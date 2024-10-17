@@ -1,12 +1,14 @@
 Package: funseqR
-Title: What the Package Does (One Line, Title Case)
+Title: FUNctional annotation of SEQuence data for non-model species in R
 Version: 0.0.0.9000
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"),
-           comment = c(ORCID = "YOUR-ORCID-ID"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person("Chris", "Brauer", , "pygmyperch@gmail.com", role = c("aut", "cre"),
+           comment = c(ORCID = "https://orcid.org/0000-0003-2968-5915"))
+Description: The funseqR package provides tools to simplify functional annotation of DNA sequences for non-model species.
+              This includes functions to aid in downloading relevant sequence databases, run blast searches, and assign functional annotations using the UniProt API.
+              funseqR streamlines the discovery of functional elements in DNA sequences, even for species lacking extensive reference data.
+              Users should, of course, remain cautious when interpreting annotations derived from distantly related species, as these may often provide limited functional insight.
+License: usethis::use_mit_license("Chris Brauer")
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
