@@ -1,0 +1,121 @@
+---
+title: "Downloading BLAST Databases with funseqR"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Downloading BLAST Databases with funseqR}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## Introduction
+
+The `funseqR` package provides tools for **fun**ctional **seq**uence annotation in **R**, including the ability to download BLAST databases efficiently. This vignette demonstrates how to use the `dwnld_ncbi_db` function to generate download commands and scripts for BLAST databases.
+
+## Installation
+
+You can install the `funseqR` package from GitHub using the `devtools` package:
+
+```{r eval=FALSE}
+# install.packages("devtools")
+devtools::install_github("pygmyperch/funseqR")
+```
+
+## Loading the Package
+
+First, load the `funseqR` package:
+
+```{r setup}
+library(funseqR)
+```
+
+## Generating Download Commands
+
+The `dwnld_ncbi_db` function allows you to generate download commands for BLAST databases. You can choose from different download methods (wget, curl, rsync, or lftp) and control parameters like the number of simultaneous connections per file and the number of parallel downloads.
+
+### Example: Downloading the 'nr' Database
+
+Let's generate download commands for the 'nr' (non-redundant protein sequences) database using the lftp method:
+
+```{r}
+nr_download <- dwnld_ncbi_db(
+  db_type = "nr",
+  method = "lftp",
+  parallel_downloads = 4,
+  pget_n = 8,
+  output_script = "download_nr.sh"
+)
+```
+
+This command generates a shell script named "download_nr.sh" that can be used to download the 'nr' database.
+
+### Viewing Generated Commands
+
+You can view the generated lftp command:
+
+```{r}
+cat(nr_download$download_commands$lftp)
+```
+
+### Metadata and File Information
+
+The function also provides metadata about the database, and information about the files to be downloaded:
+
+```{r}
+# View metadata
+print(nr_download$metadata)
+
+# View the first few files
+head(nr_download$files)
+```
+
+## Running the Download Script
+
+To actually download the database, you need to make the generated shell script executable and then run it. In R, you can do this using the `system` function:
+
+```{r, eval=FALSE}
+# Make the script executable
+system("chmod +x download_nr.sh")
+
+# Run the script
+system("./download_nr.sh")
+```
+
+Note: These commands are not actually run in this vignette as they would initiate a large download.
+
+Alternatively, if you prefer to use bash directly in the terminal:
+
+``` bash
+chmod +x download_nr.sh
+./download_nr.sh
+```
+
+Remember to ensure you have sufficient storage space before running the download script, as BLAST databases can be quite large.
+
+```{r}
+print(nr_download$metadata$total_size_gb)
+```
+
+## Using Other Download Methods
+
+The `dwnld_ncbi_db` function supports other download methods as well. Here are examples for wget, curl, and rsync:
+
+```{r}
+# wget
+wget_download <- dwnld_ncbi_db("nt", method = "wget", output_script = "download_nt_wget.sh")
+
+# curl
+curl_download <- dwnld_ncbi_db("swissprot", method = "curl", output_script = "download_swissprot_curl.sh")
+
+# rsync
+rsync_download <- dwnld_ncbi_db("nr", method = "rsync", output_script = "download_nr_rsync.sh")
+```
+
+Each of these commands generates a script for downloading the specified database using the chosen method. You then simply make the script executable and run it as in the above lfpt example.
+

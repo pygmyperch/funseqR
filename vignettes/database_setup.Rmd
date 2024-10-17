@@ -1,0 +1,116 @@
+---
+title: "Setting Up BLAST Databases"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Setting Up BLAST Databases}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## Introduction
+
+This vignette guides you through the process of setting up BLAST databases for use with the `yourpackage` R package. We'll cover how to download and set up the SwissProt, nr (non-redundant), and nt (nucleotide) databases, as well as how to configure your environment to use these databases efficiently.
+
+## Prerequisites
+
+Before you begin, ensure that you have:
+
+1.  BLAST+ installed on your system
+2.  Sufficient disk space for the databases (SwissProt is \~1GB, nr is \~200GB, nt is \~150GB)
+3.  A stable internet connection for downloading the databases
+
+## Downloading and Setting Up Databases
+
+### 1. Load the package
+
+First, load the `yourpackage`:
+
+```{r setup, eval=FALSE}
+library(yourpackage)
+```
+
+### 2. Set up a directory for your BLAST databases
+
+Choose a directory to store your BLAST databases:
+
+```{r, eval=FALSE}
+blast_db_dir <- "/path/to/blast/databases"
+```
+
+### 3. Download and extract the databases
+
+Use the `download_blastdb` function to download and extract each database:
+
+#### SwissProt
+
+```{r, eval=FALSE}
+download_blastdb("swissprot", blast_db_dir)
+```
+
+#### nr (non-redundant protein sequences)
+
+```{r, eval=FALSE}
+download_blastdb("nr", blast_db_dir)
+```
+
+#### nt (nucleotide sequences)
+
+```{r, eval=FALSE}
+download_blastdb("nt", blast_db_dir)
+```
+
+Note: Downloading the nr and nt databases may take a considerable amount of time due to their size.
+
+## Setting Up the BLASTDB Environment Variable
+
+To allow BLAST to find your databases easily, set up the BLASTDB environment variable:
+
+### For Unix-like systems (Linux, macOS)
+
+Add this line to your `.bashrc`, `.bash_profile`, or equivalent:
+
+```         
+export BLASTDB="/path/to/blast/databases:$BLASTDB"
+```
+
+### For Windows
+
+Set the environment variable using the System Properties dialog or use this command in PowerShell:
+
+```         
+[Environment]::SetEnvironmentVariable("BLASTDB", "C:\path\to\blast\databases;" + $env:BLASTDB, "User")
+```
+
+## Using the Databases in R
+
+In your R scripts or interactive sessions, use the `check_set_blastdb` function from the `yourpackage` to ensure the BLASTDB variable is set correctly:
+
+```{r, eval=FALSE}
+check_set_blastdb("/path/to/blast/databases")
+
+# Now you can use perform_blast with any of the databases
+blastx_result <- perform_blast(
+  sequences = your_sequences,
+  db_path = "/path/to/blast/databases",
+  db_name = "swissprot",
+  blast_type = "blastx",
+  e_value = 1e-5,
+  max_hits = 5,
+  threads = 4,
+  output_base = "my_blast_results",
+  taxids = 32443  # Example: Teleostei taxon ID
+)
+```
+
+## Conclusion
+
+You have now set up the BLAST databases and configured your environment to use them with the `yourpackage` R package. Remember to keep your databases updated regularly for the most current sequence information.
+
+For more information on BLAST databases and their usage, refer to the [NCBI BLAST documentation](https://www.ncbi.nlm.nih.gov/books/NBK279668/).
