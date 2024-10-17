@@ -1,16 +1,6 @@
 # funseqR
 
-Functional annotation of sequence data in R
-
-[![Alt text](../main/images/melfu_logo.png)](http://www.molecularecology.flinders.edu.au/)
-
-## <http://www.molecularecology.flinders.edu.au/%C2%A0>;   [![Alt text](../main/images/fb3.png)](https://www.facebook.com/molecularecologylab/)        [Chris Brauer]{style="font-size:larger;"}  [![Alt text](../main/images/mail3.png)](mailto:chris.brauer@flinders.edu.au)    [![Alt text](../main/images/twitter2.png)](https://twitter.com/pygmyperch)
-
-<br/>
-
-# funseqR
-
-<br/> Functional annotation of sequence data from non-model species in R <br/>
+<br/> Functional annotation of sequence data for non-model species in R <br/>
 
 # How to Install
 
@@ -30,17 +20,17 @@ devtools::install_github("pygmyperch/funseqR")
 
 A quick overview of some of the key functions:
 
--   `read_vcf`:
+-   `read_vcf`: reads a VCF (Variant Call Format) file into R using the vcfR package
 
--   `vcf2bed`:
+-   `vcf2bed`: generates a data frame in BED format and (optional) .bed file from a vcfR object
 
--   `extract_flanking_sequences`:
+-   `extract_flanking_sequences`: extracts flanking sequences for SNPs from a reference genome
 
 -   `dwnld_ncbi_db`: generates a script for downloading the specified database using one of several methods
 
--   `perform_blast`:
+-   `perform_blast`: performs either a blastn or blastx search using BLAST+
 
--   `process_blast_results`:
+-   `process_blast_results`: Process BLAST results and retrieve UniProt annotations including GO terms and KEGG references
 
 -   `summarize_annotations`:
 
