@@ -18,7 +18,7 @@ cat("Created new funseqR database:", db_path, "\n")
 # Step 2: Create a new project
 project_id <- create_project(
   con,
-  project_name = "Snapper Analysis",
+  project_name = "SnapperAnalysis",
   description = "Analysis of snapper data with SNPs"
 )
 cat("Created new project with ID:", project_id, "\n")
