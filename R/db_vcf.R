@@ -17,7 +17,7 @@
 #'   \item{file_id}{The ID of the registered input file.}
 #'   \item{vcf_count}{The number of VCF entries imported.}
 #'
-#' @importFrom vcfR read.vcfR getCHROM getPOS getID getREF getALT getQUAL getFILTER getINFO getFORMAT getData
+#' @importFrom vcfR read.vcfR getCHROM getPOS getID getREF getALT getQUAL getFILTER getINFO
 #' @importFrom DBI dbExecute dbGetQuery
 #' @importFrom progress progress_bar
 #' @export
@@ -25,23 +25,23 @@ import_vcf_to_db <- function(con, project_id, vcf_file, verbose = TRUE) {
   # Register input file
   if (verbose) message("Registering VCF file...")
   file_id <- register_input_file(con, project_id, vcf_file, "vcf", verbose = verbose)
-  
+
   # Check if VCF data for this file already exists
   existing <- DBI::dbGetQuery(
     con,
     "SELECT COUNT(*) AS count FROM vcf_data WHERE file_id = ?",
     params = list(file_id)
   )$count
-  
+
   if (existing > 0) {
     if (verbose) message("VCF data for this file already exists in the database (", existing, " entries).")
     return(list(file_id = file_id, vcf_count = existing))
   }
-  
+
   # Read VCF file
   if (verbose) message("Reading VCF file...")
   vcf_data <- vcfR::read.vcfR(vcf_file, verbose = verbose)
-  
+
   # Extract data
   if (verbose) message("Extracting VCF data...")
   chrom <- vcfR::getCHROM(vcf_data)
@@ -52,17 +52,17 @@ import_vcf_to_db <- function(con, project_id, vcf_file, verbose = TRUE) {
   qual <- vcfR::getQUAL(vcf_data)
   filter <- vcfR::getFILTER(vcf_data)
   info <- vcfR::getINFO(vcf_data)
-  
+
   # Get FORMAT and sample data if available
   format <- NULL
   sample_data <- NULL
-  
+
   if (!is.null(vcf_data@gt)) {
-    format <- vcfR::getFORMAT(vcf_data)
-    
+    format <- vcf_data@gt[, 1]  # The FORMAT column is the first column in @gt
+
     # Combine all sample columns into JSON
     gt_data <- vcf_data@gt[, -1, drop = FALSE]  # Exclude FORMAT column
-    
+
     if (ncol(gt_data) > 0) {
       sample_data <- vapply(1:nrow(gt_data), function(i) {
         row_data <- gt_data[i, , drop = TRUE]
@@ -71,7 +71,7 @@ import_vcf_to_db <- function(con, project_id, vcf_file, verbose = TRUE) {
       }, character(1))
     }
   }
-  
+
   # Prepare for import
   vcf_entries <- data.frame(
     file_id = file_id,
@@ -87,10 +87,10 @@ import_vcf_to_db <- function(con, project_id, vcf_file, verbose = TRUE) {
     sample_data = sample_data,
     stringsAsFactors = FALSE
   )
-  
+
   # Start transaction
   DBI::dbExecute(con, "BEGIN TRANSACTION")
-  
+
   # Set up progress bar
   if (verbose) {
     pb <- progress::progress_bar$new(
@@ -100,17 +100,17 @@ import_vcf_to_db <- function(con, project_id, vcf_file, verbose = TRUE) {
       width = 60
     )
   }
-  
+
   # Import data in batches
   batch_size <- 1000
   num_batches <- ceiling(nrow(vcf_entries) / batch_size)
-  
+
   tryCatch({
     for (i in 1:num_batches) {
       start_idx <- (i - 1) * batch_size + 1
       end_idx <- min(i * batch_size, nrow(vcf_entries))
       batch <- vcf_entries[start_idx:end_idx, ]
-      
+
       # Prepare statement
       params <- list()
       for (j in 1:nrow(batch)) {
@@ -128,27 +128,27 @@ import_vcf_to_db <- function(con, project_id, vcf_file, verbose = TRUE) {
           batch$sample_data[j]
         ))
       }
-      
+
       # Execute batch insert
       placeholders <- paste0("(", paste(rep("?", 11), collapse = ", "), ")")
       query <- paste0(
         "INSERT INTO vcf_data (file_id, chromosome, position, id, ref, alt, qual, filter, info, format, sample_data) VALUES ",
         paste(rep(placeholders, nrow(batch)), collapse = ", ")
       )
-      
+
       DBI::dbExecute(con, query, params = params)
-      
+
       # Update progress bar
       if (verbose) {
         pb$update(end_idx / nrow(vcf_entries))
       }
     }
-    
+
     # Commit transaction
     DBI::dbExecute(con, "COMMIT")
-    
+
     if (verbose) message("Imported ", nrow(vcf_entries), " VCF entries.")
-    
+
     return(list(file_id = file_id, vcf_count = nrow(vcf_entries)))
   }, error = function(e) {
     # Rollback transaction on error
@@ -177,18 +177,18 @@ get_vcf_data <- function(con, file_id, limit = NULL, offset = 0) {
     "SELECT * FROM input_files WHERE file_id = ?",
     params = list(file_id)
   )
-  
+
   if (nrow(file_info) == 0) {
     stop("File with ID ", file_id, " not found.")
   }
-  
+
   # Build query
   query <- "SELECT * FROM vcf_data WHERE file_id = ? ORDER BY chromosome, position"
-  
+
   if (!is.null(limit)) {
     query <- paste0(query, " LIMIT ", limit, " OFFSET ", offset)
   }
-  
+
   # Execute query
   DBI::dbGetQuery(con, query, params = list(file_id))
 }
@@ -214,16 +214,16 @@ get_vcf_by_position <- function(con, file_id, chromosome, start_pos, end_pos) {
     "SELECT * FROM input_files WHERE file_id = ?",
     params = list(file_id)
   )
-  
+
   if (nrow(file_info) == 0) {
     stop("File with ID ", file_id, " not found.")
   }
-  
+
   # Execute query
   DBI::dbGetQuery(
     con,
-    "SELECT * FROM vcf_data 
-     WHERE file_id = ? AND chromosome = ? AND position >= ? AND position <= ? 
+    "SELECT * FROM vcf_data
+     WHERE file_id = ? AND chromosome = ? AND position >= ? AND position <= ?
      ORDER BY position",
     params = list(file_id, chromosome, start_pos, end_pos)
   )
@@ -245,18 +245,18 @@ get_vcf_by_position <- function(con, file_id, chromosome, start_pos, end_pos) {
 #' @export
 vcf2bed_db <- function(con, file_id, output_file = NULL, verbose = TRUE) {
   if (verbose) message("Retrieving VCF data from database...")
-  
+
   # Get VCF data
   vcf_data <- DBI::dbGetQuery(
     con,
     "SELECT chromosome, position FROM vcf_data WHERE file_id = ? ORDER BY chromosome, position",
     params = list(file_id)
   )
-  
+
   if (nrow(vcf_data) == 0) {
     stop("No VCF data found for file ID ", file_id)
   }
-  
+
   # Create BED data
   bed_data <- data.frame(
     chrom = vcf_data$chromosome,
@@ -264,14 +264,14 @@ vcf2bed_db <- function(con, file_id, output_file = NULL, verbose = TRUE) {
     end = vcf_data$position,
     stringsAsFactors = FALSE
   )
-  
+
   # Write to file if requested
   if (!is.null(output_file)) {
     if (verbose) message("Writing BED data to file: ", output_file)
     write.table(bed_data, output_file, sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
     if (verbose) message("BED file created successfully!")
   }
-  
+
   return(bed_data)
 }
 
@@ -326,49 +326,49 @@ delete_vcf_data <- function(con, file_id, confirm = TRUE, verbose = TRUE) {
     "SELECT * FROM input_files WHERE file_id = ?",
     params = list(file_id)
   )
-  
+
   if (nrow(file_info) == 0) {
     stop("File with ID ", file_id, " not found.")
   }
-  
+
   # Count VCF entries
   count <- DBI::dbGetQuery(
     con,
     "SELECT COUNT(*) AS count FROM vcf_data WHERE file_id = ?",
     params = list(file_id)
   )$count
-  
+
   if (count == 0) {
     if (verbose) message("No VCF data found for file ID ", file_id)
     return(TRUE)
   }
-  
+
   # Confirm deletion
   if (confirm) {
-    answer <- readline(paste0("Are you sure you want to delete ", count, 
-                             " VCF entries for file '", file_info$file_name, 
+    answer <- readline(paste0("Are you sure you want to delete ", count,
+                             " VCF entries for file '", file_info$file_name,
                              "' (ID: ", file_id, ")? (y/n): "))
-    
+
     if (tolower(answer) != "y") {
       message("VCF data deletion cancelled.")
       return(FALSE)
     }
   }
-  
+
   # Start transaction
   DBI::dbExecute(con, "BEGIN TRANSACTION")
-  
+
   tryCatch({
     # Delete associated flanking sequences
     if (verbose) message("Deleting associated flanking sequences...")
-    
+
     # Get vcf_ids
     vcf_ids <- DBI::dbGetQuery(
       con,
       "SELECT vcf_id FROM vcf_data WHERE file_id = ?",
       params = list(file_id)
     )$vcf_id
-    
+
     if (length(vcf_ids) > 0) {
       # Delete flanking sequences
       DBI::dbExecute(
@@ -377,7 +377,7 @@ delete_vcf_data <- function(con, file_id, confirm = TRUE, verbose = TRUE) {
                paste(vcf_ids, collapse = ","), ")")
       )
     }
-    
+
     # Delete VCF data
     if (verbose) message("Deleting VCF data...")
     deleted <- DBI::dbExecute(
@@ -385,12 +385,12 @@ delete_vcf_data <- function(con, file_id, confirm = TRUE, verbose = TRUE) {
       "DELETE FROM vcf_data WHERE file_id = ?",
       params = list(file_id)
     )
-    
+
     # Commit transaction
     DBI::dbExecute(con, "COMMIT")
-    
+
     if (verbose) message("Deleted ", deleted, " VCF entries.")
-    
+
     return(TRUE)
   }, error = function(e) {
     # Rollback transaction on error
