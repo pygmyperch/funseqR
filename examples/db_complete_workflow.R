@@ -11,7 +11,7 @@ library(ggplot2)
 db_path <- "funseq_project.db"
 vcf_file <- "SA448_14699.vcf"
 ref_genome_file <- "Chrysophrys_auratus.v.1.0.all.assembly.units.fna"
-blast_db_path <- "/path/to/blastDBs/teleost"
+blast_db_path <- "/Volumes/SSD2TB/blastDBs/teleost/"
 blast_db_name <- "teleostei_db"
 
 # Step 1: Create a new database
@@ -21,7 +21,7 @@ cat("Created new funseqR database:", db_path, "\n")
 # Step 2: Create a new project
 project_id <- create_project(
   con,
-  project_name = "Snapper Analysis",
+  project_name = "SnapperAnalysis",
   description = "Analysis of snapper SNPs with functional annotations"
 )
 cat("Created new project with ID:", project_id, "\n")
@@ -82,8 +82,8 @@ cat("- KEGG references:", annotation_result$kegg_refs, "\n")
 
 # Step 8: Retrieve and analyze annotations
 annotations <- get_annotations(
-  con, 
-  blast_result$blast_param_id, 
+  con,
+  blast_result$blast_param_id,
   include_go = TRUE,
   include_kegg = TRUE,
   include_vcf_info = TRUE
@@ -100,13 +100,13 @@ if (nrow(annotations$go_terms) > 0) {
   go_categories <- table(annotations$go_terms$go_category)
   cat("\nGO terms by category:\n")
   print(go_categories)
-  
+
   # Create a directory for outputs
   output_dir <- "funseq_output"
   if (!dir.exists(output_dir)) {
     dir.create(output_dir)
   }
-  
+
   # Create a bar plot of GO categories
   if (require(ggplot2)) {
     go_cat_df <- data.frame(
@@ -118,7 +118,7 @@ if (nrow(annotations$go_terms) > 0) {
         sum(annotations$go_terms$go_category == "C")
       )
     )
-    
+
     p <- ggplot(go_cat_df, aes(x = Category, y = Count, fill = Category)) +
       geom_bar(stat = "identity") +
       theme_minimal() +
@@ -127,21 +127,21 @@ if (nrow(annotations$go_terms) > 0) {
         x = "GO Category",
         y = "Number of Terms"
       )
-    
+
     # Save the plot
     ggsave(file.path(output_dir, "go_categories.png"), p, width = 8, height = 6)
     cat("Created GO categories plot in", file.path(output_dir, "go_categories.png"), "\n")
   }
-  
+
   # Top 10 most frequent GO terms
   top_go_terms <- as.data.frame(table(annotations$go_terms$go_term))
   colnames(top_go_terms) <- c("GO_Term", "Frequency")
   top_go_terms <- top_go_terms[order(-top_go_terms$Frequency), ]
   top_go_terms <- head(top_go_terms, 10)
-  
+
   cat("\nTop 10 most frequent GO terms:\n")
   print(top_go_terms)
-  
+
   # Save GO terms to a file
   write.csv(
     annotations$go_terms[, c("go_id", "go_term", "go_category", "go_evidence", "uniprot_accession")],
@@ -156,7 +156,7 @@ if (nrow(annotations$annotations) > 0) {
   annotations_by_chrom <- table(annotations$annotations$chromosome)
   cat("\nAnnotations by chromosome:\n")
   print(annotations_by_chrom)
-  
+
   # Export annotation data
   write.csv(
     annotations$annotations[, c("chromosome", "position", "uniprot_accession", "gene_names", "e_value", "bit_score")],
@@ -164,7 +164,7 @@ if (nrow(annotations$annotations) > 0) {
     row.names = FALSE
   )
   cat("Saved annotations to", file.path(output_dir, "annotations.csv"), "\n")
-  
+
   # Export a summary file linking SNPs to genes
   snp_gene_summary <- annotations$annotations[!duplicated(annotations$annotations$vcf_id), ]
   snp_gene_summary <- snp_gene_summary[, c("chromosome", "position", "ref", "alt", "uniprot_accession", "gene_names", "e_value")]
