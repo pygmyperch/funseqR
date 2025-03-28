@@ -9,6 +9,7 @@ annotate_blast_results(
   blast_param_id,
   max_hits = 5,
   e_value_threshold = 1e-10,
+  batch_size = 500,
   delay = 1,
   verbose = TRUE
 )
@@ -21,6 +22,8 @@ annotate_blast_results(
 \item{max_hits}{Maximum number of hits to process per query. Default is 5.}
 
 \item{e_value_threshold}{E-value threshold for filtering BLAST hits. Default is 1e-10.}
+
+\item{batch_size}{Number of annotations to process in each transaction. Default is 500.}
 
 \item{delay}{Delay between API calls in seconds. Default is 1.}
 
