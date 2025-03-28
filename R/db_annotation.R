@@ -1,71 +1,77 @@
-#' Annotation storage and retrieval functions for funseqR
+#' Test connection to the UniProt API using working endpoints
 #'
-#' These functions manage UniProt annotations within the funseqR database.
-#'
-
-#' Query the UniProt API for a protein accession
-#'
-#' This function queries the UniProt API for information about a protein accession.
-#'
-#' @param accession The UniProt accession number.
-#' @param fields The fields to retrieve from UniProt. Default is "accession,id,gene_names,go_id,go,xref_kegg".
-#'
-#' @return A list containing the API response.
-#'
-#' @importFrom httr GET content status_code
-#' @importFrom jsonlite fromJSON
+#' @param verbose Logical. If TRUE, print progress information
+#' @return Logical. TRUE if the connection is successful
 #' @export
-query_uniprot_api <- function(accession, fields = "accession,id,gene_names,go_id,go,xref_kegg") {
-  base_url <- "https://rest.uniprot.org/uniprotkb/search"
-  query <- paste0("accession:", accession)
+test_uniprot_connection <- function(verbose = FALSE) {
+  # Use a different test approach that matches our successful configurations
+  if (verbose) message("Testing UniProt API connection with working endpoints...")
 
-  url <- paste0(base_url, "?query=", URLencode(query), "&fields=", URLencode(fields), "&format=json")
+  # Use API client headers based on our tests
+  headers <- c(
+    "User-Agent" = "funseqR/R API client",
+    "Accept" = "application/json"
+  )
 
-  response <- httr::GET(url)
-
-  if (httr::status_code(response) == 200) {
-    content <- httr::content(response, "text", encoding = "UTF-8")
-    data <- jsonlite::fromJSON(content, flatten = TRUE)
-
-    return(list(
-      accession = accession,
-      url = url,
-      status_code = httr::status_code(response),
-      content = content,
-      data = data,
-      error = NA_character_
-    ))
-  } else {
-    warning(paste("Failed to retrieve data for", accession, "- Status code:", httr::status_code(response)))
-
-    return(list(
-      accession = accession,
-      url = url,
-      status_code = httr::status_code(response),
-      content = NA_character_,
-      data = NULL,
-      error = paste("Failed to retrieve data - Status code:", httr::status_code(response))
-    ))
-  }
-}
-
-#' Test the connection to the UniProt API
-#'
-#' This function tests if the UniProt API is accessible.
-#'
-#' @return Logical. TRUE if the connection is successful.
-#'
-#' @importFrom httr GET status_code
-#' @export
-test_uniprot_connection <- function() {
-  test_url <- "https://rest.uniprot.org"
+  # Skip base URL test that we know fails with 403
+  # Test the search endpoint directly
+  test_acc <- "P99999"  # Cytochrome C - a known protein
+  test_url <- paste0("https://rest.uniprot.org/uniprotkb/search?query=accession:",
+                     test_acc, "&format=json")
 
   tryCatch({
-    response <- httr::GET(test_url)
-    return(httr::status_code(response) == 200)
+    if (verbose) message("Testing REST API search endpoint...")
+    response <- httr::GET(test_url, httr::add_headers(.headers = headers))
+    status <- httr::status_code(response)
+
+    if (status == 200) {
+      if (verbose) message("REST API connection successful!")
+      return(TRUE)
+    } else {
+      if (verbose) message("REST API returned status: ", status, ", trying legacy API...")
+
+      # Try legacy endpoint as fallback
+      legacy_url <- paste0("https://www.uniprot.org/uniprot?query=accession:",
+                           test_acc, "&format=json")
+      legacy_response <- httr::GET(legacy_url, httr::add_headers(.headers = headers))
+      legacy_status <- httr::status_code(legacy_response)
+
+      if (legacy_status == 200) {
+        if (verbose) message("Legacy API connection successful!")
+        return(TRUE)
+      } else {
+        if (verbose) message("Legacy API returned status: ", legacy_status)
+        return(FALSE)
+      }
+    }
   }, error = function(e) {
+    if (verbose) message("Error testing UniProt connection: ", e$message)
     return(FALSE)
   })
+}
+
+#' Updated connection check for annotate_blast_results function
+#'
+#' Place this code within your annotate_blast_results function
+#' to replace the existing connection check
+check_uniprot_connection <- function(verbose = TRUE) {
+  if (verbose) message("Testing UniProt API connection...")
+  connection_result <- test_uniprot_connection(verbose = verbose)
+
+  if (!connection_result) {
+    message("\nUniProt API connection failed. Possible causes:")
+    message("1. Temporary service disruption")
+    message("2. Network connectivity issues")
+    message("3. API endpoint changes")
+    message("\nOptions:")
+    message("- Try again later")
+    message("- Use offline_mode=TRUE to continue without annotations")
+    message("- Check for package updates")
+    stop("Cannot connect to UniProt API")
+  }
+
+  if (verbose) message("UniProt API connection successful.")
+  return(TRUE)
 }
 
 #' Extract UniProt information from API response
@@ -255,15 +261,17 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE)
 #' @param e_value_threshold E-value threshold for filtering BLAST hits. Default is 1e-10.
 #' @param batch_size Number of annotations to process in each transaction. Default is 500.
 #' @param delay Delay between API calls in seconds. Default is 1.
+#' @param offline_mode If TRUE, skips UniProt API and uses basic annotations. Default is FALSE.
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #'
 #' @return A list containing annotation statistics.
 #'
 #' @importFrom DBI dbExecute dbGetQuery
-#' @importFrom httr GET status_code
+#' @importFrom httr GET add_headers status_code content
+#' @importFrom jsonlite fromJSON
 #' @export
 annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_threshold = 1e-10,
-                                   batch_size = 500, delay = 1, verbose = TRUE) {
+                                   batch_size = 500, delay = 1, offline_mode = FALSE, verbose = TRUE) {
   # Check connection validity
   if (!DBI::dbIsValid(con)) {
     stop("Database connection is invalid. Please reconnect to the database.")
@@ -302,66 +310,102 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
 
   if (verbose) message("Found ", length(hit_accessions), " unique hit accessions to annotate.")
 
-  # Check UniProt API connection with direct test
-  if (verbose) message("Testing connection to UniProt API...")
+  # Check if we should use offline mode
+  use_api <- !offline_mode
 
-  # Simple direct test
-  uniprot_test <- tryCatch({
-    test_url <- "https://rest.uniprot.org"
-    response <- httr::GET(test_url)
-    status_code <- httr::status_code(response)
+  # Test UniProt API connection only if not in offline mode
+  if (use_api) {
+    if (verbose) message("Testing UniProt API connection...")
 
-    if (status_code != 200) {
-      if (verbose) message("Warning: UniProt API returned status code: ", status_code)
-    } else {
-      if (verbose) message("UniProt API connection successful.")
+    # Use API client headers based on our tests
+    headers <- c(
+      "User-Agent" = "funseqR/R API client",
+      "Accept" = "application/json"
+    )
+
+    # Skip base URL test that might fail with 403
+    # Test the search endpoint directly
+    test_acc <- "P99999"  # Cytochrome C - a known protein
+    test_url <- paste0("https://rest.uniprot.org/uniprotkb/search?query=accession:",
+                       test_acc, "&format=json")
+
+    api_test <- tryCatch({
+      response <- httr::GET(test_url, httr::add_headers(.headers = headers))
+      status <- httr::status_code(response)
+
+      if (status == 200) {
+        if (verbose) message("REST API connection successful!")
+        TRUE
+      } else {
+        if (verbose) message("REST API returned status: ", status, ", trying legacy API...")
+
+        # Try legacy endpoint as fallback
+        legacy_url <- paste0("https://www.uniprot.org/uniprot?query=accession:",
+                             test_acc, "&format=json")
+        legacy_response <- httr::GET(legacy_url, httr::add_headers(.headers = headers))
+        legacy_status <- httr::status_code(legacy_response)
+
+        if (legacy_status == 200) {
+          if (verbose) message("Legacy API connection successful!")
+          TRUE
+        } else {
+          if (verbose) message("Legacy API returned status: ", legacy_status)
+          FALSE
+        }
+      }
+    }, error = function(e) {
+      if (verbose) message("Error testing UniProt connection: ", e$message)
+      FALSE
+    })
+
+    # If API test failed, switch to offline mode
+    if (!api_test) {
+      if (verbose) {
+        message("\n=== UniProt API connection failed. Switching to offline mode ===")
+        message("Only basic annotation information will be stored.")
+        message("GO terms and KEGG pathways will not be available.")
+        message("You can re-run the annotation later when API is accessible.")
+      }
+      use_api <- FALSE
     }
-
-    # Try a simple query as an additional test
-    test_acc <- "P99999"  # Cytochrome C - a well-known protein
-    test_query <- paste0("https://rest.uniprot.org/uniprotkb/search?query=accession:", test_acc)
-    test_response <- httr::GET(test_query)
-    test_status <- httr::status_code(test_response)
-
-    if (test_status != 200) {
-      stop("UniProt API query test failed with status code: ", test_status)
-    } else {
-      if (verbose) message("UniProt API query test successful.")
-    }
-
-    TRUE  # Return TRUE if all tests pass
-  }, error = function(e) {
-    if (verbose) message("Error connecting to UniProt API: ", e$message)
-    stop("Cannot connect to UniProt API. Please check your internet connection.")
-  })
-
-  # Query UniProt for each accession with simple progress reporting
-  if (verbose) message("Querying UniProt API for accessions...")
-
-  uniprot_data <- list()
-  for (i in seq_along(hit_accessions)) {
-    acc <- hit_accessions[i]
-
-    # Query UniProt API
-    result <- query_uniprot_api(acc)
-    uniprot_data[[acc]] <- result
-
-    # Show progress
-    if (verbose && (i %% 10 == 0 || i == length(hit_accessions))) {
-      message("Queried ", i, " of ", length(hit_accessions), " accessions")
-    }
-
-    # Add delay between API calls
-    Sys.sleep(delay)
+  } else {
+    if (verbose) message("Operating in offline mode - no UniProt API queries will be made.")
   }
 
-  # Extract information from UniProt responses
-  if (verbose) message("Extracting information from UniProt responses...")
+  # Process in online or offline mode
+  if (use_api) {
+    # ONLINE MODE: Query UniProt for each accession
+    if (verbose) message("Querying UniProt API for accessions...")
 
-  uniprot_info <- lapply(uniprot_data, extract_uniprot_info)
-  valid_info <- uniprot_info[!sapply(uniprot_info, is.null)]
+    uniprot_data <- list()
+    for (i in seq_along(hit_accessions)) {
+      acc <- hit_accessions[i]
 
-  if (verbose) message("Successfully extracted information for ", length(valid_info), " of ", length(hit_accessions), " accessions.")
+      # Query UniProt API with updated function that tries both REST and legacy APIs
+      result <- query_uniprot_api(acc)
+      uniprot_data[[acc]] <- result
+
+      # Show progress
+      if (verbose && (i %% 10 == 0 || i == length(hit_accessions))) {
+        message("Queried ", i, " of ", length(hit_accessions), " accessions")
+      }
+
+      # Add delay between API calls
+      Sys.sleep(delay)
+    }
+
+    # Extract information from UniProt responses
+    if (verbose) message("Extracting information from UniProt responses...")
+
+    uniprot_info <- lapply(uniprot_data, extract_uniprot_info)
+    valid_info <- uniprot_info[!sapply(uniprot_info, is.null)]
+
+    if (verbose) message("Successfully extracted information for ", length(valid_info), " of ", length(hit_accessions), " accessions.")
+  } else {
+    # OFFLINE MODE: Skip API queries and create empty info
+    if (verbose) message("Skipping UniProt API queries in offline mode.")
+    valid_info <- list()
+  }
 
   # Get BLAST results to annotate
   blast_results_query <- "
@@ -386,6 +430,57 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
 
   if (verbose) message("Processing ", nrow(blast_results), " BLAST results in batches of ", batch_size)
 
+  # Helper function for basic annotation when API is unavailable or data is missing
+  store_basic_annotation <- function(con, blast_result_id, hit_accession, gene_name = NULL, verbose = FALSE) {
+    # Check if annotation already exists
+    existing <- DBI::dbGetQuery(
+      con,
+      "SELECT annotation_id FROM annotations
+       WHERE blast_result_id = ? AND uniprot_accession = ?",
+      params = list(blast_result_id, hit_accession)
+    )
+
+    if (nrow(existing) > 0) {
+      if (verbose) message("Annotation already exists with ID ", existing$annotation_id[1])
+      return(existing$annotation_id[1])
+    }
+
+    # Add basic annotation with just the accession number
+    current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    entry_name <- NULL
+
+    # Try to extract gene name from the accession format if not provided
+    if (is.null(gene_name)) {
+      # For "sp|P12345|GENE_SPECIES" format
+      if (grepl("^sp\\|[^|]+\\|([^_]+)_", hit_accession)) {
+        gene_name <- gsub("^sp\\|[^|]+\\|([^_]+)_.*$", "\\1", hit_accession)
+      }
+    }
+
+    DBI::dbExecute(
+      con,
+      "INSERT INTO annotations (blast_result_id, uniprot_accession, entry_name, gene_names, retrieval_date)
+       VALUES (?, ?, ?, ?, ?)",
+      params = list(
+        blast_result_id,
+        hit_accession,
+        entry_name,
+        gene_name,
+        current_time
+      )
+    )
+
+    # Get the ID of the newly created annotation
+    annotation_id <- DBI::dbGetQuery(
+      con,
+      "SELECT annotation_id FROM annotations
+       WHERE blast_result_id = ? AND uniprot_accession = ?",
+      params = list(blast_result_id, hit_accession)
+    )$annotation_id[1]
+
+    return(annotation_id)
+  }
+
   # Process BLAST results in batches
   successful_annotations <- 0
   annotation_ids <- c()
@@ -408,18 +503,23 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
         blast_result_id <- current_batch$blast_result_id[i]
         hit_accession <- current_batch$hit_accession[i]
 
-        # Skip if no UniProt information available
-        if (is.null(uniprot_info[[hit_accession]])) {
-          next
+        if (use_api && !is.null(valid_info[[hit_accession]])) {
+          # ONLINE MODE: Store complete annotation
+          annotation_id <- store_annotation(
+            con,
+            blast_result_id,
+            valid_info[[hit_accession]],
+            verbose = FALSE
+          )
+        } else {
+          # OFFLINE MODE or missing info: Store basic annotation
+          annotation_id <- store_basic_annotation(
+            con,
+            blast_result_id,
+            hit_accession,
+            verbose = FALSE
+          )
         }
-
-        # Store annotation
-        annotation_id <- store_annotation(
-          con,
-          blast_result_id,
-          uniprot_info[[hit_accession]],
-          verbose = FALSE
-        )
 
         if (!is.null(annotation_id)) {
           batch_success <- batch_success + 1
@@ -477,17 +577,92 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
 
   if (verbose) {
     message("Stored ", go_count, " GO terms and ", kegg_count, " KEGG references.")
+
+    if (!use_api) {
+      message("\nNOTE: Annotation was performed in offline mode.")
+      message("You can re-run the annotation later with UniProt API access to get GO terms and KEGG pathways.")
+    }
   }
 
   # Return summary
   list(
     blast_param_id = blast_param_id,
     unique_accessions = length(hit_accessions),
-    successful_extractions = length(valid_info),
+    successful_extractions = if (use_api) length(valid_info) else 0,
     annotated_results = successful_annotations,
     go_terms = go_count,
-    kegg_refs = kegg_count
+    kegg_refs = kegg_count,
+    offline_mode = !use_api
   )
+}
+
+#' Query the UniProt API for a protein accession using working endpoints
+#'
+#' @param accession The UniProt accession number
+#' @param fields The fields to retrieve from UniProt
+#' @param use_rest_api If TRUE, use REST API, otherwise use legacy API
+#' @return A list containing API response
+#' @noRd
+query_uniprot_api <- function(accession,
+                              fields = "accession,id,gene_names,go_id,go,xref_kegg",
+                              use_rest_api = TRUE) {
+  # Use API client headers, which we know work based on our tests
+  headers <- c(
+    "User-Agent" = paste0("funseqR/R API client"),
+    "Accept" = "application/json"
+  )
+
+  if (use_rest_api) {
+    # Use the REST API search endpoint directly (skip base URL test)
+    base_url <- "https://rest.uniprot.org/uniprotkb/search"
+    query <- paste0("accession:", accession)
+    url <- paste0(base_url, "?query=", URLencode(query),
+                  "&fields=", URLencode(fields), "&format=json")
+
+    response <- httr::GET(url, httr::add_headers(.headers = headers))
+  } else {
+    # Fallback to legacy API which also works
+    base_url <- "https://www.uniprot.org/uniprot"
+    query <- paste0("accession:", accession)
+    url <- paste0(base_url, "?query=", URLencode(query),
+                  "&columns=", URLencode(fields), "&format=json")
+
+    response <- httr::GET(url, httr::add_headers(.headers = headers))
+  }
+
+  # Process response
+  if (httr::status_code(response) == 200) {
+    content <- httr::content(response, "text", encoding = "UTF-8")
+    data <- jsonlite::fromJSON(content, flatten = TRUE)
+
+    return(list(
+      accession = accession,
+      url = url,
+      status_code = httr::status_code(response),
+      content = content,
+      data = data,
+      error = NA_character_
+    ))
+  } else {
+    # Try fallback if REST API failed
+    if (use_rest_api) {
+      return(query_uniprot_api(accession, fields, use_rest_api = FALSE))
+    }
+
+    # Both methods failed
+    warning(paste("Failed to retrieve data for", accession,
+                  "- Status code:", httr::status_code(response)))
+
+    return(list(
+      accession = accession,
+      url = url,
+      status_code = httr::status_code(response),
+      content = NA_character_,
+      data = NULL,
+      error = paste("Failed to retrieve data - Status code:",
+                    httr::status_code(response))
+    ))
+  }
 }
 
 #' Get annotations from the database

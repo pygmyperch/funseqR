@@ -2,13 +2,16 @@
 % Please edit documentation in R/db_annotation.R
 \name{test_uniprot_connection}
 \alias{test_uniprot_connection}
-\title{Test the connection to the UniProt API}
+\title{Test connection to the UniProt API using working endpoints}
 \usage{
-test_uniprot_connection()
+test_uniprot_connection(verbose = FALSE)
+}
+\arguments{
+\item{verbose}{Logical. If TRUE, print progress information}
 }
 \value{
-Logical. TRUE if the connection is successful.
+Logical. TRUE if the connection is successful
 }
 \description{
-This function tests if the UniProt API is accessible.
+Test connection to the UniProt API using working endpoints
 }

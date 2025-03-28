@@ -215,3 +215,40 @@ DBI::dbExecute(
 close_funseq_db(con)
 cat("\nDatabase connection closed\n")
 cat("Workflow completed successfully!\n")
+
+
+
+# Load the package
+library(funseqR)
+
+# Reconnect to the existing database
+# Replace "funseq_example.db" with your actual database path
+con <- connect_funseq_db("funseq_project.db", verbose = TRUE)
+
+# List available projects to find your project_id
+projects <- list_projects(con)
+print(projects)
+project_id <- projects$project_id[1]  # Adjust as needed to select your project
+
+# List VCF files in the project
+vcf_files <- list_input_files(con, project_id)
+print(vcf_files[vcf_files$file_type == "vcf", ])
+vcf_file_id <- vcf_files$file_id[vcf_files$file_type == "vcf"][1]  # Adjust as needed
+
+# List BLAST parameter sets if you need to continue with annotation
+blast_params <- list_blast_params(con, project_id)
+print(blast_params)
+blast_param_id <- blast_params$blast_param_id[1]  # Adjust as needed
+
+# Now you can continue with your workflow, e.g., annotation
+annotation_result <- annotate_blast_results(
+  con,
+  blast_param_id,
+  max_hits = 1,
+  e_value_threshold = 1e-10,
+  batch_size = 100,
+  delay = 5
+)
+
+# When done, close the connection
+close_funseq_db(con)

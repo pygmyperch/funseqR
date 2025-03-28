@@ -11,6 +11,7 @@ annotate_blast_results(
   e_value_threshold = 1e-10,
   batch_size = 500,
   delay = 1,
+  offline_mode = FALSE,
   verbose = TRUE
 )
 }
@@ -26,6 +27,8 @@ annotate_blast_results(
 \item{batch_size}{Number of annotations to process in each transaction. Default is 500.}
 
 \item{delay}{Delay between API calls in seconds. Default is 1.}
+
+\item{offline_mode}{If TRUE, skips UniProt API and uses basic annotations. Default is FALSE.}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 }
