@@ -74,7 +74,7 @@ check_uniprot_connection <- function(verbose = TRUE) {
   return(TRUE)
 }
 
-#' Extract UniProt information from API response
+#' Extract UniProt information from API response with robust error handling
 #'
 #' @param uniprot_data The response from query_uniprot_api
 #'
@@ -82,80 +82,168 @@ check_uniprot_connection <- function(verbose = TRUE) {
 #'
 #' @noRd
 extract_uniprot_info <- function(uniprot_data) {
-  if (is.null(uniprot_data$data) || is.null(uniprot_data$data$results) || length(uniprot_data$data$results) == 0) {
-    warning("No data found for accession ", uniprot_data$accession)
-    return(NULL)
-  }
+  tryCatch({
+    if (is.null(uniprot_data$data) || is.null(uniprot_data$data$results) || length(uniprot_data$data$results) == 0) {
+      warning("No data found for accession ", uniprot_data$accession)
+      return(NULL)
+    }
 
-  result <- uniprot_data$data$results[[1]]
+    # Get the first result
+    result <- uniprot_data$data$results[[1]]
 
-  # Extract gene names
-  gene_names <- c()
-  if (!is.null(result$genes)) {
-    gene_names <- unlist(lapply(result$genes, function(gene) {
-      c(
-        if (!is.null(gene$geneName$value)) gene$geneName$value else character(0),
-        if (!is.null(gene$synonyms)) sapply(gene$synonyms, function(x) x$value) else character(0),
-        if (!is.null(gene$orfNames)) sapply(gene$orfNames, function(x) x$value) else character(0)
-      )
-    }))
-    gene_names <- unique(gene_names[!is.na(gene_names)])
-  }
-  gene_names <- paste(gene_names, collapse = ";")
-
-  # Extract GO terms
-  go_terms <- data.frame(
-    go_id = character(0),
-    go_term = character(0),
-    go_category = character(0),
-    go_evidence = character(0),
-    stringsAsFactors = FALSE
-  )
-
-  if (!is.null(result$uniProtKBCrossReferences)) {
-    go_refs <- result$uniProtKBCrossReferences[sapply(result$uniProtKBCrossReferences, function(ref) ref$database == "GO")]
-    if (length(go_refs) > 0) {
-      go_terms <- do.call(rbind, lapply(go_refs, function(ref) {
-        properties <- setNames(
-          sapply(ref$properties, function(prop) prop$value),
-          sapply(ref$properties, function(prop) prop$key)
-        )
-        data.frame(
-          go_id = ref$id,
-          go_term = properties["GoTerm"],
-          go_category = substr(properties["GoTerm"], 1, 1),
-          go_evidence = properties["GoEvidenceType"],
+    # Check if result is a proper list structure
+    if (is.null(result) || is.atomic(result)) {
+      warning("Unexpected result format for accession ", uniprot_data$accession)
+      return(list(
+        accession = uniprot_data$accession,
+        entry_name = NULL,
+        gene_names = "",
+        go_terms = data.frame(
+          go_id = character(0),
+          go_term = character(0),
+          go_category = character(0),
+          go_evidence = character(0),
+          stringsAsFactors = FALSE
+        ),
+        kegg_refs = data.frame(
+          kegg_id = character(0),
+          pathway_name = NA_character_,
           stringsAsFactors = FALSE
         )
+      ))
+    }
+
+    # Extract gene names
+    gene_names <- character(0)
+    if (!is.null(result$genes) && is.list(result$genes)) {
+      gene_names <- unlist(lapply(result$genes, function(gene) {
+        gene_parts <- c()
+
+        # Add gene name if available
+        if (!is.null(gene$geneName) && is.list(gene$geneName) && !is.null(gene$geneName$value)) {
+          gene_parts <- c(gene_parts, gene$geneName$value)
+        }
+
+        # Add synonyms if available
+        if (!is.null(gene$synonyms) && is.list(gene$synonyms)) {
+          syn_values <- sapply(gene$synonyms, function(x) {
+            if (is.list(x) && !is.null(x$value)) x$value else NA_character_
+          })
+          gene_parts <- c(gene_parts, syn_values[!is.na(syn_values)])
+        }
+
+        # Add orf names if available
+        if (!is.null(gene$orfNames) && is.list(gene$orfNames)) {
+          orf_values <- sapply(gene$orfNames, function(x) {
+            if (is.list(x) && !is.null(x$value)) x$value else NA_character_
+          })
+          gene_parts <- c(gene_parts, orf_values[!is.na(orf_values)])
+        }
+
+        return(gene_parts)
       }))
+
+      gene_names <- unique(gene_names[!is.na(gene_names)])
     }
-  }
+    gene_names <- paste(gene_names, collapse = ";")
 
-  # Extract KEGG references
-  kegg_refs <- data.frame(
-    kegg_id = character(0),
-    pathway_name = NA_character_,
-    stringsAsFactors = FALSE
-  )
+    # Extract GO terms
+    go_terms <- data.frame(
+      go_id = character(0),
+      go_term = character(0),
+      go_category = character(0),
+      go_evidence = character(0),
+      stringsAsFactors = FALSE
+    )
 
-  if (!is.null(result$uniProtKBCrossReferences)) {
-    kegg_refs_list <- result$uniProtKBCrossReferences[sapply(result$uniProtKBCrossReferences, function(ref) ref$database == "KEGG")]
-    if (length(kegg_refs_list) > 0) {
-      kegg_refs <- data.frame(
-        kegg_id = sapply(kegg_refs_list, function(ref) ref$id),
-        pathway_name = NA_character_,
-        stringsAsFactors = FALSE
-      )
+    if (!is.null(result$uniProtKBCrossReferences) && is.list(result$uniProtKBCrossReferences)) {
+      go_refs <- Filter(function(ref) {
+        !is.null(ref$database) && ref$database == "GO"
+      }, result$uniProtKBCrossReferences)
+
+      if (length(go_refs) > 0) {
+        go_terms_list <- lapply(go_refs, function(ref) {
+          if (is.null(ref$properties) || !is.list(ref$properties)) {
+            return(NULL)
+          }
+
+          # Extract properties with proper checking
+          prop_keys <- sapply(ref$properties, function(p) if(!is.null(p$key)) p$key else NA_character_)
+          prop_values <- sapply(ref$properties, function(p) if(!is.null(p$value)) p$value else NA_character_)
+
+          # Only keep valid key-value pairs
+          valid_idx <- !is.na(prop_keys) & !is.na(prop_values)
+          if (sum(valid_idx) > 0) {
+            properties <- setNames(prop_values[valid_idx], prop_keys[valid_idx])
+
+            # Check if essential properties exist
+            if ("GoTerm" %in% names(properties)) {
+              go_term <- properties["GoTerm"]
+              return(data.frame(
+                go_id = if (!is.null(ref$id)) ref$id else NA_character_,
+                go_term = go_term,
+                go_category = ifelse(nchar(go_term) > 0, substr(go_term, 1, 1), NA_character_),
+                go_evidence = if("GoEvidenceType" %in% names(properties)) properties["GoEvidenceType"] else NA_character_,
+                stringsAsFactors = FALSE
+              ))
+            }
+          }
+          return(NULL)
+        })
+
+        # Remove NULL entries and combine
+        go_terms_list <- go_terms_list[!sapply(go_terms_list, is.null)]
+        if (length(go_terms_list) > 0) {
+          go_terms <- do.call(rbind, go_terms_list)
+        }
+      }
     }
-  }
 
-  list(
-    accession = result$primaryAccession,
-    entry_name = result$uniProtkbId,
-    gene_names = gene_names,
-    go_terms = go_terms,
-    kegg_refs = kegg_refs
-  )
+    # Extract KEGG references
+    kegg_refs <- data.frame(
+      kegg_id = character(0),
+      pathway_name = NA_character_,
+      stringsAsFactors = FALSE
+    )
+
+    if (!is.null(result$uniProtKBCrossReferences) && is.list(result$uniProtKBCrossReferences)) {
+      kegg_refs_list <- Filter(function(ref) {
+        !is.null(ref$database) && ref$database == "KEGG"
+      }, result$uniProtKBCrossReferences)
+
+      if (length(kegg_refs_list) > 0) {
+        kegg_ids <- sapply(kegg_refs_list, function(ref) {
+          if (!is.null(ref$id)) ref$id else NA_character_
+        })
+
+        kegg_ids <- kegg_ids[!is.na(kegg_ids)]
+
+        if (length(kegg_ids) > 0) {
+          kegg_refs <- data.frame(
+            kegg_id = kegg_ids,
+            pathway_name = NA_character_,
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+    }
+
+    # Get primary accession and entry name
+    accession <- if (!is.null(result$primaryAccession)) result$primaryAccession else uniprot_data$accession
+    entry_name <- if (!is.null(result$uniProtkbId)) result$uniProtkbId else NULL
+
+    # Return the extracted information
+    list(
+      accession = accession,
+      entry_name = entry_name,
+      gene_names = gene_names,
+      go_terms = go_terms,
+      kegg_refs = kegg_refs
+    )
+  }, error = function(e) {
+    warning(paste("Error in extract_uniprot_info for", uniprot_data$accession, ":", e$message))
+    return(NULL)
+  })
 }
 
 #' Store annotation in the database
