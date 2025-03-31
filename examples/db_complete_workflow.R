@@ -7,6 +7,10 @@ library(funseqR)
 library(Biostrings)
 library(ggplot2)
 
+HOME <- "/Users/brau0037/Library/CloudStorage/GoogleDrive-pygmyperch@gmail.com/My Drive/git_repos/temp"
+setwd(HOME)
+
+
 # Define paths
 db_path <- "funseq_project.db"
 vcf_file <- "SA448_14699.vcf"
@@ -220,6 +224,11 @@ cat("Workflow completed successfully!\n")
 
 # Load the package
 library(funseqR)
+library(Biostrings)
+library(ggplot2)
+
+HOME <- "/Users/brau0037/Library/CloudStorage/GoogleDrive-pygmyperch@gmail.com/My Drive/git_repos/temp"
+setwd(HOME)
 
 # Reconnect to the existing database
 # Replace "funseq_example.db" with your actual database path
@@ -246,8 +255,8 @@ annotation_result <- annotate_blast_results(
   blast_param_id,
   max_hits = 1,
   e_value_threshold = 1e-10,
-  batch_size = 100,
-  delay = 5
+  batch_size = 400,
+  delay = 3
 )
 
 # When done, close the connection

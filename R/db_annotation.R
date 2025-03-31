@@ -1,3 +1,101 @@
+#' Ensure the uniprot_cache table exists
+#'
+#' @param con A database connection object
+#' @param verbose Logical. If TRUE, print progress information
+#' @return Invisible NULL
+#' @noRd
+ensure_uniprot_cache_table <- function(con, verbose = FALSE) {
+  # Check if table exists
+  tables <- DBI::dbListTables(con)
+  if ("uniprot_cache" %in% tables) {
+    if (verbose) message("UniProt cache table already exists")
+    return(invisible(NULL))
+  }
+
+  # Create table
+  if (verbose) message("Creating UniProt cache table...")
+
+  DBI::dbExecute(con, "
+    CREATE TABLE uniprot_cache (
+      cache_id INTEGER PRIMARY KEY,
+      accession TEXT NOT NULL UNIQUE,
+      response_json TEXT NOT NULL,
+      retrieval_date TEXT NOT NULL
+    )
+  ")
+
+  DBI::dbExecute(con, "CREATE INDEX idx_uniprot_cache_accession ON uniprot_cache (accession)")
+
+  if (verbose) message("UniProt cache table created successfully")
+  return(invisible(NULL))
+}
+
+#' Get cached UniProt data
+#'
+#' @param con A database connection object
+#' @param accession The UniProt accession number
+#' @return The cached UniProt data or NULL if not found
+#' @noRd
+get_cached_uniprot_data <- function(con, accession) {
+  # Check if data exists in cache
+  cache_query <- "SELECT response_json FROM uniprot_cache WHERE accession = ?"
+  cache_result <- DBI::dbGetQuery(con, cache_query, params = list(accession))
+
+  if (nrow(cache_result) == 0) {
+    return(NULL)
+  }
+
+  # Parse the JSON response
+  json_data <- cache_result$response_json[1]
+  data <- jsonlite::fromJSON(json_data, flatten = TRUE)
+
+  # Create a response object
+  list(
+    accession = accession,
+    url = NA_character_,  # We don't store the URL
+    status_code = 200,    # Pretend it was a successful request
+    content = json_data,
+    data = data,
+    error = NA_character_,
+    from_cache = TRUE
+  )
+}
+
+#' Store UniProt data in cache
+#'
+#' @param con A database connection object
+#' @param accession The UniProt accession number
+#' @param response The UniProt API response
+#' @return Invisible NULL
+#' @noRd
+store_uniprot_data <- function(con, accession, response) {
+  # Skip if there was an error
+  if (!is.na(response$error)) {
+    return(invisible(NULL))
+  }
+
+  # Convert data to JSON
+  json_data <- response$content
+
+  # Check if this accession already exists
+  check_query <- "SELECT cache_id FROM uniprot_cache WHERE accession = ?"
+  check_result <- DBI::dbGetQuery(con, check_query, params = list(accession))
+
+  current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+
+  if (nrow(check_result) > 0) {
+    # Update existing record
+    update_query <- "UPDATE uniprot_cache SET response_json = ?, retrieval_date = ? WHERE accession = ?"
+    DBI::dbExecute(con, update_query, params = list(json_data, current_time, accession))
+  } else {
+    # Insert new record
+    insert_query <- "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)"
+    DBI::dbExecute(con, insert_query, params = list(accession, json_data, current_time))
+  }
+
+  return(invisible(NULL))
+}
+
 #' Test connection to the UniProt API using working endpoints
 #'
 #' @param verbose Logical. If TRUE, print progress information
@@ -94,58 +192,41 @@ extract_uniprot_info <- function(uniprot_data) {
     # Check if result is a proper list structure
     if (is.null(result) || is.atomic(result)) {
       warning("Unexpected result format for accession ", uniprot_data$accession)
-      return(list(
-        accession = uniprot_data$accession,
-        entry_name = NULL,
-        gene_names = "",
-        go_terms = data.frame(
-          go_id = character(0),
-          go_term = character(0),
-          go_category = character(0),
-          go_evidence = character(0),
-          stringsAsFactors = FALSE
-        ),
-        kegg_refs = data.frame(
-          kegg_id = character(0),
-          pathway_name = NA_character_,
-          stringsAsFactors = FALSE
-        )
-      ))
+      return(create_empty_annotation(uniprot_data$accession))
     }
 
     # Extract gene names
-    gene_names <- character(0)
-    if (!is.null(result$genes) && is.list(result$genes)) {
-      gene_names <- unlist(lapply(result$genes, function(gene) {
-        gene_parts <- c()
+    gene_names <- ""
+    if (!is.null(result$genes) && is.list(result$genes) && length(result$genes) > 0) {
+      gene_name_parts <- c()
 
+      for (gene in result$genes) {
         # Add gene name if available
-        if (!is.null(gene$geneName) && is.list(gene$geneName) && !is.null(gene$geneName$value)) {
-          gene_parts <- c(gene_parts, gene$geneName$value)
+        if (is.list(gene) && !is.null(gene$geneName) && is.list(gene$geneName) && !is.null(gene$geneName$value)) {
+          gene_name_parts <- c(gene_name_parts, gene$geneName$value)
         }
 
         # Add synonyms if available
-        if (!is.null(gene$synonyms) && is.list(gene$synonyms)) {
-          syn_values <- sapply(gene$synonyms, function(x) {
-            if (is.list(x) && !is.null(x$value)) x$value else NA_character_
-          })
-          gene_parts <- c(gene_parts, syn_values[!is.na(syn_values)])
+        if (is.list(gene) && !is.null(gene$synonyms) && is.list(gene$synonyms) && length(gene$synonyms) > 0) {
+          for (syn in gene$synonyms) {
+            if (is.list(syn) && !is.null(syn$value)) {
+              gene_name_parts <- c(gene_name_parts, syn$value)
+            }
+          }
         }
 
-        # Add orf names if available
-        if (!is.null(gene$orfNames) && is.list(gene$orfNames)) {
-          orf_values <- sapply(gene$orfNames, function(x) {
-            if (is.list(x) && !is.null(x$value)) x$value else NA_character_
-          })
-          gene_parts <- c(gene_parts, orf_values[!is.na(orf_values)])
+        # Add ORF names if available
+        if (is.list(gene) && !is.null(gene$orfNames) && is.list(gene$orfNames) && length(gene$orfNames) > 0) {
+          for (orf in gene$orfNames) {
+            if (is.list(orf) && !is.null(orf$value)) {
+              gene_name_parts <- c(gene_name_parts, orf$value)
+            }
+          }
         }
+      }
 
-        return(gene_parts)
-      }))
-
-      gene_names <- unique(gene_names[!is.na(gene_names)])
+      gene_names <- paste(unique(gene_name_parts), collapse = ";")
     }
-    gene_names <- paste(gene_names, collapse = ";")
 
     # Extract GO terms
     go_terms <- data.frame(
@@ -156,45 +237,47 @@ extract_uniprot_info <- function(uniprot_data) {
       stringsAsFactors = FALSE
     )
 
-    if (!is.null(result$uniProtKBCrossReferences) && is.list(result$uniProtKBCrossReferences)) {
-      go_refs <- Filter(function(ref) {
-        !is.null(ref$database) && ref$database == "GO"
-      }, result$uniProtKBCrossReferences)
+    # Handle GO terms carefully with explicit list creation
+    if (!is.null(result$uniProtKBCrossReferences) && is.list(result$uniProtKBCrossReferences) && length(result$uniProtKBCrossReferences) > 0) {
+      go_refs <- list()
 
+      # Find GO references
+      for (i in seq_along(result$uniProtKBCrossReferences)) {
+        ref <- result$uniProtKBCrossReferences[[i]]
+        if (is.list(ref) && !is.null(ref$database) && ref$database == "GO") {
+          go_refs <- c(go_refs, list(ref))
+        }
+      }
+
+      # Process each GO reference
       if (length(go_refs) > 0) {
-        go_terms_list <- lapply(go_refs, function(ref) {
-          if (is.null(ref$properties) || !is.list(ref$properties)) {
-            return(NULL)
-          }
+        for (ref in go_refs) {
+          if (!is.null(ref$id) && !is.null(ref$properties) && is.list(ref$properties) && length(ref$properties) > 0) {
+            # Extract properties safely
+            go_term <- NA_character_
+            go_evidence <- NA_character_
 
-          # Extract properties with proper checking
-          prop_keys <- sapply(ref$properties, function(p) if(!is.null(p$key)) p$key else NA_character_)
-          prop_values <- sapply(ref$properties, function(p) if(!is.null(p$value)) p$value else NA_character_)
+            for (prop in ref$properties) {
+              if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
+                if (prop$key == "GoTerm") go_term <- prop$value
+                if (prop$key == "GoEvidenceType") go_evidence <- prop$value
+              }
+            }
 
-          # Only keep valid key-value pairs
-          valid_idx <- !is.na(prop_keys) & !is.na(prop_values)
-          if (sum(valid_idx) > 0) {
-            properties <- setNames(prop_values[valid_idx], prop_keys[valid_idx])
-
-            # Check if essential properties exist
-            if ("GoTerm" %in% names(properties)) {
-              go_term <- properties["GoTerm"]
-              return(data.frame(
-                go_id = if (!is.null(ref$id)) ref$id else NA_character_,
+            # Only add if we found a GO term
+            if (!is.na(go_term)) {
+              new_row <- data.frame(
+                go_id = ref$id,
                 go_term = go_term,
-                go_category = ifelse(nchar(go_term) > 0, substr(go_term, 1, 1), NA_character_),
-                go_evidence = if("GoEvidenceType" %in% names(properties)) properties["GoEvidenceType"] else NA_character_,
+                go_category = substr(go_term, 1, 1),
+                go_evidence = go_evidence,
                 stringsAsFactors = FALSE
-              ))
+              )
+
+              # Append to existing go_terms
+              go_terms <- rbind(go_terms, new_row)
             }
           }
-          return(NULL)
-        })
-
-        # Remove NULL entries and combine
-        go_terms_list <- go_terms_list[!sapply(go_terms_list, is.null)]
-        if (length(go_terms_list) > 0) {
-          go_terms <- do.call(rbind, go_terms_list)
         }
       }
     }
@@ -202,28 +285,21 @@ extract_uniprot_info <- function(uniprot_data) {
     # Extract KEGG references
     kegg_refs <- data.frame(
       kegg_id = character(0),
-      pathway_name = NA_character_,
+      pathway_name = character(0),
       stringsAsFactors = FALSE
     )
 
-    if (!is.null(result$uniProtKBCrossReferences) && is.list(result$uniProtKBCrossReferences)) {
-      kegg_refs_list <- Filter(function(ref) {
-        !is.null(ref$database) && ref$database == "KEGG"
-      }, result$uniProtKBCrossReferences)
-
-      if (length(kegg_refs_list) > 0) {
-        kegg_ids <- sapply(kegg_refs_list, function(ref) {
-          if (!is.null(ref$id)) ref$id else NA_character_
-        })
-
-        kegg_ids <- kegg_ids[!is.na(kegg_ids)]
-
-        if (length(kegg_ids) > 0) {
-          kegg_refs <- data.frame(
-            kegg_id = kegg_ids,
+    # Handle KEGG refs carefully
+    if (!is.null(result$uniProtKBCrossReferences) && is.list(result$uniProtKBCrossReferences) && length(result$uniProtKBCrossReferences) > 0) {
+      for (i in seq_along(result$uniProtKBCrossReferences)) {
+        ref <- result$uniProtKBCrossReferences[[i]]
+        if (is.list(ref) && !is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id)) {
+          new_row <- data.frame(
+            kegg_id = ref$id,
             pathway_name = NA_character_,
             stringsAsFactors = FALSE
           )
+          kegg_refs <- rbind(kegg_refs, new_row)
         }
       }
     }
@@ -242,8 +318,33 @@ extract_uniprot_info <- function(uniprot_data) {
     )
   }, error = function(e) {
     warning(paste("Error in extract_uniprot_info for", uniprot_data$accession, ":", e$message))
-    return(NULL)
+    return(create_empty_annotation(uniprot_data$accession))
   })
+}
+
+#' Create an empty annotation structure
+#'
+#' @param accession The accession number
+#' @return A list with empty annotation structures
+#' @noRd
+create_empty_annotation <- function(accession) {
+  list(
+    accession = accession,
+    entry_name = NA_character_,
+    gene_names = "",
+    go_terms = data.frame(
+      go_id = character(0),
+      go_term = character(0),
+      go_category = character(0),
+      go_evidence = character(0),
+      stringsAsFactors = FALSE
+    ),
+    kegg_refs = data.frame(
+      kegg_id = character(0),
+      pathway_name = character(0),
+      stringsAsFactors = FALSE
+    )
+  )
 }
 
 #' Store annotation in the database
@@ -350,16 +451,19 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE)
 #' @param batch_size Number of annotations to process in each transaction. Default is 500.
 #' @param delay Delay between API calls in seconds. Default is 1.
 #' @param offline_mode If TRUE, skips UniProt API and uses basic annotations. Default is FALSE.
+#' @param use_cache If TRUE, uses cached API responses if available. Default is FALSE.
+#' @param store_cache If TRUE, stores API responses in the database. Default is FALSE.
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #'
 #' @return A list containing annotation statistics.
 #'
-#' @importFrom DBI dbExecute dbGetQuery
+#' @importFrom DBI dbExecute dbGetQuery dbListTables
 #' @importFrom httr GET add_headers status_code content
 #' @importFrom jsonlite fromJSON
 #' @export
 annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_threshold = 1e-10,
-                                   batch_size = 500, delay = 1, offline_mode = FALSE, verbose = TRUE) {
+                                   batch_size = 500, delay = 1, offline_mode = FALSE,
+                                   use_cache = FALSE, store_cache = FALSE, verbose = TRUE) {
   # Check connection validity
   if (!DBI::dbIsValid(con)) {
     stop("Database connection is invalid. Please reconnect to the database.")
@@ -374,6 +478,11 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
 
   if (nrow(params) == 0) {
     stop("BLAST parameters with ID ", blast_param_id, " not found.")
+  }
+
+  # Create or verify cache table if needed
+  if (use_cache || store_cache) {
+    ensure_uniprot_cache_table(con, verbose = verbose)
   }
 
   # Get BLAST results
@@ -401,8 +510,8 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   # Check if we should use offline mode
   use_api <- !offline_mode
 
-  # Test UniProt API connection only if not in offline mode
-  if (use_api) {
+  # Test UniProt API connection only if not in offline mode and not exclusively using cache
+  if (use_api && !(use_cache && !store_cache)) {
     if (verbose) message("Testing UniProt API connection...")
 
     # Use API client headers based on our tests
@@ -446,8 +555,8 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
       FALSE
     })
 
-    # If API test failed, switch to offline mode
-    if (!api_test) {
+    # If API test failed and not using cache, switch to offline mode
+    if (!api_test && !use_cache) {
       if (verbose) {
         message("\n=== UniProt API connection failed. Switching to offline mode ===")
         message("Only basic annotation information will be stored.")
@@ -456,30 +565,65 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
       }
       use_api <- FALSE
     }
-  } else {
-    if (verbose) message("Operating in offline mode - no UniProt API queries will be made.")
+  } else if (use_cache && !store_cache) {
+    if (verbose) message("Using cache only - skipping API connection test")
   }
 
   # Process in online or offline mode
   if (use_api) {
-    # ONLINE MODE: Query UniProt for each accession
-    if (verbose) message("Querying UniProt API for accessions...")
+    # ONLINE MODE: Query UniProt for each accession or use cache
+    if (verbose) message("Retrieving UniProt data for accessions...")
 
     uniprot_data <- list()
+    cache_hits <- 0
+    api_calls <- 0
+
     for (i in seq_along(hit_accessions)) {
       acc <- hit_accessions[i]
+      cache_data <- NULL
 
-      # Query UniProt API with updated function that tries both REST and legacy APIs
+      # Check cache first if enabled
+      if (use_cache) {
+        cache_data <- get_cached_uniprot_data(con, acc)
+        if (!is.null(cache_data)) {
+          uniprot_data[[acc]] <- cache_data
+          cache_hits <- cache_hits + 1
+
+          # Show progress
+          if (verbose && (i %% 10 == 0 || i == length(hit_accessions))) {
+            message("Processed ", i, " of ", length(hit_accessions), " accessions (",
+                    cache_hits, " from cache, ", api_calls, " API calls)")
+          }
+
+          next  # Skip API call
+        }
+      }
+
+      # Query UniProt API
       result <- query_uniprot_api(acc)
       uniprot_data[[acc]] <- result
+      api_calls <- api_calls + 1
+
+      # Store in cache if enabled
+      if (store_cache) {
+        store_uniprot_data(con, acc, result)
+      }
 
       # Show progress
       if (verbose && (i %% 10 == 0 || i == length(hit_accessions))) {
-        message("Queried ", i, " of ", length(hit_accessions), " accessions")
+        message("Processed ", i, " of ", length(hit_accessions), " accessions (",
+                cache_hits, " from cache, ", api_calls, " API calls)")
       }
 
       # Add delay between API calls
-      Sys.sleep(delay)
+      if (api_calls > 0 && i < length(hit_accessions)) {
+        Sys.sleep(delay)
+      }
+    }
+
+    if (verbose) {
+      message("UniProt data retrieval complete: ", cache_hits, " from cache, ",
+              api_calls, " from API")
     }
 
     # Extract information from UniProt responses
@@ -666,6 +810,11 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   if (verbose) {
     message("Stored ", go_count, " GO terms and ", kegg_count, " KEGG references.")
 
+    if (use_cache || store_cache) {
+      cache_stats <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS count FROM uniprot_cache")$count
+      message("UniProt cache now contains ", cache_stats, " entries")
+    }
+
     if (!use_api) {
       message("\nNOTE: Annotation was performed in offline mode.")
       message("You can re-run the annotation later with UniProt API access to get GO terms and KEGG pathways.")
@@ -680,7 +829,9 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
     annotated_results = successful_annotations,
     go_terms = go_count,
     kegg_refs = kegg_count,
-    offline_mode = !use_api
+    offline_mode = !use_api,
+    cache_used = use_cache,
+    cache_stored = store_cache
   )
 }
 
