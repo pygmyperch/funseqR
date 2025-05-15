@@ -14,7 +14,8 @@ annotate_blast_results(
   offline_mode = FALSE,
   use_cache = FALSE,
   store_cache = FALSE,
-  verbose = TRUE
+  verbose = TRUE,
+  debug_accessions = NULL
 )
 }
 \arguments{
@@ -37,6 +38,8 @@ annotate_blast_results(
 \item{store_cache}{If TRUE, stores API responses in the database. Default is FALSE.}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
+
+\item{debug_accessions}{Vector of accessions to debug. Default is NULL.}
 }
 \value{
 A list containing annotation statistics.
