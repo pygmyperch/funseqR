@@ -194,79 +194,24 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
     if (debug) {
       message("Debug info for accession ", uniprot_data$accession, ":")
       message("Available fields: ", paste(names(result), collapse=", "))
-
-      # Check for genes field
-      if (!is.null(result$genes)) {
-        message("Genes field present with length: ", length(result$genes))
-        if (length(result$genes) > 0) {
-          message("First gene structure: ")
-          print(str(result$genes[[1]]))
-        }
-      } else {
-        message("No genes field found")
-      }
-
-      # Check for cross references
-      if (!is.null(result$uniProtKBCrossReferences)) {
-        message("Cross references present with length: ", length(result$uniProtKBCrossReferences))
-
-        # Look for GO references
-        go_refs <- which(sapply(result$uniProtKBCrossReferences, function(r) {
-          !is.null(r$database) && r$database == "GO"
-        }))
-
-        message("Found ", length(go_refs), " GO references")
-        if (length(go_refs) > 0) {
-          message("First GO reference structure:")
-          print(str(result$uniProtKBCrossReferences[[go_refs[1]]]))
-        }
-
-        # Look for KEGG references
-        kegg_refs <- which(sapply(result$uniProtKBCrossReferences, function(r) {
-          !is.null(r$database) && r$database == "KEGG"
-        }))
-
-        message("Found ", length(kegg_refs), " KEGG references")
-        if (length(kegg_refs) > 0) {
-          message("First KEGG reference structure:")
-          print(str(result$uniProtKBCrossReferences[[kegg_refs[1]]]))
-        }
-      } else {
-        message("No uniProtKBCrossReferences field found")
-      }
-    }
-
-    # Check if result is a proper list structure
-    if (is.null(result) || is.atomic(result)) {
-      warning("Unexpected result format for accession ", uniprot_data$accession)
-      return(create_empty_annotation(uniprot_data$accession))
     }
 
     # Extract gene names
     gene_names <- ""
-    if (!is.null(result$genes) && is.list(result$genes) && length(result$genes) > 0) {
+    if (!is.null(result$genes) && length(result$genes) > 0) {
       gene_name_parts <- c()
 
       for (gene in result$genes) {
-        # Add gene name if available
-        if (is.list(gene) && !is.null(gene$geneName) && is.list(gene$geneName) && !is.null(gene$geneName$value)) {
+        # Get main gene name
+        if (!is.null(gene$geneName) && !is.null(gene$geneName$value)) {
           gene_name_parts <- c(gene_name_parts, gene$geneName$value)
         }
 
-        # Add synonyms if available
-        if (is.list(gene) && !is.null(gene$synonyms) && is.list(gene$synonyms) && length(gene$synonyms) > 0) {
+        # Get synonyms
+        if (!is.null(gene$synonyms) && length(gene$synonyms) > 0) {
           for (syn in gene$synonyms) {
-            if (is.list(syn) && !is.null(syn$value)) {
+            if (!is.null(syn$value)) {
               gene_name_parts <- c(gene_name_parts, syn$value)
-            }
-          }
-        }
-
-        # Add ORF names if available
-        if (is.list(gene) && !is.null(gene$orfNames) && is.list(gene$orfNames) && length(gene$orfNames) > 0) {
-          for (orf in gene$orfNames) {
-            if (is.list(orf) && !is.null(orf$value)) {
-              gene_name_parts <- c(gene_name_parts, orf$value)
             }
           }
         }
@@ -284,46 +229,34 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
       stringsAsFactors = FALSE
     )
 
-    # Handle GO terms carefully with explicit list creation
-    if (!is.null(result$uniProtKBCrossReferences) && is.list(result$uniProtKBCrossReferences) && length(result$uniProtKBCrossReferences) > 0) {
-      go_refs <- list()
-
+    # Handle GO terms
+    if (!is.null(result$uniProtKBCrossReferences)) {
       # Find GO references
-      for (i in seq_along(result$uniProtKBCrossReferences)) {
-        ref <- result$uniProtKBCrossReferences[[i]]
-        if (is.list(ref) && !is.null(ref$database) && ref$database == "GO") {
-          go_refs <- c(go_refs, list(ref))
-        }
-      }
+      for (ref in result$uniProtKBCrossReferences) {
+        if (!is.null(ref$database) && ref$database == "GO" && !is.null(ref$id)) {
+          go_term <- NA_character_
+          go_evidence <- NA_character_
 
-      # Process each GO reference
-      if (length(go_refs) > 0) {
-        for (ref in go_refs) {
-          if (!is.null(ref$id) && !is.null(ref$properties) && is.list(ref$properties) && length(ref$properties) > 0) {
-            # Extract properties safely
-            go_term <- NA_character_
-            go_evidence <- NA_character_
-
+          # Extract GO term and evidence from properties
+          if (!is.null(ref$properties) && length(ref$properties) > 0) {
             for (prop in ref$properties) {
-              if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
+              if (!is.null(prop$key) && !is.null(prop$value)) {
                 if (prop$key == "GoTerm") go_term <- prop$value
                 if (prop$key == "GoEvidenceType") go_evidence <- prop$value
               }
             }
+          }
 
-            # Only add if we found a GO term
-            if (!is.na(go_term)) {
-              new_row <- data.frame(
-                go_id = ref$id,
-                go_term = go_term,
-                go_category = substr(go_term, 1, 1),
-                go_evidence = go_evidence,
-                stringsAsFactors = FALSE
-              )
-
-              # Append to existing go_terms
-              go_terms <- rbind(go_terms, new_row)
-            }
+          # Add GO term to data frame if found
+          if (!is.na(go_term)) {
+            new_row <- data.frame(
+              go_id = ref$id,
+              go_term = go_term,
+              go_category = substr(go_term, 1, 1),
+              go_evidence = go_evidence,
+              stringsAsFactors = FALSE
+            )
+            go_terms <- rbind(go_terms, new_row)
           }
         }
       }
@@ -336,14 +269,24 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
       stringsAsFactors = FALSE
     )
 
-    # Handle KEGG refs carefully
-    if (!is.null(result$uniProtKBCrossReferences) && is.list(result$uniProtKBCrossReferences) && length(result$uniProtKBCrossReferences) > 0) {
-      for (i in seq_along(result$uniProtKBCrossReferences)) {
-        ref <- result$uniProtKBCrossReferences[[i]]
-        if (is.list(ref) && !is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id)) {
+    # Handle KEGG references
+    if (!is.null(result$uniProtKBCrossReferences)) {
+      for (ref in result$uniProtKBCrossReferences) {
+        if (!is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id)) {
+          pathway_name <- NA_character_
+
+          # Extract pathway name from properties
+          if (!is.null(ref$properties) && length(ref$properties) > 0) {
+            for (prop in ref$properties) {
+              if (!is.null(prop$key) && !is.null(prop$value)) {
+                if (prop$key == "Description") pathway_name <- prop$value
+              }
+            }
+          }
+
           new_row <- data.frame(
             kegg_id = ref$id,
-            pathway_name = NA_character_,
+            pathway_name = pathway_name,
             stringsAsFactors = FALSE
           )
           kegg_refs <- rbind(kegg_refs, new_row)
