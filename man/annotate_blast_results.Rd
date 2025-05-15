@@ -12,6 +12,8 @@ annotate_blast_results(
   batch_size = 500,
   delay = 1,
   offline_mode = FALSE,
+  use_cache = FALSE,
+  store_cache = FALSE,
   verbose = TRUE
 )
 }
@@ -29,6 +31,10 @@ annotate_blast_results(
 \item{delay}{Delay between API calls in seconds. Default is 1.}
 
 \item{offline_mode}{If TRUE, skips UniProt API and uses basic annotations. Default is FALSE.}
+
+\item{use_cache}{If TRUE, uses cached API responses if available. Default is FALSE.}
+
+\item{store_cache}{If TRUE, stores API responses in the database. Default is FALSE.}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 }

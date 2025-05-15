@@ -249,15 +249,26 @@ blast_params <- list_blast_params(con, project_id)
 print(blast_params)
 blast_param_id <- blast_params$blast_param_id[1]  # Adjust as needed
 
-# Now you can continue with your workflow, e.g., annotation
+# Initial run - store all API responses in the cache
 annotation_result <- annotate_blast_results(
   con,
   blast_param_id,
   max_hits = 1,
   e_value_threshold = 1e-10,
   batch_size = 400,
-  delay = 3
+  delay = 3,
+  store_cache = TRUE
 )
 
+# Subsequent development runs - use cache data without API calls
+annotation_result <- annotate_blast_results(
+  con,
+  blast_param_id,
+  max_hits = 1,
+  e_value_threshold = 1e-10,
+  batch_size = 400,
+  delay = 3,
+  use_cache = TRUE
+)
 # When done, close the connection
 close_funseq_db(con)
