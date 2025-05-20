@@ -403,12 +403,30 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE)
     return(NULL)
   }
 
-  # Debug
+  # Add detailed debugging
   if (verbose) {
     message("Storing annotation for blast_result_id: ", blast_result_id)
     message("UniProt info: accession=", uniprot_info$accession,
-            ", GO terms=", nrow(uniprot_info$go_terms),
-            ", KEGG refs=", nrow(uniprot_info$kegg_refs))
+            ", entry_name=", ifelse(is.null(uniprot_info$entry_name) || is.na(uniprot_info$entry_name), "NA", uniprot_info$entry_name),
+            ", gene_names=", ifelse(is.null(uniprot_info$gene_names) || is.na(uniprot_info$gene_names), "", uniprot_info$gene_names))
+
+    if (!is.null(uniprot_info$go_terms) && is.data.frame(uniprot_info$go_terms)) {
+      message("GO terms: ", nrow(uniprot_info$go_terms), " entries")
+      if (nrow(uniprot_info$go_terms) > 0) {
+        message("First GO term: ", uniprot_info$go_terms$go_id[1], " - ", uniprot_info$go_terms$go_term[1])
+      }
+    } else {
+      message("GO terms: NULL or not a data frame")
+    }
+
+    if (!is.null(uniprot_info$kegg_refs) && is.data.frame(uniprot_info$kegg_refs)) {
+      message("KEGG refs: ", nrow(uniprot_info$kegg_refs), " entries")
+      if (nrow(uniprot_info$kegg_refs) > 0) {
+        message("First KEGG ref: ", uniprot_info$kegg_refs$kegg_id[1])
+      }
+    } else {
+      message("KEGG refs: NULL or not a data frame")
+    }
   }
 
   # Check if annotation already exists
@@ -424,95 +442,144 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE)
     return(existing$annotation_id[1])
   }
 
-  # Add annotation
-  current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  # Start transaction
+  DBI::dbExecute(con, "BEGIN TRANSACTION")
 
-  DBI::dbExecute(
-    con,
-    "INSERT INTO annotations (blast_result_id, uniprot_accession, entry_name, gene_names, retrieval_date)
-     VALUES (?, ?, ?, ?, ?)",
-    params = list(
-      blast_result_id,
-      uniprot_info$accession,
-      uniprot_info$entry_name,
-      uniprot_info$gene_names,
-      current_time
+  tryCatch({
+    # Add annotation
+    current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+
+    # Prepare parameters with proper NULL/NA handling
+    entry_name <- uniprot_info$entry_name
+    if (is.null(entry_name) || is.na(entry_name)) entry_name <- NULL
+
+    gene_names <- uniprot_info$gene_names
+    if (is.null(gene_names) || is.na(gene_names)) gene_names <- ""
+
+    DBI::dbExecute(
+      con,
+      "INSERT INTO annotations (blast_result_id, uniprot_accession, entry_name, gene_names, retrieval_date)
+       VALUES (?, ?, ?, ?, ?)",
+      params = list(
+        blast_result_id,
+        uniprot_info$accession,
+        entry_name,
+        gene_names,
+        current_time
+      )
     )
-  )
 
-  # Get the ID of the newly created annotation
-  annotation_id <- DBI::dbGetQuery(
-    con,
-    "SELECT annotation_id FROM annotations
-     WHERE blast_result_id = ? AND uniprot_accession = ?",
-    params = list(blast_result_id, uniprot_info$accession)
-  )$annotation_id[1]
+    # Get the ID of the newly created annotation
+    annotation_id <- DBI::dbGetQuery(
+      con,
+      "SELECT annotation_id FROM annotations
+       WHERE blast_result_id = ? AND uniprot_accession = ?",
+      params = list(blast_result_id, uniprot_info$accession)
+    )$annotation_id[1]
 
-  # Add GO terms
-  if (!is.null(uniprot_info$go_terms) && is.data.frame(uniprot_info$go_terms) && nrow(uniprot_info$go_terms) > 0) {
-    if (verbose) message("Adding ", nrow(uniprot_info$go_terms), " GO terms")
+    if (verbose) message("Created annotation with ID ", annotation_id)
 
-    for (i in 1:nrow(uniprot_info$go_terms)) {
-      tryCatch({
-        # Ensure all values are character
-        go_id <- as.character(uniprot_info$go_terms$go_id[i])
-        go_term <- as.character(uniprot_info$go_terms$go_term[i])
-        go_category <- as.character(uniprot_info$go_terms$go_category[i])
-        go_evidence <- as.character(uniprot_info$go_terms$go_evidence[i])
+    # Add GO terms - completely revised approach
+    if (!is.null(uniprot_info$go_terms) && is.data.frame(uniprot_info$go_terms) && nrow(uniprot_info$go_terms) > 0) {
+      if (verbose) message("Adding ", nrow(uniprot_info$go_terms), " GO terms")
 
-        if (is.na(go_evidence)) go_evidence <- NULL
+      go_count <- 0
 
-        DBI::dbExecute(
-          con,
-          "INSERT INTO go_terms (annotation_id, go_id, go_term, go_category, go_evidence)
-           VALUES (?, ?, ?, ?, ?)",
-          params = list(
-            annotation_id,
-            go_id,
-            go_term,
-            go_category,
-            go_evidence
+      for (i in 1:nrow(uniprot_info$go_terms)) {
+        tryCatch({
+          # Get values with proper NULL handling
+          go_id <- as.character(uniprot_info$go_terms$go_id[i])
+          if (is.na(go_id)) next
+
+          go_term <- as.character(uniprot_info$go_terms$go_term[i])
+          if (is.na(go_term)) go_term <- NULL
+
+          go_category <- as.character(uniprot_info$go_terms$go_category[i])
+          if (is.na(go_category)) go_category <- NULL
+
+          go_evidence <- as.character(uniprot_info$go_terms$go_evidence[i])
+          if (is.na(go_evidence)) go_evidence <- NULL
+
+          if (verbose) message("  Inserting GO term: ", go_id, " - ", ifelse(is.null(go_term), "NULL", go_term))
+
+          # Execute the insert for this GO term
+          result <- DBI::dbExecute(
+            con,
+            "INSERT INTO go_terms (annotation_id, go_id, go_term, go_category, go_evidence)
+             VALUES (?, ?, ?, ?, ?)",
+            params = list(
+              annotation_id,
+              go_id,
+              go_term,
+              go_category,
+              go_evidence
+            )
           )
-        )
-      }, error = function(e) {
-        if (verbose) message("Error inserting GO term #", i, ": ", e$message)
-      })
+
+          go_count <- go_count + result
+
+        }, error = function(e) {
+          if (verbose) message("  Error inserting GO term #", i, ": ", e$message)
+        })
+      }
+
+      if (verbose) message("Successfully inserted ", go_count, " GO terms")
+    } else if (verbose) {
+      message("No GO terms to add")
     }
-  } else if (verbose) {
-    message("No GO terms to add")
-  }
 
-  # Add KEGG references
-  if (!is.null(uniprot_info$kegg_refs) && is.data.frame(uniprot_info$kegg_refs) && nrow(uniprot_info$kegg_refs) > 0) {
-    if (verbose) message("Adding ", nrow(uniprot_info$kegg_refs), " KEGG references")
+    # Add KEGG references - completely revised approach
+    if (!is.null(uniprot_info$kegg_refs) && is.data.frame(uniprot_info$kegg_refs) && nrow(uniprot_info$kegg_refs) > 0) {
+      if (verbose) message("Adding ", nrow(uniprot_info$kegg_refs), " KEGG references")
 
-    for (i in 1:nrow(uniprot_info$kegg_refs)) {
-      tryCatch({
-        # Ensure all values are character
-        kegg_id <- as.character(uniprot_info$kegg_refs$kegg_id[i])
-        pathway_name <- as.character(uniprot_info$kegg_refs$pathway_name[i])
+      kegg_count <- 0
 
-        if (is.na(pathway_name)) pathway_name <- NULL
+      for (i in 1:nrow(uniprot_info$kegg_refs)) {
+        tryCatch({
+          # Get values with proper NULL handling
+          kegg_id <- as.character(uniprot_info$kegg_refs$kegg_id[i])
+          if (is.na(kegg_id)) next
 
-        DBI::dbExecute(
-          con,
-          "INSERT INTO kegg_references (annotation_id, kegg_id, pathway_name)
-           VALUES (?, ?, ?)",
-          params = list(
-            annotation_id,
-            kegg_id,
-            pathway_name
+          pathway_name <- as.character(uniprot_info$kegg_refs$pathway_name[i])
+          if (is.na(pathway_name)) pathway_name <- NULL
+
+          if (verbose) message("  Inserting KEGG reference: ", kegg_id)
+
+          # Execute the insert for this KEGG reference
+          result <- DBI::dbExecute(
+            con,
+            "INSERT INTO kegg_references (annotation_id, kegg_id, pathway_name)
+             VALUES (?, ?, ?)",
+            params = list(
+              annotation_id,
+              kegg_id,
+              pathway_name
+            )
           )
-        )
-      }, error = function(e) {
-        if (verbose) message("Error inserting KEGG reference #", i, ": ", e$message)
-      })
-    }
-  } else if (verbose) {
-    message("No KEGG references to add")
-  }
 
-  return(annotation_id)
+          kegg_count <- kegg_count + result
+
+        }, error = function(e) {
+          if (verbose) message("  Error inserting KEGG reference #", i, ": ", e$message)
+        })
+      }
+
+      if (verbose) message("Successfully inserted ", kegg_count, " KEGG references")
+    } else if (verbose) {
+      message("No KEGG references to add")
+    }
+
+    # Commit the transaction
+    DBI::dbExecute(con, "COMMIT")
+
+    return(annotation_id)
+
+  }, error = function(e) {
+    # Rollback on error
+    DBI::dbExecute(con, "ROLLBACK")
+    warning("Error storing annotation: ", e$message)
+    return(NULL)
+  })
 }
 
 #' Process BLAST results and retrieve UniProt annotations
@@ -740,7 +807,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
             con,
             blast_result_id,
             valid_info[[hit_accession]],
-            verbose = FALSE
+            verbose = TRUE  # CHANGED from FALSE to TRUE for debugging
           )
         } else {
           # OFFLINE MODE or missing info: Store basic annotation
@@ -748,7 +815,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
             con,
             blast_result_id,
             hit_accession,
-            verbose = FALSE
+            verbose = TRUE  # CHANGED from FALSE to TRUE for debugging
           )
         }
 
