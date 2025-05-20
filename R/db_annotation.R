@@ -184,63 +184,53 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
   tryCatch({
     # Check the structure of uniprot_data
     if (debug) {
-      message("uniprot_data structure: ")
-      print(str(uniprot_data))
+      message("Debugging extract_uniprot_info for accession: ",
+              if(is.list(uniprot_data) && !is.null(uniprot_data$accession))
+                uniprot_data$accession else "unknown")
+      message("Class of uniprot_data: ", class(uniprot_data))
     }
 
-    # First check if uniprot_data is a JSON string that needs parsing
-    if (is.character(uniprot_data) && length(uniprot_data) == 1) {
-      # Try to parse it as JSON
-      parsed_data <- jsonlite::fromJSON(uniprot_data, flatten = TRUE)
+    # Make sure we have a proper data structure to work with
+    result <- NULL
+    accession <- "Unknown"
 
-      if (debug) {
-        message("Parsed JSON structure: ")
-        print(str(parsed_data))
-      }
-
-      # Use the parsed data
-      if (!is.null(parsed_data$results) && length(parsed_data$results) > 0) {
-        result <- parsed_data$results[[1]]
-      } else {
-        warning("No results found in parsed JSON data")
-        return(NULL)
+    # If it's a list with data and results
+    if (is.list(uniprot_data) && !is.null(uniprot_data$data) &&
+        !is.null(uniprot_data$data$results) && length(uniprot_data$data$results) > 0) {
+      result <- uniprot_data$data$results[[1]]
+      accession <- uniprot_data$accession
+      if (debug) message("Using data$results from uniprot_data")
+    }
+    # If we need to parse content
+    else if (is.list(uniprot_data) && !is.null(uniprot_data$content) &&
+             is.character(uniprot_data$content)) {
+      parsed <- jsonlite::fromJSON(uniprot_data$content, flatten = TRUE)
+      if (!is.null(parsed$results) && length(parsed$results) > 0) {
+        result <- parsed$results[[1]]
+        accession <- uniprot_data$accession
+        if (debug) message("Parsed content from uniprot_data")
       }
     }
-    # Check if it's already a list with a 'data' element
-    else if (is.list(uniprot_data) && !is.null(uniprot_data$data)) {
-      if (!is.null(uniprot_data$data$results) && length(uniprot_data$data$results) > 0) {
-        result <- uniprot_data$data$results[[1]]
-      } else {
-        warning("No results found in uniprot_data$data")
-        return(NULL)
+    # If we have a direct character that needs parsing
+    else if (is.character(uniprot_data) && length(uniprot_data) == 1) {
+      parsed <- jsonlite::fromJSON(uniprot_data, flatten = TRUE)
+      if (!is.null(parsed$results) && length(parsed$results) > 0) {
+        result <- parsed$results[[1]]
+        if (debug) message("Parsed direct character input")
       }
     }
-    # Check if it has a content field that needs parsing
-    else if (is.list(uniprot_data) && !is.null(uniprot_data$content)) {
-      parsed_data <- jsonlite::fromJSON(uniprot_data$content, flatten = TRUE)
 
-      if (!is.null(parsed_data$results) && length(parsed_data$results) > 0) {
-        result <- parsed_data$results[[1]]
-      } else {
-        warning("No results found in parsed content")
-        return(NULL)
-      }
-    }
-    # Handle any other case
-    else {
-      warning("Unexpected uniprot_data format")
+    # If we couldn't get a result, return NULL
+    if (is.null(result)) {
+      warning("Could not extract results from UniProt data for ", accession)
       return(NULL)
     }
 
-    # Debug output for result structure
     if (debug) {
-      message("Result structure: ")
-      print(str(result))
+      message("Result structure fields: ", paste(names(result), collapse = ", "))
     }
 
     # Extract basic info
-    accession <- if (!is.null(result$primaryAccession)) result$primaryAccession else
-      if (!is.null(uniprot_data$accession)) uniprot_data$accession else "Unknown"
     entry_name <- if (!is.null(result$uniProtkbId)) result$uniProtkbId else NULL
 
     # Extract gene names
@@ -250,12 +240,14 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
 
       for (gene in result$genes) {
         # Add gene name if available
-        if (is.list(gene) && !is.null(gene$geneName) && is.list(gene$geneName) && !is.null(gene$geneName$value)) {
+        if (is.list(gene) && !is.null(gene$geneName) && is.list(gene$geneName) &&
+            !is.null(gene$geneName$value)) {
           gene_name_parts <- c(gene_name_parts, gene$geneName$value)
         }
 
         # Add synonyms if available
-        if (is.list(gene) && !is.null(gene$synonyms) && is.list(gene$synonyms) && length(gene$synonyms) > 0) {
+        if (is.list(gene) && !is.null(gene$synonyms) && is.list(gene$synonyms) &&
+            length(gene$synonyms) > 0) {
           for (syn in gene$synonyms) {
             if (is.list(syn) && !is.null(syn$value)) {
               gene_name_parts <- c(gene_name_parts, syn$value)
@@ -340,6 +332,11 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
       }
     }
 
+    if (debug) {
+      message("Extracted ", nrow(go_terms), " GO terms and ",
+              nrow(kegg_refs), " KEGG references")
+    }
+
     # Return the extracted information
     list(
       accession = accession,
@@ -349,15 +346,36 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
       kegg_refs = kegg_refs
     )
   }, error = function(e) {
-    warning(paste("Error in extract_uniprot_info for",
-                  if (is.list(uniprot_data) && !is.null(uniprot_data$accession))
-                    uniprot_data$accession
-                  else "Unknown",
-                  ":", e$message))
-    return(create_empty_annotation(if (is.list(uniprot_data) && !is.null(uniprot_data$accession))
-      uniprot_data$accession
-      else "Unknown"))
+    accession <- if (is.list(uniprot_data) && !is.null(uniprot_data$accession))
+      uniprot_data$accession else "Unknown"
+    warning(paste("Error in extract_uniprot_info for", accession, ":", e$message))
+    return(create_empty_annotation(accession))
   })
+}
+
+#' Create an empty annotation structure
+#'
+#' @param accession The accession number
+#' @return A list with empty annotation structures
+#' @noRd
+create_empty_annotation <- function(accession) {
+  list(
+    accession = accession,
+    entry_name = NA_character_,
+    gene_names = "",
+    go_terms = data.frame(
+      go_id = character(0),
+      go_term = character(0),
+      go_category = character(0),
+      go_evidence = character(0),
+      stringsAsFactors = FALSE
+    ),
+    kegg_refs = data.frame(
+      kegg_id = character(0),
+      pathway_name = character(0),
+      stringsAsFactors = FALSE
+    )
+  )
 }
 
 #' Create an empty annotation structure
@@ -796,82 +814,163 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   )
 }
 
-#' Query the UniProt API for a protein accession using working endpoints
+#' Query the UniProt API for a protein accession
+#'
+#' This function queries the UniProt API for information about a protein accession
+#' and returns the response in a structured format.
 #'
 #' @param accession The UniProt accession number
 #' @param fields The fields to retrieve from UniProt
 #' @param use_rest_api If TRUE, use REST API, otherwise use legacy API
-#' @param debug If TRUE, save the API response to a file for debugging
-#' @return A list containing API response
+#' @param debug If TRUE, save the API response to a file for debugging and print additional information
+#' @param max_retries Maximum number of retry attempts for failed requests
+#' @param retry_delay Delay in seconds between retry attempts
+#'
+#' @return A list containing API response with consistent structure
+#' @importFrom httr GET add_headers status_code content
+#' @importFrom jsonlite fromJSON
 #' @noRd
 query_uniprot_api <- function(accession,
-                              fields = "accession,id,gene_names,go_id,go,xref_kegg",
+                              fields = "accession,id,gene_names,go,xref_kegg,organism_name,protein_name",
                               use_rest_api = TRUE,
-                              debug = FALSE) {
-  # Use API client headers, which we know work based on our tests
+                              debug = FALSE,
+                              max_retries = 3,
+                              retry_delay = 2) {
+
+  # Use API client headers
   headers <- c(
-    "User-Agent" = paste0("funseqR/R API client"),
+    "User-Agent" = "funseqR/R API client",
     "Accept" = "application/json"
   )
 
+  # Function to make the API call with retries
+  make_api_call <- function(url, retry_count = 0) {
+    tryCatch({
+      if (debug) message("Querying URL: ", url)
+      response <- httr::GET(url, httr::add_headers(.headers = headers))
+
+      if (httr::status_code(response) == 200) {
+        if (debug) message("Request successful, status code: 200")
+        response
+      } else {
+        if (retry_count < max_retries) {
+          if (debug) message("Request failed with status code: ", httr::status_code(response),
+                             ". Retrying in ", retry_delay, " seconds...")
+          Sys.sleep(retry_delay)
+          make_api_call(url, retry_count + 1)
+        } else {
+          if (debug) message("Request failed after ", max_retries, " retries with status code: ",
+                             httr::status_code(response))
+          response
+        }
+      }
+    }, error = function(e) {
+      if (retry_count < max_retries) {
+        if (debug) message("API call error: ", e$message, ". Retrying in ", retry_delay, " seconds...")
+        Sys.sleep(retry_delay)
+        make_api_call(url, retry_count + 1)
+      } else {
+        if (debug) message("API call failed after ", max_retries, " retries with error: ", e$message)
+        # Return a simulated error response
+        list(
+          status_code = 500,
+          content = paste("Error:", e$message),
+          error = e
+        )
+      }
+    })
+  }
+
+  # Try REST API first
   if (use_rest_api) {
-    # Use the REST API search endpoint directly (skip base URL test)
     base_url <- "https://rest.uniprot.org/uniprotkb/search"
     query <- paste0("accession:", accession)
     url <- paste0(base_url, "?query=", URLencode(query),
                   "&fields=", URLencode(fields), "&format=json")
 
-    response <- httr::GET(url, httr::add_headers(.headers = headers))
+    response <- make_api_call(url)
   } else {
-    # Fallback to legacy API which also works
+    # Legacy API as fallback
     base_url <- "https://www.uniprot.org/uniprot"
     query <- paste0("accession:", accession)
     url <- paste0(base_url, "?query=", URLencode(query),
                   "&columns=", URLencode(fields), "&format=json")
 
-    response <- httr::GET(url, httr::add_headers(.headers = headers))
+    response <- make_api_call(url)
   }
 
   # Process response
-  if (httr::status_code(response) == 200) {
-    content <- httr::content(response, "text", encoding = "UTF-8")
-    data <- jsonlite::fromJSON(content, flatten = TRUE)
+  status <- if (is.function(response$status_code)) response$status_code() else response$status_code
 
-    # Debug: Save the response if requested
-    if (debug) {
-      debug_dir <- "uniprot_debug"
-      if (!dir.exists(debug_dir)) dir.create(debug_dir)
-      debug_file <- file.path(debug_dir, paste0("uniprot_", accession, ".json"))
-      writeLines(content, debug_file)
-      message("Saved debug response to ", debug_file)
-    }
+  if (status == 200) {
+    # Extract content as text
+    content_text <- httr::content(response, "text", encoding = "UTF-8")
 
-    return(list(
-      accession = accession,
-      url = url,
-      status_code = httr::status_code(response),
-      content = content,
-      data = data,
-      error = NA_character_
-    ))
+    # Parse JSON
+    tryCatch({
+      parsed_data <- jsonlite::fromJSON(content_text, flatten = TRUE)
+
+      # Debug: Save the response if requested
+      if (debug) {
+        debug_dir <- "uniprot_debug"
+        if (!dir.exists(debug_dir)) dir.create(debug_dir)
+        debug_file <- file.path(debug_dir, paste0("uniprot_", accession, ".json"))
+        writeLines(content_text, debug_file)
+        message("Saved debug response to ", debug_file)
+
+        # Print a sample of the parsed data structure
+        message("Parsed data structure:")
+        if (!is.null(parsed_data$results) && length(parsed_data$results) > 0) {
+          message("First result has these fields: ",
+                  paste(names(parsed_data$results[[1]]), collapse = ", "))
+        } else {
+          message("No results found in parsed data")
+        }
+      }
+
+      return(list(
+        accession = accession,
+        url = url,
+        status_code = status,
+        content = content_text,
+        data = parsed_data,
+        error = NA_character_
+      ))
+    }, error = function(e) {
+      if (debug) {
+        message("JSON parsing error: ", e$message)
+        message("Raw content (first 200 chars): ", substr(content_text, 1, 200))
+      }
+
+      return(list(
+        accession = accession,
+        url = url,
+        status_code = status,
+        content = content_text,
+        data = NULL,
+        error = paste("JSON parsing error:", e$message)
+      ))
+    })
   } else {
-    # Try fallback if REST API failed
+    # Try fallback if REST API failed and we're not already using the fallback
     if (use_rest_api) {
-      return(query_uniprot_api(accession, fields, use_rest_api = FALSE, debug = debug))
+      if (debug) message("REST API failed, trying legacy API...")
+      return(query_uniprot_api(accession, fields, use_rest_api = FALSE,
+                               debug = debug, max_retries = max_retries,
+                               retry_delay = retry_delay))
     }
 
-    # Both methods failed
+    # Both APIs failed
     warning(paste("Failed to retrieve data for", accession,
-                  "- Status code:", httr::status_code(response)))
+                  "- Status code:", status))
 
     return(list(
       accession = accession,
       url = url,
-      status_code = httr::status_code(response),
-      content = NA_character_,
+      status_code = status,
+      content = if (is.function(response$content)) httr::content(response, "text", encoding = "UTF-8") else NA_character_,
       data = NULL,
-      error = paste("Failed to retrieve data - Status code:",
-                    httr::status_code(response))
+      error = paste("Failed to retrieve data - Status code:", status)
     ))
   }
 }
