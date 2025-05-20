@@ -182,19 +182,66 @@ check_uniprot_connection <- function(verbose = TRUE) {
 #' @noRd
 extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
   tryCatch({
-    if (is.null(uniprot_data$data) || is.null(uniprot_data$data$results) || length(uniprot_data$data$results) == 0) {
-      warning("No data found for accession ", uniprot_data$accession)
+    # Check the structure of uniprot_data
+    if (debug) {
+      message("uniprot_data structure: ")
+      print(str(uniprot_data))
+    }
+
+    # First check if uniprot_data is a JSON string that needs parsing
+    if (is.character(uniprot_data) && length(uniprot_data) == 1) {
+      # Try to parse it as JSON
+      parsed_data <- jsonlite::fromJSON(uniprot_data, flatten = TRUE)
+
+      if (debug) {
+        message("Parsed JSON structure: ")
+        print(str(parsed_data))
+      }
+
+      # Use the parsed data
+      if (!is.null(parsed_data$results) && length(parsed_data$results) > 0) {
+        result <- parsed_data$results[[1]]
+      } else {
+        warning("No results found in parsed JSON data")
+        return(NULL)
+      }
+    }
+    # Check if it's already a list with a 'data' element
+    else if (is.list(uniprot_data) && !is.null(uniprot_data$data)) {
+      if (!is.null(uniprot_data$data$results) && length(uniprot_data$data$results) > 0) {
+        result <- uniprot_data$data$results[[1]]
+      } else {
+        warning("No results found in uniprot_data$data")
+        return(NULL)
+      }
+    }
+    # Check if it has a content field that needs parsing
+    else if (is.list(uniprot_data) && !is.null(uniprot_data$content)) {
+      parsed_data <- jsonlite::fromJSON(uniprot_data$content, flatten = TRUE)
+
+      if (!is.null(parsed_data$results) && length(parsed_data$results) > 0) {
+        result <- parsed_data$results[[1]]
+      } else {
+        warning("No results found in parsed content")
+        return(NULL)
+      }
+    }
+    # Handle any other case
+    else {
+      warning("Unexpected uniprot_data format")
       return(NULL)
     }
 
-    # Get the first result
-    result <- uniprot_data$data$results[[1]]
-
-    # Debug: Print structure if requested
+    # Debug output for result structure
     if (debug) {
-      message("Debug info for accession ", uniprot_data$accession, ":")
-      message("Available fields: ", paste(names(result), collapse=", "))
+      message("Result structure: ")
+      print(str(result))
     }
+
+    # Extract basic info
+    accession <- if (!is.null(result$primaryAccession)) result$primaryAccession else
+      if (!is.null(uniprot_data$accession)) uniprot_data$accession else "Unknown"
+    entry_name <- if (!is.null(result$uniProtkbId)) result$uniProtkbId else NULL
 
     # Extract gene names
     gene_names <- ""
@@ -202,15 +249,15 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
       gene_name_parts <- c()
 
       for (gene in result$genes) {
-        # Get main gene name
-        if (!is.null(gene$geneName) && !is.null(gene$geneName$value)) {
+        # Add gene name if available
+        if (is.list(gene) && !is.null(gene$geneName) && is.list(gene$geneName) && !is.null(gene$geneName$value)) {
           gene_name_parts <- c(gene_name_parts, gene$geneName$value)
         }
 
-        # Get synonyms
-        if (!is.null(gene$synonyms) && length(gene$synonyms) > 0) {
+        # Add synonyms if available
+        if (is.list(gene) && !is.null(gene$synonyms) && is.list(gene$synonyms) && length(gene$synonyms) > 0) {
           for (syn in gene$synonyms) {
-            if (!is.null(syn$value)) {
+            if (is.list(syn) && !is.null(syn$value)) {
               gene_name_parts <- c(gene_name_parts, syn$value)
             }
           }
@@ -231,7 +278,6 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
 
     # Handle GO terms
     if (!is.null(result$uniProtKBCrossReferences)) {
-      # Find GO references
       for (ref in result$uniProtKBCrossReferences) {
         if (!is.null(ref$database) && ref$database == "GO" && !is.null(ref$id)) {
           go_term <- NA_character_
@@ -294,10 +340,6 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
       }
     }
 
-    # Get primary accession and entry name
-    accession <- if (!is.null(result$primaryAccession)) result$primaryAccession else uniprot_data$accession
-    entry_name <- if (!is.null(result$uniProtkbId)) result$uniProtkbId else NULL
-
     # Return the extracted information
     list(
       accession = accession,
@@ -307,8 +349,14 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
       kegg_refs = kegg_refs
     )
   }, error = function(e) {
-    warning(paste("Error in extract_uniprot_info for", uniprot_data$accession, ":", e$message))
-    return(create_empty_annotation(uniprot_data$accession))
+    warning(paste("Error in extract_uniprot_info for",
+                  if (is.list(uniprot_data) && !is.null(uniprot_data$accession))
+                    uniprot_data$accession
+                  else "Unknown",
+                  ":", e$message))
+    return(create_empty_annotation(if (is.list(uniprot_data) && !is.null(uniprot_data$accession))
+      uniprot_data$accession
+      else "Unknown"))
   })
 }
 
