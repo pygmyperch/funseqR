@@ -418,7 +418,36 @@ create_empty_annotation <- function(accession) {
 #' @noRd
 store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE) {
   if (is.null(uniprot_info)) {
+    if (verbose) message("Cannot store NULL annotation")
     return(NULL)
+  }
+
+  # Debug
+  if (verbose) {
+    message("Storing annotation for blast_result_id: ", blast_result_id)
+    message("UniProt info: ", paste(names(uniprot_info), collapse = ", "))
+
+    if (!is.null(uniprot_info$go_terms)) {
+      message("GO terms class: ", class(uniprot_info$go_terms))
+      if (is.data.frame(uniprot_info$go_terms)) {
+        message("GO terms rows: ", nrow(uniprot_info$go_terms))
+      } else {
+        message("GO terms is not a data frame")
+      }
+    } else {
+      message("GO terms is NULL")
+    }
+
+    if (!is.null(uniprot_info$kegg_refs)) {
+      message("KEGG refs class: ", class(uniprot_info$kegg_refs))
+      if (is.data.frame(uniprot_info$kegg_refs)) {
+        message("KEGG refs rows: ", nrow(uniprot_info$kegg_refs))
+      } else {
+        message("KEGG refs is not a data frame")
+      }
+    } else {
+      message("KEGG refs is NULL")
+    }
   }
 
   # Check if annotation already exists
@@ -459,37 +488,53 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE)
   )$annotation_id[1]
 
   # Add GO terms
-  if (nrow(uniprot_info$go_terms) > 0) {
+  if (!is.null(uniprot_info$go_terms) && is.data.frame(uniprot_info$go_terms) && nrow(uniprot_info$go_terms) > 0) {
+    if (verbose) message("Adding ", nrow(uniprot_info$go_terms), " GO terms")
+
     for (i in 1:nrow(uniprot_info$go_terms)) {
-      DBI::dbExecute(
-        con,
-        "INSERT INTO go_terms (annotation_id, go_id, go_term, go_category, go_evidence)
-         VALUES (?, ?, ?, ?, ?)",
-        params = list(
-          annotation_id,
-          uniprot_info$go_terms$go_id[i],
-          uniprot_info$go_terms$go_term[i],
-          uniprot_info$go_terms$go_category[i],
-          uniprot_info$go_terms$go_evidence[i]
+      tryCatch({
+        DBI::dbExecute(
+          con,
+          "INSERT INTO go_terms (annotation_id, go_id, go_term, go_category, go_evidence)
+           VALUES (?, ?, ?, ?, ?)",
+          params = list(
+            annotation_id,
+            uniprot_info$go_terms$go_id[i],
+            uniprot_info$go_terms$go_term[i],
+            uniprot_info$go_terms$go_category[i],
+            uniprot_info$go_terms$go_evidence[i]
+          )
         )
-      )
+      }, error = function(e) {
+        if (verbose) message("Error inserting GO term: ", e$message)
+      })
     }
+  } else if (verbose) {
+    message("No GO terms to add")
   }
 
   # Add KEGG references
-  if (nrow(uniprot_info$kegg_refs) > 0) {
+  if (!is.null(uniprot_info$kegg_refs) && is.data.frame(uniprot_info$kegg_refs) && nrow(uniprot_info$kegg_refs) > 0) {
+    if (verbose) message("Adding ", nrow(uniprot_info$kegg_refs), " KEGG references")
+
     for (i in 1:nrow(uniprot_info$kegg_refs)) {
-      DBI::dbExecute(
-        con,
-        "INSERT INTO kegg_references (annotation_id, kegg_id, pathway_name)
-         VALUES (?, ?, ?)",
-        params = list(
-          annotation_id,
-          uniprot_info$kegg_refs$kegg_id[i],
-          uniprot_info$kegg_refs$pathway_name[i]
+      tryCatch({
+        DBI::dbExecute(
+          con,
+          "INSERT INTO kegg_references (annotation_id, kegg_id, pathway_name)
+           VALUES (?, ?, ?)",
+          params = list(
+            annotation_id,
+            uniprot_info$kegg_refs$kegg_id[i],
+            uniprot_info$kegg_refs$pathway_name[i]
+          )
         )
-      )
+      }, error = function(e) {
+        if (verbose) message("Error inserting KEGG reference: ", e$message)
+      })
     }
+  } else if (verbose) {
+    message("No KEGG references to add")
   }
 
   return(annotation_id)
