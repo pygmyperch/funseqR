@@ -2,18 +2,18 @@
 % Please edit documentation in R/db_annotation.R
 \name{extract_uniprot_info}
 \alias{extract_uniprot_info}
-\title{Extract UniProt information from API response with robust error handling}
+\title{Extract UniProt information from API response}
 \usage{
 extract_uniprot_info(uniprot_data, debug = FALSE)
 }
 \arguments{
 \item{uniprot_data}{The response from query_uniprot_api}
 
-\item{debug}{If TRUE, print debugging information about the structure of the response}
+\item{debug}{If TRUE, print debugging information}
 }
 \value{
 A list containing extracted information
 }
 \description{
-Extract UniProt information from API response with robust error handling
+Extract UniProt information from API response
 }
