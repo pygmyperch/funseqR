@@ -179,7 +179,7 @@ check_uniprot_connection <- function(verbose = TRUE) {
 #'
 #' @return A list containing extracted information
 #'
-#' @noRd
+#' @export
 extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
   tryCatch({
     # Check the structure of uniprot_data
