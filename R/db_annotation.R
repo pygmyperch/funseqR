@@ -359,6 +359,7 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
 
               # Add GO term if found
               if (!is.na(go_term)) {
+                if (debug) message("Adding GO term: ", go_id, " - ", go_term)
                 new_row <- data.frame(
                   go_id = go_id,
                   go_term = go_term,
@@ -402,6 +403,7 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
 
             # Add GO term to data frame if found
             if (!is.na(go_term)) {
+              if (debug) message("Adding GO term: ", go_id, " - ", go_term)
               new_row <- data.frame(
                 go_id = go_id,
                 go_term = go_term,
@@ -453,6 +455,7 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
                 }
               }
 
+              if (debug) message("Adding KEGG reference: ", kegg_id)
               new_row <- data.frame(
                 kegg_id = kegg_id,
                 pathway_name = pathway_name,
@@ -486,6 +489,7 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
               }
             }
 
+            if (debug) message("Adding KEGG reference: ", kegg_id)
             new_row <- data.frame(
               kegg_id = kegg_id,
               pathway_name = pathway_name,
