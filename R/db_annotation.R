@@ -1017,7 +1017,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
 #' @return A list containing API response with consistent structure
 #' @importFrom httr GET add_headers status_code content
 #' @importFrom jsonlite fromJSON
-#' @noRd
+#' @export
 query_uniprot_api <- function(accession,
                               fields = "accession,id,gene_names,go,xref_kegg,organism_name,protein_name",
                               use_rest_api = TRUE,
