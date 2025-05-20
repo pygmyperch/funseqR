@@ -192,11 +192,14 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
 
     # Make sure we have a proper data structure to work with
     result <- NULL
-    accession <- "Unknown"
+    accession <- if(is.list(uniprot_data) && !is.null(uniprot_data$accession))
+      uniprot_data$accession else "Unknown"
 
     # If it's a list with data and results
     if (is.list(uniprot_data) && !is.null(uniprot_data$data) && !is.null(uniprot_data$data$results)) {
-      if (debug) message("Data structure: ", class(uniprot_data$data$results))
+      if (debug) {
+        message("Data structure: ", class(uniprot_data$data$results))
+      }
 
       # Check if results is a data frame or list
       if (is.data.frame(uniprot_data$data$results)) {
@@ -204,7 +207,6 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
           if (debug) message("Results is a data frame with ", nrow(uniprot_data$data$results), " rows")
           # Convert data frame row to a list
           result <- as.list(uniprot_data$data$results[1,])
-          accession <- uniprot_data$accession
           if (debug) message("Converted data frame row to list")
         } else {
           warning("Empty results data frame")
@@ -212,7 +214,6 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
         }
       } else if (is.list(uniprot_data$data$results) && length(uniprot_data$data$results) > 0) {
         result <- uniprot_data$data$results[[1]]
-        accession <- uniprot_data$accession
         if (debug) message("Using results list")
       } else {
         warning("Unexpected results structure")
@@ -226,25 +227,15 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
       parsed <- jsonlite::fromJSON(uniprot_data$content, flatten = FALSE)
 
       if (!is.null(parsed$results) && length(parsed$results) > 0) {
-        result <- parsed$results[[1]]
-        accession <- uniprot_data$accession
-        if (debug) message("Successfully parsed content")
+        if (is.data.frame(parsed$results)) {
+          if (debug) message("Parsed results is a data frame")
+          result <- as.list(parsed$results[1,])
+        } else if (is.list(parsed$results)) {
+          if (debug) message("Parsed results is a list")
+          result <- parsed$results[[1]]
+        }
       } else {
         warning("No results found in parsed content")
-        return(NULL)
-      }
-    }
-    # If we have a direct character that needs parsing
-    else if (is.character(uniprot_data) && length(uniprot_data) == 1) {
-      if (debug) message("Parsing direct character input")
-      # Use flatten=FALSE to maintain list structure
-      parsed <- jsonlite::fromJSON(uniprot_data, flatten = FALSE)
-
-      if (!is.null(parsed$results) && length(parsed$results) > 0) {
-        result <- parsed$results[[1]]
-        if (debug) message("Successfully parsed character input")
-      } else {
-        warning("No results found in parsed character input")
         return(NULL)
       }
     }
@@ -260,6 +251,7 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
     }
 
     # Extract basic info
+    primaryAccession <- if (!is.null(result$primaryAccession)) result$primaryAccession else accession
     entry_name <- if (!is.null(result$uniProtkbId)) result$uniProtkbId else NULL
 
     # Extract gene names
@@ -271,7 +263,7 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
       # Handle different gene field structures
       if (is.data.frame(result$genes)) {
         # Handle data frame
-        if (debug) message("Genes is a data frame with", nrow(result$genes), "rows")
+        if (debug) message("Genes is a data frame with ", nrow(result$genes), " rows")
 
         for (i in 1:nrow(result$genes)) {
           # Try to extract gene name
@@ -283,48 +275,27 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
             gene_name_parts <- c(gene_name_parts, result$genes$geneName[[i]]$value)
           }
 
-          # Try to extract synonyms
-          if (!is.null(result$genes$synonyms[i]) && is.list(result$genes$synonyms[i])) {
-            if (debug) message("Processing synonyms")
-            synonyms <- result$genes$synonyms[[i]]
-
-            if (is.data.frame(synonyms) && "value" %in% names(synonyms)) {
-              gene_name_parts <- c(gene_name_parts, synonyms$value)
-            } else if (is.list(synonyms)) {
-              for (syn in synonyms) {
-                if (is.list(syn) && !is.null(syn$value)) {
-                  gene_name_parts <- c(gene_name_parts, syn$value)
-                }
-              }
-            }
-          }
+          # Try to extract synonyms - skipping for now as it's causing issues
         }
       } else if (is.list(result$genes)) {
         # Handle list
         if (debug) message("Genes is a list with", length(result$genes), "elements")
 
-        for (gene in result$genes) {
-          # Add gene name if available
-          if (is.list(gene) && !is.null(gene$geneName)) {
-            if (is.list(gene$geneName) && !is.null(gene$geneName$value)) {
-              gene_name_parts <- c(gene_name_parts, gene$geneName$value)
-            } else if (is.character(gene$geneName)) {
-              gene_name_parts <- c(gene_name_parts, gene$geneName)
-            }
+        for (i in seq_along(result$genes)) {
+          gene <- result$genes[[i]]
+
+          # Add gene name if available - directly accessing structure from JSON response
+          if (is.list(gene) && !is.null(gene$geneName) && is.list(gene$geneName) && !is.null(gene$geneName$value)) {
+            gene_name_parts <- c(gene_name_parts, gene$geneName$value)
           }
 
           # Add synonyms if available
-          if (is.list(gene) && !is.null(gene$synonyms)) {
-            if (is.list(gene$synonyms)) {
-              for (syn in gene$synonyms) {
-                if (is.list(syn) && !is.null(syn$value)) {
-                  gene_name_parts <- c(gene_name_parts, syn$value)
-                } else if (is.character(syn)) {
-                  gene_name_parts <- c(gene_name_parts, syn)
-                }
+          if (is.list(gene) && !is.null(gene$synonyms) && is.list(gene$synonyms)) {
+            for (j in seq_along(gene$synonyms)) {
+              syn <- gene$synonyms[[j]]
+              if (is.list(syn) && !is.null(syn$value)) {
+                gene_name_parts <- c(gene_name_parts, syn$value)
               }
-            } else if (is.character(gene$synonyms)) {
-              gene_name_parts <- c(gene_name_parts, gene$synonyms)
             }
           }
         }
@@ -352,49 +323,51 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
         # Handle data frame format
         if (debug) message("Cross references is a data frame with ", nrow(result$uniProtKBCrossReferences), " rows")
 
-        # Filter for GO references
-        go_refs <- result$uniProtKBCrossReferences[result$uniProtKBCrossReferences$database == "GO", ]
+        # Safely extract GO references
+        if ("database" %in% names(result$uniProtKBCrossReferences)) {
+          # Find rows where database == "GO"
+          go_rows <- which(result$uniProtKBCrossReferences$database == "GO")
 
-        if (nrow(go_refs) > 0) {
-          if (debug) message("Found ", nrow(go_refs), " GO references")
+          if (length(go_rows) > 0) {
+            if (debug) message("Found ", length(go_rows), " GO references")
 
-          for (i in 1:nrow(go_refs)) {
-            go_id <- go_refs$id[i]
-            go_term <- NA_character_
-            go_evidence <- NA_character_
+            for (i in go_rows) {
+              go_id <- as.character(result$uniProtKBCrossReferences$id[i])
+              go_term <- NA_character_
+              go_evidence <- NA_character_
 
-            # Handle properties based on structure
-            if (!is.null(go_refs$properties) && is.list(go_refs$properties)) {
-              props <- go_refs$properties[[i]]
+              # Handle properties if available
+              if (!is.null(result$uniProtKBCrossReferences$properties) &&
+                  is.list(result$uniProtKBCrossReferences$properties) &&
+                  length(result$uniProtKBCrossReferences$properties) >= i) {
 
-              if (is.data.frame(props)) {
-                # Handle data frame properties
-                term_idx <- which(props$key == "GoTerm")
-                if (length(term_idx) > 0) go_term <- props$value[term_idx]
+                props <- result$uniProtKBCrossReferences$properties[[i]]
 
-                evid_idx <- which(props$key == "GoEvidenceType")
-                if (length(evid_idx) > 0) go_evidence <- props$value[evid_idx]
-              } else if (is.list(props)) {
-                # Handle list properties
-                for (prop in props) {
-                  if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
-                    if (prop$key == "GoTerm") go_term <- prop$value
-                    if (prop$key == "GoEvidenceType") go_evidence <- prop$value
+                # Process properties safely
+                if (is.data.frame(props) && "key" %in% names(props) && "value" %in% names(props)) {
+                  term_rows <- which(props$key == "GoTerm")
+                  if (length(term_rows) > 0) {
+                    go_term <- as.character(props$value[term_rows[1]])
+                  }
+
+                  evidence_rows <- which(props$key == "GoEvidenceType")
+                  if (length(evidence_rows) > 0) {
+                    go_evidence <- as.character(props$value[evidence_rows[1]])
                   }
                 }
               }
-            }
 
-            # Add GO term if found
-            if (!is.na(go_term)) {
-              new_row <- data.frame(
-                go_id = go_id,
-                go_term = go_term,
-                go_category = substr(go_term, 1, 1),
-                go_evidence = go_evidence,
-                stringsAsFactors = FALSE
-              )
-              go_terms <- rbind(go_terms, new_row)
+              # Add GO term if found
+              if (!is.na(go_term)) {
+                new_row <- data.frame(
+                  go_id = go_id,
+                  go_term = go_term,
+                  go_category = substr(go_term, 1, 1),
+                  go_evidence = go_evidence,
+                  stringsAsFactors = FALSE
+                )
+                go_terms <- rbind(go_terms, new_row)
+              }
             }
           }
         }
@@ -402,18 +375,27 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
         # Handle list format
         if (debug) message("Cross references is a list with ", length(result$uniProtKBCrossReferences), " elements")
 
-        for (ref in result$uniProtKBCrossReferences) {
-          if (is.list(ref) && !is.null(ref$database) && ref$database == "GO" && !is.null(ref$id)) {
-            go_id <- ref$id
+        # Iterate through safely
+        for (i in seq_along(result$uniProtKBCrossReferences)) {
+          ref <- result$uniProtKBCrossReferences[[i]]
+
+          # Safe check for database == "GO"
+          if (is.list(ref) && !is.null(ref$database) && length(ref$database) == 1 &&
+              ref$database == "GO" && !is.null(ref$id)) {
+
+            go_id <- as.character(ref$id)
             go_term <- NA_character_
             go_evidence <- NA_character_
 
             # Extract GO term and evidence from properties
-            if (!is.null(ref$properties) && length(ref$properties) > 0) {
-              for (prop in ref$properties) {
-                if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
-                  if (prop$key == "GoTerm") go_term <- prop$value
-                  if (prop$key == "GoEvidenceType") go_evidence <- prop$value
+            if (!is.null(ref$properties) && is.list(ref$properties) && length(ref$properties) > 0) {
+              for (j in seq_along(ref$properties)) {
+                prop <- ref$properties[[j]]
+                if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value) &&
+                    length(prop$key) == 1 && length(prop$value) == 1) {
+
+                  if (prop$key == "GoTerm") go_term <- as.character(prop$value)
+                  if (prop$key == "GoEvidenceType") go_evidence <- as.character(prop$value)
                 }
               }
             }
@@ -434,7 +416,7 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
       }
     }
 
-    # Extract KEGG references
+    # Extract KEGG references - using similar safety checks as GO terms
     kegg_refs <- data.frame(
       kegg_id = character(0),
       pathway_name = character(0),
@@ -446,49 +428,60 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
       # Handle different cross reference structures
       if (is.data.frame(result$uniProtKBCrossReferences)) {
         # Handle data frame format
-        kegg_refs_df <- result$uniProtKBCrossReferences[result$uniProtKBCrossReferences$database == "KEGG", ]
+        if ("database" %in% names(result$uniProtKBCrossReferences)) {
+          # Find rows where database == "KEGG"
+          kegg_rows <- which(result$uniProtKBCrossReferences$database == "KEGG")
 
-        if (nrow(kegg_refs_df) > 0) {
-          for (i in 1:nrow(kegg_refs_df)) {
-            kegg_id <- kegg_refs_df$id[i]
-            pathway_name <- NA_character_
+          if (length(kegg_rows) > 0) {
+            for (i in kegg_rows) {
+              kegg_id <- as.character(result$uniProtKBCrossReferences$id[i])
+              pathway_name <- NA_character_
 
-            # Handle properties if available
-            if (!is.null(kegg_refs_df$properties) && is.list(kegg_refs_df$properties)) {
-              props <- kegg_refs_df$properties[[i]]
+              # Handle properties if available
+              if (!is.null(result$uniProtKBCrossReferences$properties) &&
+                  is.list(result$uniProtKBCrossReferences$properties) &&
+                  length(result$uniProtKBCrossReferences$properties) >= i) {
 
-              if (is.data.frame(props)) {
-                desc_idx <- which(props$key == "Description")
-                if (length(desc_idx) > 0) pathway_name <- props$value[desc_idx]
-              } else if (is.list(props)) {
-                for (prop in props) {
-                  if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
-                    if (prop$key == "Description") pathway_name <- prop$value
+                props <- result$uniProtKBCrossReferences$properties[[i]]
+
+                # Process properties safely
+                if (is.data.frame(props) && "key" %in% names(props) && "value" %in% names(props)) {
+                  desc_rows <- which(props$key == "Description")
+                  if (length(desc_rows) > 0) {
+                    pathway_name <- as.character(props$value[desc_rows[1]])
                   }
                 }
               }
-            }
 
-            new_row <- data.frame(
-              kegg_id = kegg_id,
-              pathway_name = pathway_name,
-              stringsAsFactors = FALSE
-            )
-            kegg_refs <- rbind(kegg_refs, new_row)
+              new_row <- data.frame(
+                kegg_id = kegg_id,
+                pathway_name = pathway_name,
+                stringsAsFactors = FALSE
+              )
+              kegg_refs <- rbind(kegg_refs, new_row)
+            }
           }
         }
       } else if (is.list(result$uniProtKBCrossReferences)) {
         # Handle list format
-        for (ref in result$uniProtKBCrossReferences) {
-          if (is.list(ref) && !is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id)) {
-            kegg_id <- ref$id
+        for (i in seq_along(result$uniProtKBCrossReferences)) {
+          ref <- result$uniProtKBCrossReferences[[i]]
+
+          # Safe check for database == "KEGG"
+          if (is.list(ref) && !is.null(ref$database) && length(ref$database) == 1 &&
+              ref$database == "KEGG" && !is.null(ref$id)) {
+
+            kegg_id <- as.character(ref$id)
             pathway_name <- NA_character_
 
             # Extract pathway name from properties
-            if (!is.null(ref$properties) && length(ref$properties) > 0) {
-              for (prop in ref$properties) {
-                if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
-                  if (prop$key == "Description") pathway_name <- prop$value
+            if (!is.null(ref$properties) && is.list(ref$properties) && length(ref$properties) > 0) {
+              for (j in seq_along(ref$properties)) {
+                prop <- ref$properties[[j]]
+                if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value) &&
+                    length(prop$key) == 1 && length(prop$value) == 1) {
+
+                  if (prop$key == "Description") pathway_name <- as.character(prop$value)
                 }
               }
             }
@@ -510,7 +503,7 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
 
     # Return the extracted information
     list(
-      accession = accession,
+      accession = primaryAccession,
       entry_name = entry_name,
       gene_names = gene_names,
       go_terms = go_terms,
