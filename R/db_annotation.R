@@ -469,9 +469,6 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE,
     }
   } else {
     # Create new annotation
-    # Start transaction
-    DBI::dbExecute(con, "BEGIN TRANSACTION")
-
     tryCatch({
       # Add annotation
       current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
@@ -506,12 +503,7 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE,
 
       if (verbose) message("Created new annotation with ID ", annotation_id)
 
-      # Commit the transaction
-      DBI::dbExecute(con, "COMMIT")
-
     }, error = function(e) {
-      # Rollback on error
-      DBI::dbExecute(con, "ROLLBACK")
       warning("Error creating annotation: ", e$message)
       return(NULL)
     })
@@ -522,9 +514,6 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE,
   if (!is.null(annotation_id) && !is.null(uniprot_info$go_terms) &&
       is.data.frame(uniprot_info$go_terms) && nrow(uniprot_info$go_terms) > 0) {
     if (verbose) message("Adding ", nrow(uniprot_info$go_terms), " GO terms")
-
-    # Start transaction for GO terms
-    DBI::dbExecute(con, "BEGIN TRANSACTION")
 
     tryCatch({
       for (i in 1:nrow(uniprot_info$go_terms)) {
@@ -560,14 +549,9 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE,
         go_count <- go_count + result
       }
 
-      # Commit the transaction
-      DBI::dbExecute(con, "COMMIT")
-
       if (verbose) message("Successfully inserted ", go_count, " GO terms")
 
     }, error = function(e) {
-      # Rollback on error
-      DBI::dbExecute(con, "ROLLBACK")
       warning("Error inserting GO terms: ", e$message)
     })
   } else if (verbose) {
@@ -579,9 +563,6 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE,
   if (!is.null(annotation_id) && !is.null(uniprot_info$kegg_refs) &&
       is.data.frame(uniprot_info$kegg_refs) && nrow(uniprot_info$kegg_refs) > 0) {
     if (verbose) message("Adding ", nrow(uniprot_info$kegg_refs), " KEGG references")
-
-    # Start transaction for KEGG references
-    DBI::dbExecute(con, "BEGIN TRANSACTION")
 
     tryCatch({
       for (i in 1:nrow(uniprot_info$kegg_refs)) {
@@ -609,14 +590,9 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE,
         kegg_count <- kegg_count + result
       }
 
-      # Commit the transaction
-      DBI::dbExecute(con, "COMMIT")
-
       if (verbose) message("Successfully inserted ", kegg_count, " KEGG references")
 
     }, error = function(e) {
-      # Rollback on error
-      DBI::dbExecute(con, "ROLLBACK")
       warning("Error inserting KEGG references: ", e$message)
     })
   } else if (verbose) {
