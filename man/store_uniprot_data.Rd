@@ -4,7 +4,7 @@
 \alias{store_uniprot_data}
 \title{Store UniProt data in cache}
 \usage{
-store_uniprot_data(con, accession, response)
+store_uniprot_data(con, accession, response, debug = FALSE)
 }
 \arguments{
 \item{con}{A database connection object}

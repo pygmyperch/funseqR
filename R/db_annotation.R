@@ -68,32 +68,88 @@ get_cached_uniprot_data <- function(con, accession) {
 #' @param response The UniProt API response
 #' @return Invisible NULL
 #' @export
-store_uniprot_data <- function(con, accession, response) {
-  # Skip if there was an error
-  if (!is.na(response$error)) {
+store_uniprot_data <- function(con, accession, response, debug = FALSE) {
+  if (debug) {
+    message("Attempting to store data for accession: ", accession)
+    message("Response structure: ", paste(names(response), collapse=", "))
+    if (!is.null(response$status_code)) {
+      message("Response status code: ", response$status_code)
+    }
+    if (!is.null(response$content)) {
+      message("Content length: ", nchar(response$content))
+    } else {
+      message("Content is NULL")
+    }
+  }
+
+  # Check if the database is connected
+  if (!DBI::dbIsValid(con)) {
+    if (debug) message("Database connection is invalid")
     return(invisible(NULL))
   }
 
-  # Convert data to JSON
-  json_data <- response$content
-
-  # Check if this accession already exists
-  check_query <- "SELECT cache_id FROM uniprot_cache WHERE accession = ?"
-  check_result <- DBI::dbGetQuery(con, check_query, params = list(accession))
-
-  current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-
-  if (nrow(check_result) > 0) {
-    # Update existing record
-    update_query <- "UPDATE uniprot_cache SET response_json = ?, retrieval_date = ? WHERE accession = ?"
-    DBI::dbExecute(con, update_query, params = list(json_data, current_time, accession))
-  } else {
-    # Insert new record
-    insert_query <- "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)"
-    DBI::dbExecute(con, insert_query, params = list(accession, json_data, current_time))
+  # Skip if there's an error
+  if (!is.null(response$error) && !is.na(response$error)) {
+    if (debug) message("Skipping due to error: ", response$error)
+    return(invisible(NULL))
   }
 
-  return(invisible(NULL))
+  # Make sure we have content to store
+  json_data <- NULL
+  if (!is.null(response$content) && !is.na(response$content) && nchar(response$content) > 0) {
+    json_data <- response$content
+    if (debug) message("Using response content as JSON data")
+  } else if (is.list(response$data)) {
+    # Try to convert data to JSON
+    tryCatch({
+      json_data <- jsonlite::toJSON(response$data, auto_unbox = TRUE)
+      if (debug) message("Converted response data to JSON")
+    }, error = function(e) {
+      if (debug) message("Error converting data to JSON: ", e$message)
+      return(invisible(NULL))
+    })
+  }
+
+  if (is.null(json_data)) {
+    if (debug) message("No valid JSON data available to store")
+    return(invisible(NULL))
+  }
+
+  # Verify the JSON is valid
+  tryCatch({
+    # Try parsing to validate
+    jsonlite::fromJSON(json_data)
+    if (debug) message("JSON validation successful")
+  }, error = function(e) {
+    if (debug) message("Invalid JSON data: ", e$message)
+    return(invisible(NULL))
+  })
+
+  # Check if this accession already exists
+  tryCatch({
+    check_query <- "SELECT cache_id FROM uniprot_cache WHERE accession = ?"
+    check_result <- DBI::dbGetQuery(con, check_query, params = list(accession))
+
+    current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+
+    if (nrow(check_result) > 0) {
+      # Update existing record
+      if (debug) message("Updating existing cache record")
+      update_query <- "UPDATE uniprot_cache SET response_json = ?, retrieval_date = ? WHERE accession = ?"
+      DBI::dbExecute(con, update_query, params = list(json_data, current_time, accession))
+    } else {
+      # Insert new record
+      if (debug) message("Inserting new cache record")
+      insert_query <- "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)"
+      DBI::dbExecute(con, insert_query, params = list(accession, json_data, current_time))
+    }
+
+    if (debug) message("Successfully stored in cache")
+    return(invisible(NULL))
+  }, error = function(e) {
+    if (debug) message("Database error: ", e$message)
+    return(invisible(NULL))
+  })
 }
 
 #' Test connection to the UniProt API using working endpoints
@@ -717,6 +773,8 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   uniprot_data <- list()
   cache_hits <- 0
   api_calls <- 0
+  cache_storage_attempts <- 0
+  cache_storage_success <- 0
 
   for (i in seq_along(hit_accessions)) {
     acc <- hit_accessions[i]
@@ -750,8 +808,35 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
         api_calls <- api_calls + 1
 
         # Store in cache if requested
-        if (store_cache && is.null(response$error)) {
-          store_uniprot_data(con, acc, response)
+        if (store_cache) {
+          cache_storage_attempts <- cache_storage_attempts + 1
+          # Check for successful API call (status 200)
+          if (is.null(response$error) || is.na(response$error)) {
+            tryCatch({
+              store_uniprot_data(con, acc, response, enable_debug)
+              cache_storage_success <- cache_storage_success + 1
+
+              # Verify storage worked
+              if (enable_debug) {
+                verify <- DBI::dbGetQuery(
+                  con,
+                  "SELECT COUNT(*) as count FROM uniprot_cache WHERE accession = ?",
+                  params = list(acc)
+                )
+                if (verify$count > 0) {
+                  message("Verified cache storage for ", acc, " - Success!")
+                } else {
+                  message("Cache verification FAILED for ", acc, " - not found in database")
+                }
+              }
+            }, error = function(e) {
+              if (verbose && enable_debug) {
+                message("Error storing ", acc, " in cache: ", e$message)
+              }
+            })
+          } else if (verbose && enable_debug) {
+            message("Not storing ", acc, " in cache due to error: ", response$error)
+          }
         }
 
         # Extract information
@@ -775,8 +860,35 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
       api_calls <- api_calls + 1
 
       # Store in cache if requested
-      if (store_cache && is.null(response$error)) {
-        store_uniprot_data(con, acc, response)
+      if (store_cache) {
+        cache_storage_attempts <- cache_storage_attempts + 1
+        # Check for successful API call (status 200)
+        if (is.null(response$error) || is.na(response$error)) {
+          tryCatch({
+            store_uniprot_data(con, acc, response, enable_debug)
+            cache_storage_success <- cache_storage_success + 1
+
+            # Verify storage worked
+            if (enable_debug) {
+              verify <- DBI::dbGetQuery(
+                con,
+                "SELECT COUNT(*) as count FROM uniprot_cache WHERE accession = ?",
+                params = list(acc)
+              )
+              if (verify$count > 0) {
+                message("Verified cache storage for ", acc, " - Success!")
+              } else {
+                message("Cache verification FAILED for ", acc, " - not found in database")
+              }
+            }
+          }, error = function(e) {
+            if (verbose && enable_debug) {
+              message("Error storing ", acc, " in cache: ", e$message)
+            }
+          })
+        } else if (verbose && enable_debug) {
+          message("Not storing ", acc, " in cache due to error: ", response$error)
+        }
       }
 
       # Extract information
@@ -802,6 +914,10 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   if (verbose) {
     message("UniProt data retrieval complete: ", cache_hits, " from cache, ",
             api_calls, " from API")
+    if (store_cache) {
+      message("Cache storage stats: ", cache_storage_success, " successes out of ",
+              cache_storage_attempts, " attempts")
+    }
   }
 
   # Extract information from UniProt responses
@@ -931,6 +1047,42 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
     if (use_cache || store_cache) {
       cache_stats <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS count FROM uniprot_cache")$count
       message("UniProt cache now contains ", cache_stats, " entries")
+
+      # Debug one final time if no cache entries were created
+      if (store_cache && cache_stats == 0 && api_calls > 0) {
+        message("\nDEBUG: Cache storage issue detected!")
+
+        # Try to diagnose cache table
+        table_exists <- "uniprot_cache" %in% DBI::dbListTables(con)
+        message("Cache table exists: ", table_exists)
+
+        if (table_exists) {
+          # Check table structure
+          structure <- DBI::dbGetQuery(con, "PRAGMA table_info(uniprot_cache)")
+          message("Table structure has ", nrow(structure), " columns")
+
+          # Try one more direct insertion
+          test_acc <- hit_accessions[1]
+          message("Testing direct insertion for ", test_acc)
+
+          tryCatch({
+            DBI::dbExecute(
+              con,
+              "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)",
+              params = list(test_acc, "{'test': true}", format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+            )
+
+            verify <- DBI::dbGetQuery(
+              con,
+              "SELECT COUNT(*) as count FROM uniprot_cache WHERE accession = ?",
+              params = list(test_acc)
+            )
+            message("Direct insertion test result: ", verify$count, " rows")
+          }, error = function(e) {
+            message("Direct insertion failed: ", e$message)
+          })
+        }
+      }
     }
 
     if (offline_mode) {
