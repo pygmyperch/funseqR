@@ -723,7 +723,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   }
 
   # Process in online or offline mode
-  if (debug_accessions && length(debug_accessions) > 0) {
+  if (!is.null(debug_accessions) && length(debug_accessions) > 0) {
     if (verbose) message("Debug mode enabled for accessions: ", paste(debug_accessions, collapse = ", "))
   }
 
