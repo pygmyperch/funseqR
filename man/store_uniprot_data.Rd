@@ -2,22 +2,22 @@
 % Please edit documentation in R/db_annotation.R
 \name{store_uniprot_data}
 \alias{store_uniprot_data}
-\title{Enhanced function to store UniProt API responses in database cache}
+\title{Store UniProt data in cache}
 \usage{
 store_uniprot_data(con, accession, response, debug = FALSE)
 }
 \arguments{
-\item{con}{Database connection object}
+\item{con}{A database connection object}
 
-\item{accession}{UniProt accession number}
+\item{accession}{The UniProt accession number}
 
-\item{response}{API response (can be various formats)}
+\item{response}{The UniProt API response (can be in various formats)}
 
-\item{debug}{Print debug information}
+\item{debug}{If TRUE, print debugging information}
 }
 \value{
 TRUE if storage successful, FALSE otherwise
 }
 \description{
-Enhanced function to store UniProt API responses in database cache
+Store UniProt data in cache
 }
