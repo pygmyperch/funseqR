@@ -496,7 +496,9 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
   if (is.list(entry) && !is.null(entry$uniProtKBCrossReferences) &&
       is.list(entry$uniProtKBCrossReferences) && length(entry$uniProtKBCrossReferences) > 0) {
 
-    if (debug) message("Processing ", length(entry$uniProtKBCrossReferences), " cross-references")
+    if (debug) {
+      message("Processing ", length(entry$uniProtKBCrossReferences), " cross-references")
+    }
 
     go_terms <- data.frame(
       go_id = character(0),
@@ -516,24 +518,55 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
     for (i in seq_along(entry$uniProtKBCrossReferences)) {
       ref <- entry$uniProtKBCrossReferences[[i]]
 
+      # Debug the reference type
+      if (debug) {
+        ref_type <- "unknown"
+        if (is.list(ref) && !is.null(ref$database)) {
+          ref_type <- ref$database
+        }
+        message("Reference #", i, " type: ", ref_type)
+      }
+
       # Skip if not a valid reference
       if (!is.list(ref) || is.null(ref$database)) {
+        if (debug) message("Skipping invalid reference")
         next
       }
 
       # Process GO terms
       if (ref$database == "GO" && !is.null(ref$id)) {
+        if (debug) message("Processing GO reference: ", ref$id)
+
         go_id <- ref$id
         go_term <- NA_character_
         go_evidence <- NA_character_
+
+        # Debug the properties structure
+        if (debug && !is.null(ref$properties)) {
+          message("Properties structure for GO term:")
+          print(str(ref$properties))
+        }
 
         # Extract properties
         if (!is.null(ref$properties) && is.list(ref$properties) && length(ref$properties) > 0) {
           for (j in seq_along(ref$properties)) {
             prop <- ref$properties[[j]]
+
+            if (debug) {
+              prop_key <- if (!is.null(prop$key)) prop$key else "NULL"
+              prop_value <- if (!is.null(prop$value)) prop$value else "NULL"
+              message("Property #", j, ": ", prop_key, " = ", prop_value)
+            }
+
             if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
-              if (prop$key == "GoTerm") go_term <- prop$value
-              if (prop$key == "GoEvidenceType") go_evidence <- prop$value
+              if (prop$key == "GoTerm") {
+                go_term <- prop$value
+                if (debug) message("Found GO term: ", go_term)
+              }
+              if (prop$key == "GoEvidenceType") {
+                go_evidence <- prop$value
+                if (debug) message("Found GO evidence: ", go_evidence)
+              }
             }
           }
         }
@@ -544,6 +577,7 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
           go_category <- NA_character_
           if (nchar(go_term) >= 1) {
             go_category <- substr(go_term, 1, 1)
+            if (debug) message("Extracted GO category: ", go_category)
           }
 
           new_row <- data.frame(
@@ -556,21 +590,40 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
           go_terms <- rbind(go_terms, new_row)
 
           if (debug) message("Added GO term: ", go_id, " - ", go_term)
+        } else {
+          if (debug) message("Skipping GO term (no term value found)")
         }
       }
 
       # Process KEGG references
       if (ref$database == "KEGG" && !is.null(ref$id)) {
+        if (debug) message("Processing KEGG reference: ", ref$id)
+
         kegg_id <- ref$id
         pathway_name <- NA_character_
+
+        # Debug the properties structure
+        if (debug && !is.null(ref$properties)) {
+          message("Properties structure for KEGG reference:")
+          print(str(ref$properties))
+        }
 
         # Extract properties
         if (!is.null(ref$properties) && is.list(ref$properties) && length(ref$properties) > 0) {
           for (j in seq_along(ref$properties)) {
             prop <- ref$properties[[j]]
+
+            if (debug) {
+              prop_key <- if (!is.null(prop$key)) prop$key else "NULL"
+              prop_value <- if (!is.null(prop$value)) prop$value else "NULL"
+              message("Property #", j, ": ", prop_key, " = ", prop_value)
+            }
+
             if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
-              if (prop$key == "Description" || prop$key == "PathwayName")
+              if (prop$key == "Description" || prop$key == "PathwayName") {
                 pathway_name <- prop$value
+                if (debug) message("Found pathway name: ", pathway_name)
+              }
             }
           }
         }
@@ -596,7 +649,15 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
               nrow(kegg_refs), " KEGG references")
     }
   } else if (debug) {
-    message("No cross-references found in entry")
+    message("No cross-references found in entry or structure unexpected")
+    # Debug what we're seeing in the entry
+    if (is.list(entry)) {
+      message("Entry fields: ", paste(names(entry), collapse = ", "))
+      if ("uniProtKBCrossReferences" %in% names(entry)) {
+        message("uniProtKBCrossReferences type: ", class(entry$uniProtKBCrossReferences)[1])
+        message("uniProtKBCrossReferences length: ", length(entry$uniProtKBCrossReferences))
+      }
+    }
   }
 
   return(result)
