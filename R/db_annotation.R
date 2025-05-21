@@ -1234,30 +1234,41 @@ query_uniprot_api <- function(accession,
     # Get raw content as text
     raw_content <- httr::content(response, "text", encoding = "UTF-8")
 
-    # Save raw content for debugging
-    if (debug) {
-      debug_dir <- "uniprot_debug"
-      if (!dir.exists(debug_dir)) dir.create(debug_dir)
-      debug_file <- file.path(debug_dir, paste0("uniprot_", accession, "_raw.json"))
-      writeLines(raw_content, debug_file)
-      message("Saved raw JSON response to ", debug_file)
-    }
-
-    # Update result with content
-    result$content <- raw_content
-
-    # Parse JSON
-    parsed_data <- jsonlite::fromJSON(raw_content, flatten = TRUE)
-    result$data <- parsed_data
-
-    if (debug) {
-      message("Successfully parsed JSON")
-      if (!is.null(parsed_data$results) && length(parsed_data$results) > 0) {
-        message("First result has these fields: ",
-                paste(names(parsed_data$results[[1]]), collapse = ", "))
-      } else {
-        message("No results found in parsed data")
+    # Important: check if raw_content is not NULL or NA and has content
+    if (!is.null(raw_content) && !is.na(raw_content) && nchar(raw_content) > 0) {
+      # Save raw content for debugging
+      if (debug) {
+        debug_dir <- "uniprot_debug"
+        if (!dir.exists(debug_dir)) dir.create(debug_dir)
+        debug_file <- file.path(debug_dir, paste0("uniprot_", accession, "_raw.json"))
+        writeLines(raw_content, debug_file)
+        message("Saved raw JSON response to ", debug_file)
       }
+
+      # Update result with content - this was missing in the original function
+      result$content <- raw_content
+
+      # Parse JSON
+      tryCatch({
+        parsed_data <- jsonlite::fromJSON(raw_content, flatten = TRUE)
+        result$data <- parsed_data
+
+        if (debug) {
+          message("Successfully parsed JSON")
+          if (!is.null(parsed_data$results) && length(parsed_data$results) > 0) {
+            message("First result has these fields: ",
+                    paste(names(parsed_data$results[[1]]), collapse = ", "))
+          } else {
+            message("No results found in parsed data")
+          }
+        }
+      }, error = function(e) {
+        if (debug) message("Error parsing JSON: ", e$message)
+        result$error <- paste("Error parsing JSON:", e$message)
+      })
+    } else {
+      if (debug) message("Empty or NULL response content")
+      result$error <- "Empty response content"
     }
 
     return(result)
@@ -1265,14 +1276,13 @@ query_uniprot_api <- function(accession,
   }, error = function(e) {
     if (debug) {
       message("Error processing response: ", e$message)
-      if (exists("raw_content") && !is.null(raw_content)) {
-        message("Raw content (first 200 chars): ", substr(raw_content, 1, 200))
-      }
     }
 
     result$error <- paste("Error processing response:", e$message)
     return(result)
   })
+
+  return(result)  # Final return in case all else fails
 }
 
 #' Get annotations from the database
