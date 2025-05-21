@@ -672,7 +672,7 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE,
 #' @param delay Delay between operations in seconds. Default is 1.
 #' @param offline_mode If TRUE, skips UniProt API and uses basic annotations. Default is FALSE.
 #' @param use_cache If TRUE, uses cached API responses if available. Default is TRUE.
-#' @param store_cache If TRUE, stores API responses in the database. Default is FALSE.
+#' @param store_cache If TRUE, stores API responses in the database. Default is TRUE.
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #' @param debug_accessions Vector of accessions to debug. Default is NULL.
 #'
@@ -758,6 +758,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   need_api <- !offline_mode &&
     (length(setdiff(hit_accessions, cached_accessions)) > 0) &&
     (!use_cache || store_cache)
+
   if (need_api) {
     if (verbose) message("Testing UniProt API connection...")
     check_uniprot_connection(verbose = verbose)
@@ -767,31 +768,6 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
     } else if (use_cache && !store_cache && length(cached_accessions) > 0) {
       if (verbose) message("Using cache only - skipping API connection test")
     }
-  }
-
-  # Add a specific test for API response format
-  if (verbose && need_api) {
-    message("Testing specific API call for debugging...")
-    test_acc <- "P70076" # Use the first accession from your blast results
-    test_response <- query_uniprot_api(test_acc, debug = TRUE)
-    message("Test API call complete")
-    message("Response structure: ", paste(names(test_response), collapse=", "))
-    if (!is.null(test_response$content)) {
-      message("Content length: ", nchar(test_response$content))
-      message("Content type: ", class(test_response$content))
-      message("First 50 chars: ", substr(test_response$content, 1, 50))
-    }
-
-    message("Testing cache storage...")
-    store_uniprot_data(con, test_acc, test_response, debug = TRUE)
-
-    # Check if it worked
-    verify <- DBI::dbGetQuery(
-      con,
-      "SELECT COUNT(*) as count FROM uniprot_cache WHERE accession = ?",
-      params = list(test_acc)
-    )
-    message("Cache verification: ", verify$count, " records for ", test_acc)
   }
 
   # Process all accessions
@@ -828,44 +804,32 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
           Sys.sleep(delay)
         }
 
-        # Query the API
-        response <- query_uniprot_api(acc, debug = enable_debug)
+        # Use the new direct API function
+        info <- fetch_uniprot_data(acc, debug = enable_debug)
         api_calls <- api_calls + 1
 
-        # Store in cache if requested
+        # Store the response directly in memory
+        uniprot_data[[acc]] <- info
+
+        # Store in database cache if requested
         if (store_cache) {
           cache_storage_attempts <- cache_storage_attempts + 1
-          # Check for successful API call (status 200)
-          if (is.null(response$error) || is.na(response$error)) {
-            tryCatch({
-              store_uniprot_data(con, acc, response, enable_debug)
-              cache_storage_success <- cache_storage_success + 1
+          # Create a simplified response to store
+          json_data <- jsonlite::toJSON(info, auto_unbox = TRUE)
 
-              # Verify storage worked
-              if (enable_debug) {
-                verify <- DBI::dbGetQuery(
-                  con,
-                  "SELECT COUNT(*) as count FROM uniprot_cache WHERE accession = ?",
-                  params = list(acc)
-                )
-                if (verify$count > 0) {
-                  message("Verified cache storage for ", acc, " - Success!")
-                } else {
-                  message("Cache verification FAILED for ", acc, " - not found in database")
-                }
-              }
-            }, error = function(e) {
-              if (verbose && enable_debug) {
-                message("Error storing ", acc, " in cache: ", e$message)
-              }
-            })
-          } else if (verbose && enable_debug) {
-            message("Not storing ", acc, " in cache due to error: ", response$error)
-          }
+          tryCatch({
+            current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+            insert_query <- "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)"
+            DBI::dbExecute(con, insert_query, params = list(acc, json_data, current_time))
+            cache_storage_success <- cache_storage_success + 1
+
+            if (enable_debug) message("Successfully stored ", acc, " in cache")
+          }, error = function(e) {
+            if (verbose && enable_debug) {
+              message("Error storing ", acc, " in cache: ", e$message)
+            }
+          })
         }
-
-        # Extract information
-        uniprot_data[[acc]] <- extract_uniprot_info(response, debug = enable_debug)
       }
       else {
         # In offline mode, create empty info
@@ -880,44 +844,32 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
         Sys.sleep(delay)
       }
 
-      # Query the API
-      response <- query_uniprot_api(acc, debug = enable_debug)
+      # Use the new direct API function
+      info <- fetch_uniprot_data(acc, debug = enable_debug)
       api_calls <- api_calls + 1
 
-      # Store in cache if requested
+      # Store the response directly in memory
+      uniprot_data[[acc]] <- info
+
+      # Store in database cache if requested
       if (store_cache) {
         cache_storage_attempts <- cache_storage_attempts + 1
-        # Check for successful API call (status 200)
-        if (is.null(response$error) || is.na(response$error)) {
-          tryCatch({
-            store_uniprot_data(con, acc, response, enable_debug)
-            cache_storage_success <- cache_storage_success + 1
+        # Create a simplified response to store
+        json_data <- jsonlite::toJSON(info, auto_unbox = TRUE)
 
-            # Verify storage worked
-            if (enable_debug) {
-              verify <- DBI::dbGetQuery(
-                con,
-                "SELECT COUNT(*) as count FROM uniprot_cache WHERE accession = ?",
-                params = list(acc)
-              )
-              if (verify$count > 0) {
-                message("Verified cache storage for ", acc, " - Success!")
-              } else {
-                message("Cache verification FAILED for ", acc, " - not found in database")
-              }
-            }
-          }, error = function(e) {
-            if (verbose && enable_debug) {
-              message("Error storing ", acc, " in cache: ", e$message)
-            }
-          })
-        } else if (verbose && enable_debug) {
-          message("Not storing ", acc, " in cache due to error: ", response$error)
-        }
+        tryCatch({
+          current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+          insert_query <- "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)"
+          DBI::dbExecute(con, insert_query, params = list(acc, json_data, current_time))
+          cache_storage_success <- cache_storage_success + 1
+
+          if (enable_debug) message("Successfully stored ", acc, " in cache")
+        }, error = function(e) {
+          if (verbose && enable_debug) {
+            message("Error storing ", acc, " in cache: ", e$message)
+          }
+        })
       }
-
-      # Extract information
-      uniprot_data[[acc]] <- extract_uniprot_info(response, debug = enable_debug)
     }
     else {
       # In offline mode, create empty info
@@ -945,23 +897,8 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
     }
   }
 
-  # Extract information from UniProt responses
-  if (verbose) message("Extracting information from UniProt responses...")
-
-  valid_info <- list()
-  for (acc in names(uniprot_data)) {
-    enable_debug <- !is.null(debug_accessions) && acc %in% debug_accessions
-    if (enable_debug) {
-      if (is.list(uniprot_data[[acc]]) && (is.null(uniprot_data[[acc]]$error) || is.na(uniprot_data[[acc]]$error))) {
-        message("Processing data for ", acc)
-      } else if (is.list(uniprot_data[[acc]]) && !is.null(uniprot_data[[acc]]$error) && !is.na(uniprot_data[[acc]]$error)) {
-        message("Error in UniProt data: ", uniprot_data[[acc]]$error)
-      }
-    }
-    valid_info[[acc]] <- uniprot_data[[acc]]
-  }
-
-  if (verbose) message("Successfully extracted information for ", length(valid_info), " of ", length(hit_accessions), " accessions.")
+  # No need for separate extraction since we're using direct annotation objects
+  if (verbose) message("Successfully extracted information for ", length(uniprot_data), " of ", length(hit_accessions), " accessions.")
 
   # Get BLAST results to annotate
   blast_results_query <- "
@@ -1008,11 +945,11 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
         blast_result_id <- current_batch$blast_result_id[i]
         hit_accession <- current_batch$hit_accession[i]
 
-        # Store annotation using valid_info
+        # Store annotation using the data we already have
         annotation_id <- store_annotation(
           con,
           blast_result_id,
-          valid_info[[hit_accession]],
+          uniprot_data[[hit_accession]],
           verbose = (!is.null(debug_accessions) && hit_accession %in% debug_accessions),
           update_existing = TRUE
         )
@@ -1073,40 +1010,9 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
       cache_stats <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS count FROM uniprot_cache")$count
       message("UniProt cache now contains ", cache_stats, " entries")
 
-      # Debug one final time if no cache entries were created
-      if (store_cache && cache_stats == 0 && api_calls > 0) {
-        message("\nDEBUG: Cache storage issue detected!")
-
-        # Try to diagnose cache table
-        table_exists <- "uniprot_cache" %in% DBI::dbListTables(con)
-        message("Cache table exists: ", table_exists)
-
-        if (table_exists) {
-          # Check table structure
-          structure <- DBI::dbGetQuery(con, "PRAGMA table_info(uniprot_cache)")
-          message("Table structure has ", nrow(structure), " columns")
-
-          # Try one more direct insertion
-          test_acc <- hit_accessions[1]
-          message("Testing direct insertion for ", test_acc)
-
-          tryCatch({
-            DBI::dbExecute(
-              con,
-              "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)",
-              params = list(test_acc, "{'test': true}", format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
-            )
-
-            verify <- DBI::dbGetQuery(
-              con,
-              "SELECT COUNT(*) as count FROM uniprot_cache WHERE accession = ?",
-              params = list(test_acc)
-            )
-            message("Direct insertion test result: ", verify$count, " rows")
-          }, error = function(e) {
-            message("Direct insertion failed: ", e$message)
-          })
-        }
+      # Show new cache entries
+      if (cache_stats > 0 && cache_storage_success > 0) {
+        message("Successfully created ", cache_storage_success, " new cache entries")
       }
     }
 
@@ -1120,13 +1026,14 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   list(
     blast_param_id = blast_param_id,
     unique_accessions = length(hit_accessions),
-    successful_extractions = length(valid_info),
+    successful_extractions = length(uniprot_data),
     annotated_results = successful_annotations,
     go_terms = go_count,
     kegg_refs = kegg_count,
     offline_mode = offline_mode,
     cache_used = use_cache,
-    cache_stored = store_cache
+    cache_stored = store_cache,
+    cache_stored_count = cache_storage_success
   )
 }
 
@@ -1746,4 +1653,244 @@ read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
     if (debug) message("Error parsing JSON file: ", e$message)
     return(create_empty_annotation(accession))
   })
+}
+
+#' Fetch and Process UniProt Data for a Protein Accession
+#'
+#' This function queries the UniProt REST API for protein information,
+#' extracts relevant data, and saves the JSON response to a file for caching.
+#' It directly returns a structured annotation object ready for database storage.
+#'
+#' @param accession The UniProt accession number to query
+#' @param debug If TRUE, print detailed debugging information
+#' @param retry_max Maximum number of retry attempts. Default is 3.
+#' @param retry_delay Delay in seconds between retries. Default is 2.
+#'
+#' @return A list containing extracted protein information with these elements:
+#'   \item{accession}{UniProt accession number}
+#'   \item{entry_name}{UniProt entry name/ID}
+#'   \item{gene_names}{Semicolon-separated list of gene names}
+#'   \item{go_terms}{Data frame of GO terms}
+#'   \item{kegg_refs}{Data frame of KEGG references}
+#'
+#' @examples
+#' # Fetch data for a zebrafish protein
+#' info <- fetch_uniprot_data("Q6DGQ8")
+#'
+#' @export
+fetch_uniprot_data <- function(accession, debug = FALSE, retry_max = 3, retry_delay = 2) {
+  # Construct URL
+  base_url <- "https://rest.uniprot.org/uniprotkb/search"
+  fields <- "accession,id,gene_names,go,xref_kegg,organism_name,protein_name"
+  query <- paste0("accession:", accession)
+  url <- paste0(base_url, "?query=", URLencode(query),
+                "&fields=", URLencode(fields), "&format=json")
+
+  if (debug) message("Fetching data from: ", url)
+
+  # Initialize retry counter
+  retry_count <- 0
+
+  # Create directory for JSON files if it doesn't exist
+  debug_dir <- "uniprot_debug"
+  if (!dir.exists(debug_dir)) dir.create(debug_dir)
+
+  # Retry loop
+  while(retry_count <= retry_max) {
+    # Add delay for retries
+    if (retry_count > 0) {
+      if (debug) message("Retry attempt ", retry_count, " of ", retry_max)
+      Sys.sleep(retry_delay)
+    }
+
+    # Use httr to get the response
+    tryCatch({
+      response <- httr::GET(url)
+      status <- httr::status_code(response)
+
+      if (debug) message("Response status: ", status)
+
+      if (status == 200) {
+        # Get content as text
+        content_text <- httr::content(response, "text", encoding = "UTF-8")
+
+        if (debug) {
+          message("Content length: ", nchar(content_text))
+          message("First 50 chars: ", substr(content_text, 1, 50))
+        }
+
+        # Create debug/cache file
+        json_file <- file.path(debug_dir, paste0("uniprot_", accession, ".json"))
+        writeLines(content_text, json_file)
+
+        if (debug) message("Saved content to: ", json_file)
+
+        # Try to parse it
+        tryCatch({
+          parsed <- jsonlite::fromJSON(content_text, flatten = TRUE)
+
+          # Extract info
+          info <- create_empty_annotation(accession)
+
+          if (!is.null(parsed$results) && length(parsed$results) > 0) {
+            entry <- parsed$results[[1]]
+
+            # Basic info
+            if (!is.null(entry$primaryAccession))
+              info$accession <- entry$primaryAccession
+
+            if (!is.null(entry$uniProtkbId))
+              info$entry_name <- entry$uniProtkbId
+
+            # Gene names
+            if (!is.null(entry$genes) && length(entry$genes) > 0) {
+              gene_names <- c()
+
+              for (i in seq_along(entry$genes)) {
+                gene <- entry$genes[[i]]
+                if (is.list(gene) && !is.null(gene$geneName) &&
+                    !is.null(gene$geneName$value)) {
+                  gene_names <- c(gene_names, gene$geneName$value)
+                }
+              }
+
+              if (length(gene_names) > 0) {
+                info$gene_names <- paste(gene_names, collapse = ";")
+              }
+            }
+
+            # GO terms
+            if (!is.null(entry$uniProtKBCrossReferences) &&
+                length(entry$uniProtKBCrossReferences) > 0) {
+
+              # Count GO terms and KEGG refs to pre-allocate
+              go_count <- 0
+              kegg_count <- 0
+
+              for (ref in entry$uniProtKBCrossReferences) {
+                if (!is.null(ref$database)) {
+                  if (ref$database == "GO") go_count <- go_count + 1
+                  if (ref$database == "KEGG") kegg_count <- kegg_count + 1
+                }
+              }
+
+              # Create data frames
+              go_terms <- data.frame(
+                go_id = character(go_count),
+                go_term = character(go_count),
+                go_category = character(go_count),
+                go_evidence = character(go_count),
+                stringsAsFactors = FALSE
+              )
+
+              kegg_refs <- data.frame(
+                kegg_id = character(kegg_count),
+                pathway_name = character(kegg_count),
+                stringsAsFactors = FALSE
+              )
+
+              # Fill data frames
+              go_idx <- 1
+              kegg_idx <- 1
+
+              for (i in seq_along(entry$uniProtKBCrossReferences)) {
+                ref <- entry$uniProtKBCrossReferences[[i]]
+
+                # Process GO terms
+                if (!is.null(ref$database) && ref$database == "GO" && !is.null(ref$id)) {
+                  go_id <- ref$id
+                  go_term <- NA_character_
+                  go_evidence <- NA_character_
+
+                  if (!is.null(ref$properties) && length(ref$properties) > 0) {
+                    for (j in seq_along(ref$properties)) {
+                      prop <- ref$properties[[j]]
+                      if (!is.null(prop$key) && !is.null(prop$value)) {
+                        if (prop$key == "GoTerm") go_term <- prop$value
+                        if (prop$key == "GoEvidenceType") go_evidence <- prop$value
+                      }
+                    }
+                  }
+
+                  if (!is.na(go_term) && go_idx <= go_count) {
+                    go_terms[go_idx, ] <- list(
+                      go_id,
+                      go_term,
+                      substr(go_term, 1, 1),
+                      go_evidence
+                    )
+                    go_idx <- go_idx + 1
+                  }
+                }
+
+                # Process KEGG references
+                if (!is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id) &&
+                    kegg_idx <= kegg_count) {
+
+                  kegg_id <- ref$id
+                  pathway_name <- NA_character_
+
+                  if (!is.null(ref$properties) && length(ref$properties) > 0) {
+                    for (j in seq_along(ref$properties)) {
+                      prop <- ref$properties[[j]]
+                      if (!is.null(prop$key) && !is.null(prop$value)) {
+                        if (prop$key == "Description") pathway_name <- prop$value
+                      }
+                    }
+                  }
+
+                  kegg_refs[kegg_idx, ] <- list(kegg_id, pathway_name)
+                  kegg_idx <- kegg_idx + 1
+                }
+              }
+
+              # Trim any unused rows
+              if (go_idx <= go_count) {
+                go_terms <- go_terms[1:(go_idx-1), , drop = FALSE]
+              }
+
+              if (kegg_idx <= kegg_count) {
+                kegg_refs <- kegg_refs[1:(kegg_idx-1), , drop = FALSE]
+              }
+
+              info$go_terms <- go_terms
+              info$kegg_refs <- kegg_refs
+            }
+          }
+
+          if (debug) {
+            message("Extracted ", nrow(info$go_terms), " GO terms and ",
+                    nrow(info$kegg_refs), " KEGG references")
+          }
+
+          return(info)
+
+        }, error = function(e) {
+          if (debug) message("Error parsing JSON: ", e$message)
+          # Failure to parse - increment retry counter
+          retry_count <- retry_count + 1
+          if (retry_count > retry_max) {
+            return(create_empty_annotation(accession))
+          }
+        })
+      } else {
+        if (debug) message("Request failed: ", status)
+        # Failed request - increment retry counter
+        retry_count <- retry_count + 1
+        if (retry_count > retry_max) {
+          return(create_empty_annotation(accession))
+        }
+      }
+    }, error = function(e) {
+      if (debug) message("HTTP request error: ", e$message)
+      # Network error - increment retry counter
+      retry_count <- retry_count + 1
+      if (retry_count > retry_max) {
+        return(create_empty_annotation(accession))
+      }
+    })
+  }
+
+  # If we reach here, all retries failed
+  return(create_empty_annotation(accession))
 }

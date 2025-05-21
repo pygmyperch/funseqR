@@ -35,7 +35,7 @@ annotate_blast_results(
 
 \item{use_cache}{If TRUE, uses cached API responses if available. Default is TRUE.}
 
-\item{store_cache}{If TRUE, stores API responses in the database. Default is FALSE.}
+\item{store_cache}{If TRUE, stores API responses in the database. Default is TRUE.}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 
