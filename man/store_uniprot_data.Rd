@@ -2,7 +2,7 @@
 % Please edit documentation in R/db_annotation.R
 \name{store_uniprot_data}
 \alias{store_uniprot_data}
-\title{Store UniProt data in cache}
+\title{Store UniProt data in cache with robust error handling}
 \usage{
 store_uniprot_data(con, accession, response, debug = FALSE)
 }
@@ -11,7 +11,7 @@ store_uniprot_data(con, accession, response, debug = FALSE)
 
 \item{accession}{The UniProt accession number}
 
-\item{response}{The UniProt API response (can be in various formats)}
+\item{response}{The UniProt API response}
 
 \item{debug}{If TRUE, print debugging information}
 }
@@ -19,5 +19,5 @@ store_uniprot_data(con, accession, response, debug = FALSE)
 TRUE if storage successful, FALSE otherwise
 }
 \description{
-Store UniProt data in cache
+Store UniProt data in cache with robust error handling
 }

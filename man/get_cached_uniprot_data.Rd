@@ -4,12 +4,14 @@
 \alias{get_cached_uniprot_data}
 \title{Get cached UniProt data}
 \usage{
-get_cached_uniprot_data(con, accession)
+get_cached_uniprot_data(con, accession, debug = FALSE)
 }
 \arguments{
 \item{con}{A database connection object}
 
 \item{accession}{The UniProt accession number}
+
+\item{debug}{If TRUE, print debugging information}
 }
 \value{
 The cached UniProt data or NULL if not found

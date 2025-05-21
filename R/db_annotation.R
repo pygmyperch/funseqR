@@ -34,139 +34,183 @@ ensure_uniprot_cache_table <- function(con, verbose = FALSE) {
 #'
 #' @param con A database connection object
 #' @param accession The UniProt accession number
+#' @param debug If TRUE, print debugging information
 #' @return The cached UniProt data or NULL if not found
 #' @export
-get_cached_uniprot_data <- function(con, accession) {
-  # Check if data exists in cache
-  cache_query <- "SELECT response_json FROM uniprot_cache WHERE accession = ?"
-  cache_result <- DBI::dbGetQuery(con, cache_query, params = list(accession))
-
-  if (nrow(cache_result) == 0) {
+get_cached_uniprot_data <- function(con, accession, debug = FALSE) {
+  if (is.null(con) || !DBI::dbIsValid(con)) {
+    if (debug) message("Invalid database connection")
     return(NULL)
   }
 
-  # Parse the JSON response
-  json_data <- cache_result$response_json[1]
-  data <- jsonlite::fromJSON(json_data, flatten = TRUE)
+  # Check if the table exists
+  tables <- DBI::dbListTables(con)
+  if (!"uniprot_cache" %in% tables) {
+    if (debug) message("UniProt cache table doesn't exist")
+    return(NULL)
+  }
 
-  # Create a response object
-  list(
-    accession = accession,
-    url = NA_character_,  # We don't store the URL
-    status_code = 200,    # Pretend it was a successful request
-    content = json_data,
-    data = data,
-    error = NA_character_,
-    from_cache = TRUE
-  )
+  # Check if data exists in cache
+  tryCatch({
+    cache_query <- "SELECT response_json FROM uniprot_cache WHERE accession = ?"
+    cache_result <- DBI::dbGetQuery(con, cache_query, params = list(accession))
+
+    if (nrow(cache_result) == 0 || is.null(cache_result$response_json)) {
+      if (debug) message("No cache entry found for ", accession)
+      return(NULL)
+    }
+
+    # Get the JSON text
+    json_data <- cache_result$response_json[1]
+
+    if (is.na(json_data) || nchar(json_data) == 0) {
+      if (debug) message("Cache entry for ", accession, " is empty")
+      return(NULL)
+    }
+
+    # Parse the JSON response
+    parsed_data <- NULL
+    tryCatch({
+      parsed_data <- jsonlite::fromJSON(json_data, flatten = TRUE)
+    }, error = function(e) {
+      if (debug) message("Error parsing JSON for ", accession, ": ", e$message)
+    })
+
+    if (is.null(parsed_data)) {
+      if (debug) message("Failed to parse JSON for ", accession)
+      return(NULL)
+    }
+
+    # Create a response object
+    return(list(
+      accession = accession,
+      url = NA_character_,
+      status_code = 200,
+      content = json_data,
+      data = parsed_data,
+      error = NA_character_,
+      from_cache = TRUE
+    ))
+  }, error = function(e) {
+    if (debug) message("Error retrieving cache data for ", accession, ": ", e$message)
+    return(NULL)
+  })
 }
 
-#' Store UniProt data in cache
+#' Store UniProt data in cache with robust error handling
 #'
 #' @param con A database connection object
 #' @param accession The UniProt accession number
-#' @param response The UniProt API response (can be in various formats)
+#' @param response The UniProt API response
 #' @param debug If TRUE, print debugging information
 #' @return TRUE if storage successful, FALSE otherwise
 #' @export
 store_uniprot_data <- function(con, accession, response, debug = FALSE) {
+  # Initialize json_data to a fallback value
+  json_data <- paste0('{"accession":"', accession, '","empty":true,"timestamp":"',
+                      format(Sys.time(), "%Y-%m-%d %H:%M:%S"), '"}')
+
   if (debug) {
     message("Attempting to store data for accession: ", accession)
-    message("Response type: ", class(response)[1])
   }
 
-  # Check database connection
-  if (!DBI::dbIsValid(con)) {
-    if (debug) message("Database connection is invalid")
+  # First check if the connection is valid
+  if (is.null(con) || !DBI::dbIsValid(con)) {
+    if (debug) message("Database connection is invalid or NULL")
     return(FALSE)
   }
 
-  # Handle NULL response
-  if (is.null(response)) {
-    if (debug) message("Response is NULL, creating empty entry")
-    json_data <- paste0('{"accession":"', accession, '","empty":true,"timestamp":"',
-                        format(Sys.time(), "%Y-%m-%d %H:%M:%S"), '"}')
-  }
-  else {
-    # Extract JSON based on response type
-    json_data <- NULL
-
-    # Case 1: Response has content field with JSON string
-    if (is.list(response) &&
-        "content" %in% names(response) &&
-        !is.null(response$content) &&
-        is.character(response$content) &&
-        nchar(response$content) > 0) {
-
-      json_data <- response$content
-      if (debug) message("Using content field as JSON")
+  # Handle the response object carefully with separate conditionals
+  if (!is.null(response)) {
+    # Determine if it's a list
+    if (is.list(response)) {
+      # Try content field if it exists
+      if (!is.null(names(response)) && "content" %in% names(response)) {
+        # Content exists, check if it's usable
+        content_val <- response$content
+        if (!is.null(content_val) && is.character(content_val) && !is.na(content_val) && nchar(content_val) > 0) {
+          json_data <- content_val
+          if (debug) message("Using content field as JSON")
+        }
+      }
+      # If content didn't work, try data field
+      else if (!is.null(names(response)) && "data" %in% names(response) && !is.null(response$data)) {
+        tryCatch({
+          json_text <- jsonlite::toJSON(response$data, auto_unbox = TRUE)
+          if (!is.null(json_text) && nchar(json_text) > 0) {
+            json_data <- json_text
+            if (debug) message("Converted data field to JSON")
+          }
+        }, error = function(e) {
+          if (debug) message("Error converting data to JSON: ", e$message)
+        })
+      }
+      # As last resort, try to convert the whole response
+      else {
+        tryCatch({
+          json_text <- jsonlite::toJSON(response, auto_unbox = TRUE)
+          if (!is.null(json_text) && nchar(json_text) > 0) {
+            json_data <- json_text
+            if (debug) message("Converted entire response to JSON")
+          }
+        }, error = function(e) {
+          if (debug) message("Error converting response to JSON: ", e$message)
+        })
+      }
     }
-    # Case 2: Response has data field
-    else if (is.list(response) &&
-             "data" %in% names(response) &&
-             !is.null(response$data)) {
-
-      tryCatch({
-        json_data <- jsonlite::toJSON(response$data, auto_unbox = TRUE)
-        if (debug) message("Converted data field to JSON")
-      }, error = function(e) {
-        if (debug) message("Error converting data to JSON: ", e$message)
-      })
-    }
-    # Case 3: Response is a list with accession field
-    else if (is.list(response) &&
-             "accession" %in% names(response)) {
-
-      tryCatch({
-        json_data <- jsonlite::toJSON(response, auto_unbox = TRUE)
-        if (debug) message("Converted entire response to JSON")
-      }, error = function(e) {
-        if (debug) message("Error converting response to JSON: ", e$message)
-      })
-    }
-
-    # If all extraction methods failed, create minimal JSON
-    if (is.null(json_data) || !is.character(json_data) || nchar(json_data) == 0) {
-      if (debug) message("Failed to extract JSON, creating minimal entry")
-      json_data <- paste0('{"accession":"', accession, '","empty":true,"timestamp":"',
-                          format(Sys.time(), "%Y-%m-%d %H:%M:%S"), '"}')
+    else if (is.character(response) && !is.na(response) && nchar(response) > 0) {
+      # The response itself is a string, try to use it directly
+      json_data <- response
+      if (debug) message("Using response as JSON string")
     }
   }
 
   # Store in database
+  success <- FALSE
   tryCatch({
     current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
 
-    # Check if entry exists
-    existing <- DBI::dbGetQuery(
-      con,
-      "SELECT COUNT(*) AS count FROM uniprot_cache WHERE accession = ?",
-      params = list(accession)
-    )$count > 0
-
-    if (existing) {
-      # Update existing record
-      result <- DBI::dbExecute(
-        con,
-        "UPDATE uniprot_cache SET response_json = ?, retrieval_date = ? WHERE accession = ?",
-        params = list(json_data, current_time, accession)
-      )
-      if (debug) message("Updated existing record for ", accession)
-    } else {
-      # Insert new record
-      result <- DBI::dbExecute(
-        con,
-        "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)",
-        params = list(accession, json_data, current_time)
-      )
-      if (debug) message("Created new record for ", accession)
+    # First check if we need to create the table
+    tables <- DBI::dbListTables(con)
+    if (!"uniprot_cache" %in% tables) {
+      if (debug) message("Creating uniprot_cache table")
+      DBI::dbExecute(con, "
+        CREATE TABLE uniprot_cache (
+          cache_id INTEGER PRIMARY KEY,
+          accession TEXT NOT NULL UNIQUE,
+          response_json TEXT NOT NULL,
+          retrieval_date TEXT NOT NULL
+        )
+      ")
+      DBI::dbExecute(con, "CREATE INDEX idx_uniprot_cache_accession ON uniprot_cache (accession)")
     }
 
-    return(TRUE)
+    # Check if entry exists
+    existing_query <- "SELECT COUNT(*) AS count FROM uniprot_cache WHERE accession = ?"
+    existing <- DBI::dbGetQuery(con, existing_query, params = list(accession))
+    has_existing <- FALSE
+    if (nrow(existing) > 0 && !is.null(existing$count) && existing$count > 0) {
+      has_existing <- TRUE
+    }
+
+    if (has_existing) {
+      # Update existing record
+      update_query <- "UPDATE uniprot_cache SET response_json = ?, retrieval_date = ? WHERE accession = ?"
+      result <- DBI::dbExecute(con, update_query, params = list(json_data, current_time, accession))
+      if (debug) message("Updated existing record for ", accession)
+      success <- TRUE
+    } else {
+      # Insert new record
+      insert_query <- "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)"
+      result <- DBI::dbExecute(con, insert_query, params = list(accession, json_data, current_time))
+      if (debug) message("Created new record for ", accession)
+      success <- TRUE
+    }
   }, error = function(e) {
     if (debug) message("Database error: ", e$message)
-    return(FALSE)
   })
+
+  return(success)
 }
 
 #' Test connection to the UniProt API using working endpoints
@@ -824,18 +868,41 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
         Sys.sleep(delay)
       }
 
-      # Fetch from API
-      api_result <- query_uniprot_api(acc, debug = enable_debug)
-      api_calls <- api_calls + 1
+      # Wrap API call in tryCatch
+      api_result <- NULL
+      tryCatch({
+        api_result <- query_uniprot_api(acc, debug = enable_debug)
+        api_calls <- api_calls + 1
+      }, error = function(e) {
+        if (verbose) message("Error querying API for ", acc, ": ", e$message)
+        # Create a minimal result object
+        api_result <- list(
+          accession = acc,
+          error = e$message
+        )
+      })
 
       # ALWAYS store API result in database cache if requested
-      if (store_cache) {
-        storage_success <- store_uniprot_data(con, acc, api_result, debug = enable_debug)
+      if (store_cache && !is.null(api_result)) {
+        # Add extra debug for storage process
+        storage_success <- store_uniprot_data(con, acc, api_result, debug = enable_debug || verbose)
         if (storage_success) storage_successes <- storage_successes + 1
       }
 
-      # Extract information
-      info <- extract_uniprot_info(api_result, debug = enable_debug)
+      # Extract information, even if minimal
+      info <- NULL
+      tryCatch({
+        info <- extract_uniprot_info(api_result, debug = enable_debug)
+      }, error = function(e) {
+        if (verbose) message("Error extracting info for ", acc, ": ", e$message)
+        info <- create_empty_annotation(acc)
+      })
+
+      # Always ensure we have something to store
+      if (is.null(info)) {
+        info <- create_empty_annotation(acc)
+      }
+
       uniprot_data[[acc]] <- info
     }
     else {
