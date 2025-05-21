@@ -7,24 +7,15 @@
 query_uniprot_api(
   accession,
   fields = "accession,id,gene_names,go,xref_kegg,organism_name,protein_name",
-  use_rest_api = TRUE,
-  debug = FALSE,
-  max_retries = 3,
-  retry_delay = 2
+  debug = FALSE
 )
 }
 \arguments{
 \item{accession}{The UniProt accession number}
 
-\item{fields}{The fields to retrieve from UniProt}
+\item{fields}{The fields to retrieve from UniProt (for search endpoint)}
 
-\item{use_rest_api}{If TRUE, use REST API, otherwise use legacy API}
-
-\item{debug}{If TRUE, save the API response to a file for debugging and print additional information}
-
-\item{max_retries}{Maximum number of retry attempts for failed requests}
-
-\item{retry_delay}{Delay in seconds between retry attempts}
+\item{debug}{If TRUE, save the API response to a file for debugging}
 }
 \value{
 A list containing API response with consistent structure
