@@ -1367,3 +1367,166 @@ delete_annotations <- function(con, blast_param_id, confirm = TRUE, verbose = TR
     stop("Error deleting annotations: ", e$message)
   })
 }
+
+
+#' Read UniProt JSON data from a file and extract annotations
+#'
+#' This function reads a UniProt JSON file and extracts annotation information
+#'
+#' @param accession The UniProt accession number
+#' @param json_file The path to the JSON file (if NULL, will look in uniprot_debug directory)
+#' @param debug If TRUE, print debugging information
+#'
+#' @return A list containing extracted annotation information
+#' @export
+read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
+  # Determine the file path
+  if (is.null(json_file)) {
+    debug_dir <- "uniprot_debug"
+    json_file <- file.path(debug_dir, paste0("uniprot_", accession, ".json"))
+  }
+
+  if (!file.exists(json_file)) {
+    if (debug) message("JSON file not found: ", json_file)
+    return(create_empty_annotation(accession))
+  }
+
+  # Read the JSON file
+  if (debug) message("Reading JSON file: ", json_file)
+
+  tryCatch({
+    content <- readLines(json_file, warn = FALSE)
+    parsed <- jsonlite::fromJSON(paste(content, collapse = "\n"), flatten = TRUE)
+
+    # Create result structure
+    result <- list(
+      accession = accession,
+      entry_name = NA_character_,
+      gene_names = "",
+      go_terms = data.frame(
+        go_id = character(0),
+        go_term = character(0),
+        go_category = character(0),
+        go_evidence = character(0),
+        stringsAsFactors = FALSE
+      ),
+      kegg_refs = data.frame(
+        kegg_id = character(0),
+        pathway_name = character(0),
+        stringsAsFactors = FALSE
+      )
+    )
+
+    # Extract data if available
+    if (!is.null(parsed$results) && length(parsed$results) > 0) {
+      entry <- parsed$results[[1]]
+
+      # Basic info
+      if (!is.null(entry$primaryAccession))
+        result$accession <- entry$primaryAccession
+
+      if (!is.null(entry$uniProtkbId))
+        result$entry_name <- entry$uniProtkbId
+
+      # Gene names
+      if (!is.null(entry$genes) && length(entry$genes) > 0) {
+        gene_names <- c()
+
+        for (gene in entry$genes) {
+          if (!is.null(gene$geneName) && !is.null(gene$geneName$value)) {
+            gene_names <- c(gene_names, gene$geneName$value)
+          }
+        }
+
+        if (length(gene_names) > 0) {
+          result$gene_names <- paste(gene_names, collapse = ";")
+        }
+      }
+
+      # Extract GO terms and KEGG references
+      if (!is.null(entry$uniProtKBCrossReferences)) {
+        # Process GO terms
+        go_terms <- data.frame(
+          go_id = character(0),
+          go_term = character(0),
+          go_category = character(0),
+          go_evidence = character(0),
+          stringsAsFactors = FALSE
+        )
+
+        # Process KEGG references
+        kegg_refs <- data.frame(
+          kegg_id = character(0),
+          pathway_name = character(0),
+          stringsAsFactors = FALSE
+        )
+
+        for (ref in entry$uniProtKBCrossReferences) {
+          # Process GO terms
+          if (!is.null(ref$database) && ref$database == "GO" && !is.null(ref$id)) {
+            go_id <- ref$id
+            go_term <- NA_character_
+            go_evidence <- NA_character_
+
+            if (!is.null(ref$properties)) {
+              for (prop in ref$properties) {
+                if (!is.null(prop$key) && !is.null(prop$value)) {
+                  if (prop$key == "GoTerm") go_term <- prop$value
+                  if (prop$key == "GoEvidenceType") go_evidence <- prop$value
+                }
+              }
+            }
+
+            if (!is.na(go_term)) {
+              if (debug) message("Adding GO term: ", go_id, " - ", go_term)
+              new_row <- data.frame(
+                go_id = go_id,
+                go_term = go_term,
+                go_category = substr(go_term, 1, 1),
+                go_evidence = go_evidence,
+                stringsAsFactors = FALSE
+              )
+              go_terms <- rbind(go_terms, new_row)
+            }
+          }
+
+          # Process KEGG references
+          if (!is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id)) {
+            kegg_id <- ref$id
+            pathway_name <- NA_character_
+
+            if (!is.null(ref$properties)) {
+              for (prop in ref$properties) {
+                if (!is.null(prop$key) && !is.null(prop$value)) {
+                  if (prop$key == "Description") pathway_name <- prop$value
+                }
+              }
+            }
+
+            if (debug) message("Adding KEGG reference: ", kegg_id)
+            new_row <- data.frame(
+              kegg_id = kegg_id,
+              pathway_name = pathway_name,
+              stringsAsFactors = FALSE
+            )
+            kegg_refs <- rbind(kegg_refs, new_row)
+          }
+        }
+
+        result$go_terms <- go_terms
+        result$kegg_refs <- kegg_refs
+      }
+
+      if (debug) {
+        message("Extracted ", nrow(result$go_terms), " GO terms and ",
+                nrow(result$kegg_refs), " KEGG references")
+      }
+    }
+
+    return(result)
+
+  }, error = function(e) {
+    if (debug) message("Error parsing JSON file: ", e$message)
+    return(create_empty_annotation(accession))
+  })
+}
