@@ -303,7 +303,7 @@ check_uniprot_connection <- function(verbose = TRUE) {
 #' @return A list containing extracted information
 #' @export
 extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
-  # Initialize result with empty data
+  # Initialize standard result structure
   result <- list(
     accession = if (!is.null(uniprot_data$accession)) uniprot_data$accession else "Unknown",
     entry_name = NA_character_,
@@ -322,165 +322,74 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
     )
   )
 
+  # Validate input
   if (is.null(uniprot_data) || !is.list(uniprot_data)) {
     if (debug) message("No valid UniProt data provided")
     return(result)
   }
 
-  # Debug the structure of what we received
-  if (debug) {
-    message("Input data structure:")
-    message("Class: ", paste(class(uniprot_data), collapse = ", "))
-
-    if (is.list(uniprot_data)) {
-      message("List with fields: ", paste(names(uniprot_data), collapse = ", "))
-
-      if ("content" %in% names(uniprot_data)) {
-        if (is.character(uniprot_data$content)) {
-          message("Content is character with length ", nchar(uniprot_data$content))
-        } else {
-          message("Content is not a character but a ", class(uniprot_data$content)[1])
-        }
-      }
-
-      if ("data" %in% names(uniprot_data)) {
-        message("Data is class ", class(uniprot_data$data)[1])
-        if (is.list(uniprot_data$data)) {
-          message("Data fields: ", paste(names(uniprot_data$data), collapse = ", "))
-        }
-      }
-    }
-  }
-
-  # Get the entry data - handle both formats (direct and search)
+  # Parse content field (most reliable source)
   entry <- NULL
 
-  # Try different paths to find the entry data
-
-  # Path 1: From content field containing raw JSON - preferred approach
-  if (is.null(entry) &&
-      !is.null(uniprot_data$content) &&
-      is.character(uniprot_data$content) &&
-      nchar(uniprot_data$content) > 0) {
-
-    if (debug) message("Trying to extract from content field (raw JSON)")
+  if (!is.null(uniprot_data$content) && is.character(uniprot_data$content) && nchar(uniprot_data$content) > 0) {
+    if (debug) message("Parsing content field, length: ", nchar(uniprot_data$content))
 
     tryCatch({
-      # Parse the JSON content
-      parsed_content <- jsonlite::fromJSON(uniprot_data$content, flatten = FALSE)
+      # CRITICAL FIX: Use simplifyVector = FALSE to preserve nested structures
+      parsed <- jsonlite::fromJSON(uniprot_data$content, simplifyVector = FALSE)
 
-      if (debug) {
-        message("Successfully parsed JSON from content")
-        message("Parsed type: ", class(parsed_content)[1])
-        if (is.list(parsed_content)) {
-          message("Parsed fields: ", paste(names(parsed_content), collapse = ", "))
-        }
-      }
-
-      # Check which format we have
-      if (is.list(parsed_content)) {
-        # Case 1: Search API response with results array
-        if (!is.null(parsed_content$results) &&
-            is.list(parsed_content$results) &&
-            length(parsed_content$results) > 0) {
-
-          if (debug) message("Found results array in content")
-          entry <- parsed_content$results[[1]]  # Take first result
-        }
-        # Case 2: Direct API response with entry data at root
-        else if (!is.null(parsed_content$primaryAccession)) {
-          if (debug) message("Found direct entry in content")
-          entry <- parsed_content
-        }
-        # Case 3: Unknown format but is a list
-        else {
-          if (debug) message("Unknown list format in content, using as-is")
-          entry <- parsed_content
-        }
-      }
-      # Atomic response - try to use as-is
-      else if (length(parsed_content) > 0) {
-        if (debug) message("Parsed content is atomic, using as-is")
-        # Create a minimal entry with the accession
-        entry <- list(primaryAccession = result$accession)
+      # Find the entry data
+      if (!is.null(parsed$results) && is.list(parsed$results) && length(parsed$results) > 0) {
+        entry <- parsed$results[[1]]
+        if (debug) message("Found entry in results array")
+      } else if (!is.null(parsed$primaryAccession)) {
+        entry <- parsed
+        if (debug) message("Found entry at root level")
       }
     }, error = function(e) {
-      if (debug) message("Error parsing content: ", e$message)
+      if (debug) message("Error parsing JSON content: ", e$message)
     })
   }
 
-  # Path 2: From data field containing parsed JSON
+  # Try data field if content parsing failed
   if (is.null(entry) && !is.null(uniprot_data$data)) {
-    if (debug) message("Trying to extract from data field (parsed object)")
+    if (debug) message("Trying data field")
 
-    # Already parsed data
-    parsed_data <- uniprot_data$data
-
-    # Handle different types
-    if (is.list(parsed_data)) {
-      # Case 1: Search API response with results array
-      if (!is.null(parsed_data$results) &&
-          is.list(parsed_data$results) &&
-          length(parsed_data$results) > 0) {
-
-        if (debug) message("Found results array in data")
-        entry <- parsed_data$results[[1]]  # Take first result
+    if (is.list(uniprot_data$data)) {
+      if (!is.null(uniprot_data$data$results) && is.list(uniprot_data$data$results) &&
+          length(uniprot_data$data$results) > 0) {
+        entry <- uniprot_data$data$results[[1]]
+      } else if (!is.null(uniprot_data$data$primaryAccession)) {
+        entry <- uniprot_data$data
       }
-      # Case 2: Direct API response with entry data at root
-      else if (!is.null(parsed_data$primaryAccession)) {
-        if (debug) message("Found direct entry in data")
-        entry <- parsed_data
-      }
-      # Case 3: Unknown format but is a list
-      else {
-        if (debug) message("Unknown list format in data, using as-is")
-        entry <- parsed_data
-      }
-    }
-    # Handle atomic data
-    else if (length(parsed_data) > 0) {
-      if (debug) message("Data is atomic, using as-is")
-      # Create a minimal entry with the accession
-      entry <- list(primaryAccession = result$accession)
     }
   }
 
-  # Path 3: Check if uniprot_data itself is the entry
-  if (is.null(entry) && is.list(uniprot_data) && !is.null(uniprot_data$primaryAccession)) {
-    if (debug) message("Found entry data at root level")
-    entry <- uniprot_data
-  }
-
-  # If we couldn't find entry data, return empty result
+  # Return empty result if no entry found
   if (is.null(entry)) {
     if (debug) message("No entry data found in response")
     return(result)
   }
 
-  # Make sure entry is a list before trying to access fields
-  if (!is.list(entry)) {
-    if (debug) message("Entry is not a list, creating minimal entry")
-    entry <- list(primaryAccession = result$accession)
-  }
-
-  # Extract basic info - with type checking
-  if (is.list(entry) && !is.null(entry$primaryAccession)) {
+  # Extract basic info
+  if (!is.null(entry$primaryAccession)) {
     result$accession <- entry$primaryAccession
     if (debug) message("Found accession: ", result$accession)
   }
 
-  if (is.list(entry) && !is.null(entry$uniProtkbId)) {
+  if (!is.null(entry$uniProtkbId)) {
     result$entry_name <- entry$uniProtkbId
     if (debug) message("Found entry name: ", result$entry_name)
   }
 
-  # Extract gene names with type checking
-  if (is.list(entry) && !is.null(entry$genes) && is.list(entry$genes) && length(entry$genes) > 0) {
+  # Extract gene names
+  if (!is.null(entry$genes) && is.list(entry$genes) && length(entry$genes) > 0) {
     gene_names <- c()
 
     for (i in seq_along(entry$genes)) {
       gene <- entry$genes[[i]]
-      if (is.list(gene) && !is.null(gene$geneName) && is.list(gene$geneName) && !is.null(gene$geneName$value)) {
+      if (is.list(gene) && !is.null(gene$geneName) &&
+          is.list(gene$geneName) && !is.null(gene$geneName$value)) {
         gene_names <- c(gene_names, gene$geneName$value)
         if (debug) message("Found gene name: ", gene$geneName$value)
       }
@@ -492,13 +401,9 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
     }
   }
 
-  # Extract GO terms and KEGG references with type checking
-  if (is.list(entry) && !is.null(entry$uniProtKBCrossReferences) &&
-      is.list(entry$uniProtKBCrossReferences) && length(entry$uniProtKBCrossReferences) > 0) {
-
-    if (debug) {
-      message("Processing ", length(entry$uniProtKBCrossReferences), " cross-references")
-    }
+  # Extract GO terms and KEGG references
+  if (!is.null(entry$uniProtKBCrossReferences) && is.list(entry$uniProtKBCrossReferences)) {
+    if (debug) message("Processing ", length(entry$uniProtKBCrossReferences), " cross-references")
 
     go_terms <- data.frame(
       go_id = character(0),
@@ -518,67 +423,36 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
     for (i in seq_along(entry$uniProtKBCrossReferences)) {
       ref <- entry$uniProtKBCrossReferences[[i]]
 
-      # Debug the reference type
-      if (debug) {
-        ref_type <- "unknown"
-        if (is.list(ref) && !is.null(ref$database)) {
-          ref_type <- ref$database
-        }
-        message("Reference #", i, " type: ", ref_type)
-      }
-
-      # Skip if not a valid reference
-      if (!is.list(ref) || is.null(ref$database)) {
-        if (debug) message("Skipping invalid reference")
-        next
-      }
-
-      # Process GO terms
-      if (ref$database == "GO" && !is.null(ref$id)) {
+      # Process GO terms - FIXED: properly check structure and extract fields
+      if (is.list(ref) && !is.null(ref$database) && ref$database == "GO" && !is.null(ref$id)) {
         if (debug) message("Processing GO reference: ", ref$id)
 
         go_id <- ref$id
         go_term <- NA_character_
         go_evidence <- NA_character_
 
-        # Debug the properties structure
-        if (debug && !is.null(ref$properties)) {
-          message("Properties structure for GO term:")
-          print(str(ref$properties))
-        }
-
-        # Extract properties
-        if (!is.null(ref$properties) && is.list(ref$properties) && length(ref$properties) > 0) {
+        # Extract properties - FIXED: properly handle the properties list
+        if (!is.null(ref$properties) && is.list(ref$properties)) {
           for (j in seq_along(ref$properties)) {
             prop <- ref$properties[[j]]
-
-            if (debug) {
-              prop_key <- if (!is.null(prop$key)) prop$key else "NULL"
-              prop_value <- if (!is.null(prop$value)) prop$value else "NULL"
-              message("Property #", j, ": ", prop_key, " = ", prop_value)
-            }
 
             if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
               if (prop$key == "GoTerm") {
                 go_term <- prop$value
-                if (debug) message("Found GO term: ", go_term)
+                if (debug) message("  Found GO term: ", go_term)
               }
               if (prop$key == "GoEvidenceType") {
                 go_evidence <- prop$value
-                if (debug) message("Found GO evidence: ", go_evidence)
+                if (debug) message("  Found GO evidence: ", go_evidence)
               }
             }
           }
         }
 
-        # Add to GO terms if we have a term
+        # Add GO term if we have one
         if (!is.na(go_term)) {
-          # Extract category from the term (e.g., "C:nucleus" -> "C")
-          go_category <- NA_character_
-          if (nchar(go_term) >= 1) {
-            go_category <- substr(go_term, 1, 1)
-            if (debug) message("Extracted GO category: ", go_category)
-          }
+          # Extract category (C, F, P) from the term
+          go_category <- substr(go_term, 1, 1)
 
           new_row <- data.frame(
             go_id = go_id,
@@ -590,39 +464,25 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
           go_terms <- rbind(go_terms, new_row)
 
           if (debug) message("Added GO term: ", go_id, " - ", go_term)
-        } else {
-          if (debug) message("Skipping GO term (no term value found)")
         }
       }
 
       # Process KEGG references
-      if (ref$database == "KEGG" && !is.null(ref$id)) {
+      if (is.list(ref) && !is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id)) {
         if (debug) message("Processing KEGG reference: ", ref$id)
 
         kegg_id <- ref$id
         pathway_name <- NA_character_
 
-        # Debug the properties structure
-        if (debug && !is.null(ref$properties)) {
-          message("Properties structure for KEGG reference:")
-          print(str(ref$properties))
-        }
-
-        # Extract properties
-        if (!is.null(ref$properties) && is.list(ref$properties) && length(ref$properties) > 0) {
+        # Extract properties - same pattern as GO terms
+        if (!is.null(ref$properties) && is.list(ref$properties)) {
           for (j in seq_along(ref$properties)) {
             prop <- ref$properties[[j]]
-
-            if (debug) {
-              prop_key <- if (!is.null(prop$key)) prop$key else "NULL"
-              prop_value <- if (!is.null(prop$value)) prop$value else "NULL"
-              message("Property #", j, ": ", prop_key, " = ", prop_value)
-            }
 
             if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
               if (prop$key == "Description" || prop$key == "PathwayName") {
                 pathway_name <- prop$value
-                if (debug) message("Found pathway name: ", pathway_name)
+                if (debug) message("  Found pathway name: ", pathway_name)
               }
             }
           }
@@ -645,19 +505,10 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
     result$kegg_refs <- kegg_refs
 
     if (debug) {
-      message("Extracted ", nrow(go_terms), " GO terms and ",
-              nrow(kegg_refs), " KEGG references")
+      message("Extracted ", nrow(go_terms), " GO terms and ", nrow(kegg_refs), " KEGG references")
     }
   } else if (debug) {
-    message("No cross-references found in entry or structure unexpected")
-    # Debug what we're seeing in the entry
-    if (is.list(entry)) {
-      message("Entry fields: ", paste(names(entry), collapse = ", "))
-      if ("uniProtKBCrossReferences" %in% names(entry)) {
-        message("uniProtKBCrossReferences type: ", class(entry$uniProtKBCrossReferences)[1])
-        message("uniProtKBCrossReferences length: ", length(entry$uniProtKBCrossReferences))
-      }
-    }
+    message("No cross-references found or not a list structure")
   }
 
   return(result)
