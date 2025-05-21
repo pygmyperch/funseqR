@@ -52,7 +52,7 @@ get_cached_uniprot_data <- function(con, accession, debug = FALSE) {
 
   # Check if data exists in cache
   tryCatch({
-    cache_query <- "SELECT response_json FROM uniprot_cache WHERE accession = ?"
+    cache_query <- "SELECT response_json, retrieval_date FROM uniprot_cache WHERE accession = ?"
     cache_result <- DBI::dbGetQuery(con, cache_query, params = list(accession))
 
     if (nrow(cache_result) == 0 || is.null(cache_result$response_json)) {
@@ -61,36 +61,42 @@ get_cached_uniprot_data <- function(con, accession, debug = FALSE) {
     }
 
     # Get the JSON text
-    json_data <- cache_result$response_json[1]
+    json_text <- cache_result$response_json[1]
+    retrieval_date <- cache_result$retrieval_date[1]
 
-    if (is.na(json_data) || nchar(json_data) == 0) {
+    if (is.na(json_text) || nchar(json_text) == 0) {
       if (debug) message("Cache entry for ", accession, " is empty")
       return(NULL)
     }
 
-    # Parse the JSON response
-    parsed_data <- NULL
-    tryCatch({
-      parsed_data <- jsonlite::fromJSON(json_data, flatten = TRUE)
-    }, error = function(e) {
-      if (debug) message("Error parsing JSON for ", accession, ": ", e$message)
-    })
+    if (debug) {
+      message("Found cache entry for ", accession, " retrieved on ", retrieval_date)
+      message("JSON length: ", nchar(json_text), " chars")
+      if (nchar(json_text) > 0) {
+        message("First 50 chars: ", substr(json_text, 1, 50), "...")
+      }
+    }
 
-    if (is.null(parsed_data)) {
-      if (debug) message("Failed to parse JSON for ", accession)
+    # Check for placeholder entries
+    if (grepl('"empty"\\s*:\\s*true', json_text)) {
+      if (debug) message("Cache entry is a placeholder, ignoring")
       return(NULL)
     }
 
-    # Create a response object
-    return(list(
+    # Create a response object - without trying to parse the JSON
+    # We'll leave the parsing to extract_uniprot_info to avoid duplicate parsing
+    result <- list(
       accession = accession,
       url = NA_character_,
       status_code = 200,
-      content = json_data,
-      data = parsed_data,
+      content = json_text,   # Original JSON text
+      data = NULL,           # We won't parse here to avoid issues
       error = NA_character_,
-      from_cache = TRUE
-    ))
+      from_cache = TRUE,
+      retrieval_date = retrieval_date
+    )
+
+    return(result)
   }, error = function(e) {
     if (debug) message("Error retrieving cache data for ", accession, ": ", e$message)
     return(NULL)
@@ -321,53 +327,126 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
     return(result)
   }
 
+  # Debug the structure of what we received
+  if (debug) {
+    message("Input data structure:")
+    message("Class: ", paste(class(uniprot_data), collapse = ", "))
+
+    if (is.list(uniprot_data)) {
+      message("List with fields: ", paste(names(uniprot_data), collapse = ", "))
+
+      if ("content" %in% names(uniprot_data)) {
+        if (is.character(uniprot_data$content)) {
+          message("Content is character with length ", nchar(uniprot_data$content))
+        } else {
+          message("Content is not a character but a ", class(uniprot_data$content)[1])
+        }
+      }
+
+      if ("data" %in% names(uniprot_data)) {
+        message("Data is class ", class(uniprot_data$data)[1])
+        if (is.list(uniprot_data$data)) {
+          message("Data fields: ", paste(names(uniprot_data$data), collapse = ", "))
+        }
+      }
+    }
+  }
+
   # Get the entry data - handle both formats (direct and search)
   entry <- NULL
 
   # Try different paths to find the entry data
 
-  # Path 1: From cache with data field containing parsed JSON
-  if (is.null(entry) && !is.null(uniprot_data$data)) {
-    if (debug) message("Trying to extract from data field")
+  # Path 1: From content field containing raw JSON - preferred approach
+  if (is.null(entry) &&
+      !is.null(uniprot_data$content) &&
+      is.character(uniprot_data$content) &&
+      nchar(uniprot_data$content) > 0) {
 
-    parsed_data <- uniprot_data$data
-
-    # Case 1: Search API response with results array
-    if (is.list(parsed_data) && !is.null(parsed_data$results) && length(parsed_data$results) > 0) {
-      if (debug) message("Found results array in data field")
-      entry <- parsed_data$results[[1]]  # Take first result
-    }
-    # Case 2: Direct API response with entry data at root
-    else if (is.list(parsed_data) && !is.null(parsed_data$primaryAccession)) {
-      if (debug) message("Found direct entry in data field")
-      entry <- parsed_data
-    }
-  }
-
-  # Path 2: From content field containing raw JSON
-  if (is.null(entry) && !is.null(uniprot_data$content) && is.character(uniprot_data$content)) {
-    if (debug) message("Trying to extract from content field")
+    if (debug) message("Trying to extract from content field (raw JSON)")
 
     tryCatch({
-      parsed_content <- jsonlite::fromJSON(uniprot_data$content, flatten = TRUE)
+      # Parse the JSON content
+      parsed_content <- jsonlite::fromJSON(uniprot_data$content, flatten = FALSE)
 
-      # Case 1: Search API response with results array
-      if (!is.null(parsed_content$results) && length(parsed_content$results) > 0) {
-        if (debug) message("Found results array in content field")
-        entry <- parsed_content$results[[1]]  # Take first result
+      if (debug) {
+        message("Successfully parsed JSON from content")
+        message("Parsed type: ", class(parsed_content)[1])
+        if (is.list(parsed_content)) {
+          message("Parsed fields: ", paste(names(parsed_content), collapse = ", "))
+        }
       }
-      # Case 2: Direct API response with entry data at root
-      else if (!is.null(parsed_content$primaryAccession)) {
-        if (debug) message("Found direct entry in content field")
-        entry <- parsed_content
+
+      # Check which format we have
+      if (is.list(parsed_content)) {
+        # Case 1: Search API response with results array
+        if (!is.null(parsed_content$results) &&
+            is.list(parsed_content$results) &&
+            length(parsed_content$results) > 0) {
+
+          if (debug) message("Found results array in content")
+          entry <- parsed_content$results[[1]]  # Take first result
+        }
+        # Case 2: Direct API response with entry data at root
+        else if (!is.null(parsed_content$primaryAccession)) {
+          if (debug) message("Found direct entry in content")
+          entry <- parsed_content
+        }
+        # Case 3: Unknown format but is a list
+        else {
+          if (debug) message("Unknown list format in content, using as-is")
+          entry <- parsed_content
+        }
+      }
+      # Atomic response - try to use as-is
+      else if (length(parsed_content) > 0) {
+        if (debug) message("Parsed content is atomic, using as-is")
+        # Create a minimal entry with the accession
+        entry <- list(primaryAccession = result$accession)
       }
     }, error = function(e) {
-      if (debug) message("Error parsing content field: ", e$message)
+      if (debug) message("Error parsing content: ", e$message)
     })
   }
 
+  # Path 2: From data field containing parsed JSON
+  if (is.null(entry) && !is.null(uniprot_data$data)) {
+    if (debug) message("Trying to extract from data field (parsed object)")
+
+    # Already parsed data
+    parsed_data <- uniprot_data$data
+
+    # Handle different types
+    if (is.list(parsed_data)) {
+      # Case 1: Search API response with results array
+      if (!is.null(parsed_data$results) &&
+          is.list(parsed_data$results) &&
+          length(parsed_data$results) > 0) {
+
+        if (debug) message("Found results array in data")
+        entry <- parsed_data$results[[1]]  # Take first result
+      }
+      # Case 2: Direct API response with entry data at root
+      else if (!is.null(parsed_data$primaryAccession)) {
+        if (debug) message("Found direct entry in data")
+        entry <- parsed_data
+      }
+      # Case 3: Unknown format but is a list
+      else {
+        if (debug) message("Unknown list format in data, using as-is")
+        entry <- parsed_data
+      }
+    }
+    # Handle atomic data
+    else if (length(parsed_data) > 0) {
+      if (debug) message("Data is atomic, using as-is")
+      # Create a minimal entry with the accession
+      entry <- list(primaryAccession = result$accession)
+    }
+  }
+
   # Path 3: Check if uniprot_data itself is the entry
-  if (is.null(entry) && !is.null(uniprot_data$primaryAccession)) {
+  if (is.null(entry) && is.list(uniprot_data) && !is.null(uniprot_data$primaryAccession)) {
     if (debug) message("Found entry data at root level")
     entry <- uniprot_data
   }
@@ -378,24 +457,30 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
     return(result)
   }
 
-  # Extract basic info
-  if (!is.null(entry$primaryAccession)) {
+  # Make sure entry is a list before trying to access fields
+  if (!is.list(entry)) {
+    if (debug) message("Entry is not a list, creating minimal entry")
+    entry <- list(primaryAccession = result$accession)
+  }
+
+  # Extract basic info - with type checking
+  if (is.list(entry) && !is.null(entry$primaryAccession)) {
     result$accession <- entry$primaryAccession
     if (debug) message("Found accession: ", result$accession)
   }
 
-  if (!is.null(entry$uniProtkbId)) {
+  if (is.list(entry) && !is.null(entry$uniProtkbId)) {
     result$entry_name <- entry$uniProtkbId
     if (debug) message("Found entry name: ", result$entry_name)
   }
 
-  # Extract gene names
-  if (!is.null(entry$genes) && length(entry$genes) > 0) {
+  # Extract gene names with type checking
+  if (is.list(entry) && !is.null(entry$genes) && is.list(entry$genes) && length(entry$genes) > 0) {
     gene_names <- c()
 
     for (i in seq_along(entry$genes)) {
       gene <- entry$genes[[i]]
-      if (!is.null(gene$geneName) && !is.null(gene$geneName$value)) {
+      if (is.list(gene) && !is.null(gene$geneName) && is.list(gene$geneName) && !is.null(gene$geneName$value)) {
         gene_names <- c(gene_names, gene$geneName$value)
         if (debug) message("Found gene name: ", gene$geneName$value)
       }
@@ -407,8 +492,10 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
     }
   }
 
-  # Extract GO terms and KEGG references
-  if (!is.null(entry$uniProtKBCrossReferences) && length(entry$uniProtKBCrossReferences) > 0) {
+  # Extract GO terms and KEGG references with type checking
+  if (is.list(entry) && !is.null(entry$uniProtKBCrossReferences) &&
+      is.list(entry$uniProtKBCrossReferences) && length(entry$uniProtKBCrossReferences) > 0) {
+
     if (debug) message("Processing ", length(entry$uniProtKBCrossReferences), " cross-references")
 
     go_terms <- data.frame(
@@ -441,10 +528,10 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
         go_evidence <- NA_character_
 
         # Extract properties
-        if (!is.null(ref$properties) && length(ref$properties) > 0) {
+        if (!is.null(ref$properties) && is.list(ref$properties) && length(ref$properties) > 0) {
           for (j in seq_along(ref$properties)) {
             prop <- ref$properties[[j]]
-            if (!is.null(prop$key) && !is.null(prop$value)) {
+            if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
               if (prop$key == "GoTerm") go_term <- prop$value
               if (prop$key == "GoEvidenceType") go_evidence <- prop$value
             }
@@ -478,10 +565,10 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
         pathway_name <- NA_character_
 
         # Extract properties
-        if (!is.null(ref$properties) && length(ref$properties) > 0) {
+        if (!is.null(ref$properties) && is.list(ref$properties) && length(ref$properties) > 0) {
           for (j in seq_along(ref$properties)) {
             prop <- ref$properties[[j]]
-            if (!is.null(prop$key) && !is.null(prop$value)) {
+            if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
               if (prop$key == "Description" || prop$key == "PathwayName")
                 pathway_name <- prop$value
             }
