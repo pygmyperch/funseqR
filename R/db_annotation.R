@@ -1368,10 +1368,13 @@ read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
   if (debug) message("Reading JSON file: ", json_file)
 
   tryCatch({
-    content <- readLines(json_file, warn = FALSE)
-    parsed <- jsonlite::fromJSON(paste(content, collapse = "\n"), flatten = TRUE)
+    # Change how we read and parse the JSON file
+    json_text <- readChar(json_file, file.info(json_file)$size)
+    if (debug) message("Read ", nchar(json_text), " characters")
 
-    # Create result structure
+    parsed <- jsonlite::fromJSON(json_text, simplifyVector = TRUE)
+
+    # Create result structure with better error handling
     result <- list(
       accession = accession,
       entry_name = NA_character_,
@@ -1389,6 +1392,12 @@ read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
         stringsAsFactors = FALSE
       )
     )
+
+    # Check that we have proper parsing results
+    if (!is.list(parsed) || is.null(parsed$results)) {
+      if (debug) message("JSON doesn't have expected 'results' structure")
+      return(result)
+    }
 
     # Extract data if available
     if (!is.null(parsed$results) && length(parsed$results) > 0) {
