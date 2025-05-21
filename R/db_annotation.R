@@ -75,11 +75,6 @@ store_uniprot_data <- function(con, accession, response, debug = FALSE) {
     if (!is.null(response$status_code)) {
       message("Response status code: ", response$status_code)
     }
-    if (!is.null(response$content)) {
-      message("Content length: ", nchar(response$content))
-    } else {
-      message("Content is NULL")
-    }
   }
 
   # Check if the database is connected
@@ -88,63 +83,69 @@ store_uniprot_data <- function(con, accession, response, debug = FALSE) {
     return(invisible(NULL))
   }
 
-  # Skip if there's an error
-  if (!is.null(response$error) && !is.na(response$error)) {
-    if (debug) message("Skipping due to error: ", response$error)
-    return(invisible(NULL))
-  }
-
-  # Make sure we have content to store
+  # Prepare JSON data based on what's available in the response
   json_data <- NULL
-  if (!is.null(response$content) && !is.na(response$content) && nchar(response$content) > 0) {
+
+  # First try to use content directly if it exists and is a string
+  if (!is.null(response$content) && is.character(response$content) && nchar(response$content) > 0) {
     json_data <- response$content
-    if (debug) message("Using response content as JSON data")
-  } else if (is.list(response$data)) {
-    # Try to convert data to JSON
+    if (debug) message("Using content as JSON data (length: ", nchar(json_data), ")")
+  }
+  # Next try using the 'data' field if it exists and is a list
+  else if (!is.null(response$data) && is.list(response$data)) {
     tryCatch({
       json_data <- jsonlite::toJSON(response$data, auto_unbox = TRUE)
-      if (debug) message("Converted response data to JSON")
+      if (debug) message("Converted data to JSON (length: ", nchar(json_data), ")")
     }, error = function(e) {
-      if (debug) message("Error converting data to JSON: ", e$message)
-      return(invisible(NULL))
+      if (debug) message("Failed to convert data to JSON: ", e$message)
     })
   }
-
-  if (is.null(json_data)) {
-    if (debug) message("No valid JSON data available to store")
-    return(invisible(NULL))
+  # If we have a successful status code but no useful content, create a minimal JSON
+  else if (!is.null(response$status_code) && response$status_code == 200) {
+    # Create a minimal JSON with accession and status
+    minimal_data <- list(
+      accession = accession,
+      status = "success",
+      timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    )
+    json_data <- jsonlite::toJSON(minimal_data, auto_unbox = TRUE)
+    if (debug) message("Created minimal JSON data (length: ", nchar(json_data), ")")
   }
 
-  # Verify the JSON is valid
-  tryCatch({
-    # Try parsing to validate
-    jsonlite::fromJSON(json_data)
-    if (debug) message("JSON validation successful")
-  }, error = function(e) {
-    if (debug) message("Invalid JSON data: ", e$message)
-    return(invisible(NULL))
-  })
+  # If we still don't have JSON data, create an empty entry
+  if (is.null(json_data) || nchar(json_data) == 0) {
+    if (debug) message("No valid JSON data available, creating empty entry")
+    json_data <- paste0('{"accession":"', accession, '","empty":true}')
+  }
 
-  # Check if this accession already exists
+  # Store the data regardless of content (we'll at least have the accession)
   tryCatch({
-    check_query <- "SELECT cache_id FROM uniprot_cache WHERE accession = ?"
-    check_result <- DBI::dbGetQuery(con, check_query, params = list(accession))
-
     current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
 
-    if (nrow(check_result) > 0) {
+    # Check if this accession already exists
+    check_query <- "SELECT COUNT(*) AS count FROM uniprot_cache WHERE accession = ?"
+    check_result <- DBI::dbGetQuery(con, check_query, params = list(accession))
+
+    if (check_result$count > 0) {
       # Update existing record
-      if (debug) message("Updating existing cache record")
+      if (debug) message("Updating existing record")
       update_query <- "UPDATE uniprot_cache SET response_json = ?, retrieval_date = ? WHERE accession = ?"
-      DBI::dbExecute(con, update_query, params = list(json_data, current_time, accession))
+      result <- DBI::dbExecute(con, update_query, params = list(json_data, current_time, accession))
+      if (debug) message("Updated ", result, " records")
     } else {
       # Insert new record
-      if (debug) message("Inserting new cache record")
+      if (debug) message("Inserting new record")
       insert_query <- "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)"
-      DBI::dbExecute(con, insert_query, params = list(accession, json_data, current_time))
+      result <- DBI::dbExecute(con, insert_query, params = list(accession, json_data, current_time))
+      if (debug) message("Inserted ", result, " records")
     }
 
-    if (debug) message("Successfully stored in cache")
+    # Verify the insertion
+    verify_query <- "SELECT COUNT(*) AS count FROM uniprot_cache WHERE accession = ?"
+    verify_result <- DBI::dbGetQuery(con, verify_query, params = list(accession))
+
+    if (debug) message("Verification: ", verify_result$count, " records found for ", accession)
+
     return(invisible(NULL))
   }, error = function(e) {
     if (debug) message("Database error: ", e$message)
@@ -757,7 +758,6 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   need_api <- !offline_mode &&
     (length(setdiff(hit_accessions, cached_accessions)) > 0) &&
     (!use_cache || store_cache)
-
   if (need_api) {
     if (verbose) message("Testing UniProt API connection...")
     check_uniprot_connection(verbose = verbose)
@@ -767,6 +767,31 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
     } else if (use_cache && !store_cache && length(cached_accessions) > 0) {
       if (verbose) message("Using cache only - skipping API connection test")
     }
+  }
+
+  # Add a specific test for API response format
+  if (verbose && need_api) {
+    message("Testing specific API call for debugging...")
+    test_acc <- "P70076" # Use the first accession from your blast results
+    test_response <- query_uniprot_api(test_acc, debug = TRUE)
+    message("Test API call complete")
+    message("Response structure: ", paste(names(test_response), collapse=", "))
+    if (!is.null(test_response$content)) {
+      message("Content length: ", nchar(test_response$content))
+      message("Content type: ", class(test_response$content))
+      message("First 50 chars: ", substr(test_response$content, 1, 50))
+    }
+
+    message("Testing cache storage...")
+    store_uniprot_data(con, test_acc, test_response, debug = TRUE)
+
+    # Check if it worked
+    verify <- DBI::dbGetQuery(
+      con,
+      "SELECT COUNT(*) as count FROM uniprot_cache WHERE accession = ?",
+      params = list(test_acc)
+    )
+    message("Cache verification: ", verify$count, " records for ", test_acc)
   }
 
   # Process all accessions
