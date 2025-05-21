@@ -624,7 +624,7 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE,
 #' @export
 annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_threshold = 1e-10,
                                    batch_size = 500, delay = 1, offline_mode = FALSE,
-                                   use_cache = TRUE, store_cache = FALSE, verbose = TRUE,
+                                   use_cache = TRUE, store_cache = TRUE, verbose = TRUE,
                                    debug_accessions = NULL) {
   # Check connection validity
   if (!DBI::dbIsValid(con)) {
@@ -645,6 +645,12 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   # Create or verify cache table if needed
   if (use_cache || store_cache) {
     ensure_uniprot_cache_table(con, verbose = verbose)
+
+    # Count existing entries
+    if (verbose) {
+      cache_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) AS count FROM uniprot_cache")$count
+      message("Current UniProt cache contains ", cache_count, " entries")
+    }
   }
 
   # Get BLAST results
@@ -671,36 +677,40 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
 
   # Find cached JSON files
   json_dir <- "uniprot_debug"
+  cached_accessions <- character(0)
   if (dir.exists(json_dir)) {
     json_files <- list.files(json_dir, pattern = "\\.json$", full.names = FALSE)
     json_files <- grep("_raw\\.json$", json_files, value = TRUE, invert = TRUE)
 
     if (verbose) message("Found ", length(json_files), " cached JSON files")
-  } else {
-    json_files <- character(0)
+
+    # Extract accessions from filenames
+    cached_accessions <- gsub("^uniprot_(.+)\\.json$", "\\1", json_files)
+    if (verbose && length(cached_accessions) > 0) {
+      message("Cached accessions: ", paste(cached_accessions, collapse = ", "))
+    }
   }
 
-  # Extract accessions from filenames
-  cached_accessions <- gsub("^uniprot_(.+)\\.json$", "\\1", json_files)
-  if (verbose && length(cached_accessions) > 0) {
-    message("Cached accessions: ", paste(cached_accessions, collapse = ", "))
-  }
-
-  # Check if we should use offline mode
-  use_api <- !offline_mode
-
-  # Test UniProt API connection only if not in offline mode and not exclusively using cache
-  if (use_api && !(use_cache && !store_cache)) {
-    if (verbose) message("Testing UniProt API connection...")
-    # Rest of API testing code remains unchanged...
-    check_uniprot_connection(verbose = verbose)
-  } else if (use_cache && !store_cache) {
-    if (verbose) message("Using cache only - skipping API connection test")
-  }
-
-  # Process in online or offline mode
+  # Debug mode announcement
   if (!is.null(debug_accessions) && length(debug_accessions) > 0) {
     if (verbose) message("Debug mode enabled for accessions: ", paste(debug_accessions, collapse = ", "))
+    if (verbose && !offline_mode) message("API queries will still be performed for accessions not in debug mode or cache")
+  }
+
+  # Test UniProt API connection only if not in offline mode and not exclusively using cache
+  need_api <- !offline_mode &&
+    (length(setdiff(hit_accessions, cached_accessions)) > 0) &&
+    (!use_cache || store_cache)
+
+  if (need_api) {
+    if (verbose) message("Testing UniProt API connection...")
+    check_uniprot_connection(verbose = verbose)
+  } else {
+    if (offline_mode) {
+      if (verbose) message("Offline mode enabled - skipping API connection test")
+    } else if (use_cache && !store_cache && length(cached_accessions) > 0) {
+      if (verbose) message("Using cache only - skipping API connection test")
+    }
   }
 
   # Process all accessions
@@ -712,14 +722,68 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
     acc <- hit_accessions[i]
     enable_debug <- !is.null(debug_accessions) && acc %in% debug_accessions
 
+    # First check if we can get this from the cache directory
     if (acc %in% cached_accessions) {
-      # Read from cached JSON file
       if (verbose && enable_debug) message("Reading cached JSON file for ", acc)
       info <- read_uniprot_json(acc, debug = enable_debug)
       uniprot_data[[acc]] <- info
       cache_hits <- cache_hits + 1
-    } else {
-      # Create empty info since we're bypassing the API
+    }
+    # Then check if we can get this from the database cache
+    else if (use_cache) {
+      cache_data <- get_cached_uniprot_data(con, acc)
+      if (!is.null(cache_data)) {
+        if (verbose && enable_debug) message("Retrieved ", acc, " from database cache")
+        uniprot_data[[acc]] <- extract_uniprot_info(cache_data, debug = enable_debug)
+        cache_hits <- cache_hits + 1
+      }
+      # Only query API if not in offline mode and not found in any cache
+      else if (!offline_mode) {
+        if (verbose && enable_debug) message("Querying API for ", acc)
+        # Add delay if needed
+        if (api_calls > 0 && delay > 0) {
+          Sys.sleep(delay)
+        }
+
+        # Query the API
+        response <- query_uniprot_api(acc, debug = enable_debug)
+        api_calls <- api_calls + 1
+
+        # Store in cache if requested
+        if (store_cache && is.null(response$error)) {
+          store_uniprot_data(con, acc, response)
+        }
+
+        # Extract information
+        uniprot_data[[acc]] <- extract_uniprot_info(response, debug = enable_debug)
+      }
+      else {
+        # In offline mode, create empty info
+        uniprot_data[[acc]] <- create_empty_annotation(acc)
+      }
+    }
+    # Direct API query if not using cache
+    else if (!offline_mode) {
+      if (verbose && enable_debug) message("Querying API for ", acc)
+      # Add delay if needed
+      if (api_calls > 0 && delay > 0) {
+        Sys.sleep(delay)
+      }
+
+      # Query the API
+      response <- query_uniprot_api(acc, debug = enable_debug)
+      api_calls <- api_calls + 1
+
+      # Store in cache if requested
+      if (store_cache && is.null(response$error)) {
+        store_uniprot_data(con, acc, response)
+      }
+
+      # Extract information
+      uniprot_data[[acc]] <- extract_uniprot_info(response, debug = enable_debug)
+    }
+    else {
+      # In offline mode, create empty info
       uniprot_data[[acc]] <- create_empty_annotation(acc)
     }
 
@@ -730,7 +794,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
     }
 
     # Add delay between operations if needed
-    if (i < length(hit_accessions) && delay > 0) {
+    if (i < length(hit_accessions) && delay > 0 && api_calls > 0) {
       Sys.sleep(delay)
     }
   }
@@ -747,9 +811,9 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   for (acc in names(uniprot_data)) {
     enable_debug <- !is.null(debug_accessions) && acc %in% debug_accessions
     if (enable_debug) {
-      if (is.null(uniprot_data[[acc]]$error) || is.na(uniprot_data[[acc]]$error)) {
+      if (is.list(uniprot_data[[acc]]) && (is.null(uniprot_data[[acc]]$error) || is.na(uniprot_data[[acc]]$error))) {
         message("Processing data for ", acc)
-      } else {
+      } else if (is.list(uniprot_data[[acc]]) && !is.null(uniprot_data[[acc]]$error) && !is.na(uniprot_data[[acc]]$error)) {
         message("Error in UniProt data: ", uniprot_data[[acc]]$error)
       }
     }
@@ -808,7 +872,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
           con,
           blast_result_id,
           valid_info[[hit_accession]],
-          verbose = TRUE,
+          verbose = (!is.null(debug_accessions) && hit_accession %in% debug_accessions),
           update_existing = TRUE
         )
 
@@ -869,7 +933,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
       message("UniProt cache now contains ", cache_stats, " entries")
     }
 
-    if (!use_api) {
+    if (offline_mode) {
       message("\nNOTE: Annotation was performed in offline mode.")
       message("You can re-run the annotation later with UniProt API access to get GO terms and KEGG pathways.")
     }
@@ -883,7 +947,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
     annotated_results = successful_annotations,
     go_terms = go_count,
     kegg_refs = kegg_count,
-    offline_mode = !use_api,
+    offline_mode = offline_mode,
     cache_used = use_cache,
     cache_stored = store_cache
   )

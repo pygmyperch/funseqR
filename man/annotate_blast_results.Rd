@@ -13,7 +13,7 @@ annotate_blast_results(
   delay = 1,
   offline_mode = FALSE,
   use_cache = TRUE,
-  store_cache = FALSE,
+  store_cache = TRUE,
   verbose = TRUE,
   debug_accessions = NULL
 )
