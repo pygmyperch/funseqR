@@ -4,7 +4,13 @@
 \alias{store_annotation}
 \title{Store annotation in the database}
 \usage{
-store_annotation(con, blast_result_id, uniprot_info, verbose = TRUE)
+store_annotation(
+  con,
+  blast_result_id,
+  uniprot_info,
+  verbose = TRUE,
+  update_existing = TRUE
+)
 }
 \arguments{
 \item{con}{A database connection object.}
@@ -14,10 +20,13 @@ store_annotation(con, blast_result_id, uniprot_info, verbose = TRUE)
 \item{uniprot_info}{A list containing UniProt information as returned by extract_uniprot_info.}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
+
+\item{update_existing}{Logical. If TRUE, add GO terms and KEGG references to existing annotations. Default is TRUE.}
 }
 \value{
-The ID of the newly created annotation.
+The ID of the annotation.
 }
 \description{
-This function stores UniProt annotation in the database.
+This function stores UniProt annotation in the database or adds GO terms and KEGG references
+to existing annotations if they're missing.
 }
