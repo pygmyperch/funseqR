@@ -30,6 +30,5 @@ query_uniprot_api(
 A list containing API response with consistent structure
 }
 \description{
-This function queries the UniProt API for information about a protein accession
-and returns the response in a structured format.
+Query the UniProt API for a protein accession
 }
