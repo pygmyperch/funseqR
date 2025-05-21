@@ -1663,22 +1663,14 @@ read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
 #'
 #' @param accession The UniProt accession number to query
 #' @param debug If TRUE, print detailed debugging information
+#' @param timeout Timeout in seconds for the HTTP request. Default is 10.
 #' @param retry_max Maximum number of retry attempts. Default is 3.
 #' @param retry_delay Delay in seconds between retries. Default is 2.
 #'
-#' @return A list containing extracted protein information with these elements:
-#'   \item{accession}{UniProt accession number}
-#'   \item{entry_name}{UniProt entry name/ID}
-#'   \item{gene_names}{Semicolon-separated list of gene names}
-#'   \item{go_terms}{Data frame of GO terms}
-#'   \item{kegg_refs}{Data frame of KEGG references}
-#'
-#' @examples
-#' # Fetch data for a zebrafish protein
-#' info <- fetch_uniprot_data("Q6DGQ8")
-#'
+#' @return A list containing extracted protein information
 #' @export
-fetch_uniprot_data <- function(accession, debug = FALSE, retry_max = 3, retry_delay = 2) {
+fetch_uniprot_data <- function(accession, debug = FALSE, timeout = 10,
+                               retry_max = 3, retry_delay = 2) {
   # Construct URL
   base_url <- "https://rest.uniprot.org/uniprotkb/search"
   fields <- "accession,id,gene_names,go,xref_kegg,organism_name,protein_name"
@@ -1688,209 +1680,226 @@ fetch_uniprot_data <- function(accession, debug = FALSE, retry_max = 3, retry_de
 
   if (debug) message("Fetching data from: ", url)
 
-  # Initialize retry counter
-  retry_count <- 0
-
   # Create directory for JSON files if it doesn't exist
   debug_dir <- "uniprot_debug"
   if (!dir.exists(debug_dir)) dir.create(debug_dir)
+  json_file <- file.path(debug_dir, paste0("uniprot_", accession, ".json"))
 
-  # Retry loop
-  while(retry_count <= retry_max) {
-    # Add delay for retries
-    if (retry_count > 0) {
-      if (debug) message("Retry attempt ", retry_count, " of ", retry_max)
-      Sys.sleep(retry_delay)
-    }
+  # Try direct download with download.file or curl
+  tryCatch({
+    # First try a simpler approach with download.file
+    if (debug) message("Using download.file to fetch data")
+    temp_file <- tempfile()
+    download.file(url, temp_file, quiet = !debug, mode = "wb",
+                  headers = c("Accept" = "application/json",
+                              "User-Agent" = "Mozilla/5.0 (R; funseqR)"))
 
-    # Use httr to get the response
-    tryCatch({
-      response <- httr::GET(url)
-      status <- httr::status_code(response)
+    # Check if the file has content
+    if (file.size(temp_file) > 10) {
+      # Read the file
+      content_text <- readChar(temp_file, file.size(temp_file))
 
-      if (debug) message("Response status: ", status)
+      if (debug) {
+        message("Downloaded content length: ", nchar(content_text))
+        message("First 100 chars: ", substr(content_text, 1, 100))
+      }
 
-      if (status == 200) {
-        # Get content as text
-        content_text <- httr::content(response, "text", encoding = "UTF-8")
+      # Try to parse to validate
+      tryCatch({
+        parsed <- jsonlite::fromJSON(content_text, flatten = TRUE)
 
-        if (debug) {
-          message("Content length: ", nchar(content_text))
-          message("First 50 chars: ", substr(content_text, 1, 50))
-        }
-
-        # Create debug/cache file
-        json_file <- file.path(debug_dir, paste0("uniprot_", accession, ".json"))
+        # If we get here, the JSON is valid
+        # Write to the cache file
         writeLines(content_text, json_file)
 
-        if (debug) message("Saved content to: ", json_file)
+        if (debug) message("Valid JSON saved to: ", json_file)
 
-        # Try to parse it
+        # Extract and return the annotations
+        return(process_uniprot_json(parsed, accession, debug))
+      }, error = function(e) {
+        if (debug) message("Error parsing downloaded JSON: ", e$message)
+      })
+    } else {
+      if (debug) message("Downloaded file is empty or too small")
+    }
+
+    # If we get here, the download.file approach failed, try with httr
+    if (debug) message("Trying alternative approach with httr")
+
+    # Use httr with explicit timeouts
+    response <- httr::GET(
+      url,
+      httr::add_headers(
+        "Accept" = "application/json",
+        "User-Agent" = "Mozilla/5.0 (R; funseqR)"
+      ),
+      httr::timeout(timeout)
+    )
+
+    status <- httr::status_code(response)
+
+    if (debug) message("HTTP status code: ", status)
+
+    if (status == 200) {
+      # Get content as text with explicit encoding
+      content_text <- httr::content(response, "text", encoding = "UTF-8")
+
+      if (debug) {
+        message("Content length: ", nchar(content_text))
+        message("First 100 chars: ", substr(content_text, 1, 100))
+      }
+
+      # Make sure we got valid content
+      if (!is.null(content_text) && nchar(content_text) > 10) {
+        # Try to parse to validate
         tryCatch({
           parsed <- jsonlite::fromJSON(content_text, flatten = TRUE)
 
-          # Extract info
-          info <- create_empty_annotation(accession)
+          # Write to the cache file
+          writeLines(content_text, json_file)
 
-          if (!is.null(parsed$results) && length(parsed$results) > 0) {
-            entry <- parsed$results[[1]]
+          if (debug) message("Valid JSON saved to: ", json_file)
 
-            # Basic info
-            if (!is.null(entry$primaryAccession))
-              info$accession <- entry$primaryAccession
-
-            if (!is.null(entry$uniProtkbId))
-              info$entry_name <- entry$uniProtkbId
-
-            # Gene names
-            if (!is.null(entry$genes) && length(entry$genes) > 0) {
-              gene_names <- c()
-
-              for (i in seq_along(entry$genes)) {
-                gene <- entry$genes[[i]]
-                if (is.list(gene) && !is.null(gene$geneName) &&
-                    !is.null(gene$geneName$value)) {
-                  gene_names <- c(gene_names, gene$geneName$value)
-                }
-              }
-
-              if (length(gene_names) > 0) {
-                info$gene_names <- paste(gene_names, collapse = ";")
-              }
-            }
-
-            # GO terms
-            if (!is.null(entry$uniProtKBCrossReferences) &&
-                length(entry$uniProtKBCrossReferences) > 0) {
-
-              # Count GO terms and KEGG refs to pre-allocate
-              go_count <- 0
-              kegg_count <- 0
-
-              for (ref in entry$uniProtKBCrossReferences) {
-                if (!is.null(ref$database)) {
-                  if (ref$database == "GO") go_count <- go_count + 1
-                  if (ref$database == "KEGG") kegg_count <- kegg_count + 1
-                }
-              }
-
-              # Create data frames
-              go_terms <- data.frame(
-                go_id = character(go_count),
-                go_term = character(go_count),
-                go_category = character(go_count),
-                go_evidence = character(go_count),
-                stringsAsFactors = FALSE
-              )
-
-              kegg_refs <- data.frame(
-                kegg_id = character(kegg_count),
-                pathway_name = character(kegg_count),
-                stringsAsFactors = FALSE
-              )
-
-              # Fill data frames
-              go_idx <- 1
-              kegg_idx <- 1
-
-              for (i in seq_along(entry$uniProtKBCrossReferences)) {
-                ref <- entry$uniProtKBCrossReferences[[i]]
-
-                # Process GO terms
-                if (!is.null(ref$database) && ref$database == "GO" && !is.null(ref$id)) {
-                  go_id <- ref$id
-                  go_term <- NA_character_
-                  go_evidence <- NA_character_
-
-                  if (!is.null(ref$properties) && length(ref$properties) > 0) {
-                    for (j in seq_along(ref$properties)) {
-                      prop <- ref$properties[[j]]
-                      if (!is.null(prop$key) && !is.null(prop$value)) {
-                        if (prop$key == "GoTerm") go_term <- prop$value
-                        if (prop$key == "GoEvidenceType") go_evidence <- prop$value
-                      }
-                    }
-                  }
-
-                  if (!is.na(go_term) && go_idx <= go_count) {
-                    go_terms[go_idx, ] <- list(
-                      go_id,
-                      go_term,
-                      substr(go_term, 1, 1),
-                      go_evidence
-                    )
-                    go_idx <- go_idx + 1
-                  }
-                }
-
-                # Process KEGG references
-                if (!is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id) &&
-                    kegg_idx <= kegg_count) {
-
-                  kegg_id <- ref$id
-                  pathway_name <- NA_character_
-
-                  if (!is.null(ref$properties) && length(ref$properties) > 0) {
-                    for (j in seq_along(ref$properties)) {
-                      prop <- ref$properties[[j]]
-                      if (!is.null(prop$key) && !is.null(prop$value)) {
-                        if (prop$key == "Description") pathway_name <- prop$value
-                      }
-                    }
-                  }
-
-                  kegg_refs[kegg_idx, ] <- list(kegg_id, pathway_name)
-                  kegg_idx <- kegg_idx + 1
-                }
-              }
-
-              # Trim any unused rows
-              if (go_idx <= go_count) {
-                go_terms <- go_terms[1:(go_idx-1), , drop = FALSE]
-              }
-
-              if (kegg_idx <= kegg_count) {
-                kegg_refs <- kegg_refs[1:(kegg_idx-1), , drop = FALSE]
-              }
-
-              info$go_terms <- go_terms
-              info$kegg_refs <- kegg_refs
-            }
-          }
-
-          if (debug) {
-            message("Extracted ", nrow(info$go_terms), " GO terms and ",
-                    nrow(info$kegg_refs), " KEGG references")
-          }
-
-          return(info)
-
+          # Extract and return the annotations
+          return(process_uniprot_json(parsed, accession, debug))
         }, error = function(e) {
           if (debug) message("Error parsing JSON: ", e$message)
-          # Failure to parse - increment retry counter
-          retry_count <- retry_count + 1
-          if (retry_count > retry_max) {
-            return(create_empty_annotation(accession))
-          }
+          # Save the raw content even if parsing failed
+          writeLines(content_text, json_file)
+          if (debug) message("Raw content saved to: ", json_file)
         })
       } else {
-        if (debug) message("Request failed: ", status)
-        # Failed request - increment retry counter
-        retry_count <- retry_count + 1
-        if (retry_count > retry_max) {
-          return(create_empty_annotation(accession))
+        if (debug) message("Empty or invalid content received")
+        writeLines("Empty or invalid content", json_file)
+      }
+    } else {
+      if (debug) message("HTTP request failed with status: ", status)
+      writeLines(paste("HTTP error:", status), json_file)
+    }
+  }, error = function(e) {
+    if (debug) message("Error fetching data: ", e$message)
+    writeLines(paste("Error:", e$message), json_file)
+  })
+
+  # If we reach here, the fetch failed - create empty annotation
+  if (debug) message("Returning empty annotation for ", accession)
+  return(create_empty_annotation(accession))
+}
+
+#' Process UniProt JSON data into annotations
+#'
+#' Helper function to extract annotation information from parsed UniProt JSON
+#'
+#' @param parsed Parsed JSON data from UniProt API
+#' @param accession The accession number
+#' @param debug Enable debug output
+#'
+#' @return A structured annotation object
+process_uniprot_json <- function(parsed, accession, debug = FALSE) {
+  # Create empty annotation structure
+  info <- create_empty_annotation(accession)
+
+  # Process only if we have results
+  if (!is.null(parsed$results) && length(parsed$results) > 0) {
+    entry <- parsed$results[[1]]
+
+    # Basic info
+    if (!is.null(entry$primaryAccession))
+      info$accession <- entry$primaryAccession
+
+    if (!is.null(entry$uniProtkbId))
+      info$entry_name <- entry$uniProtkbId
+
+    # Gene names
+    if (!is.null(entry$genes) && length(entry$genes) > 0) {
+      gene_names <- c()
+
+      for (gene in entry$genes) {
+        if (!is.null(gene$geneName) && !is.null(gene$geneName$value)) {
+          gene_names <- c(gene_names, gene$geneName$value)
         }
       }
-    }, error = function(e) {
-      if (debug) message("HTTP request error: ", e$message)
-      # Network error - increment retry counter
-      retry_count <- retry_count + 1
-      if (retry_count > retry_max) {
-        return(create_empty_annotation(accession))
+
+      if (length(gene_names) > 0) {
+        info$gene_names <- paste(gene_names, collapse = ";")
       }
-    })
+    }
+
+    # GO terms and KEGG references
+    if (!is.null(entry$uniProtKBCrossReferences) && length(entry$uniProtKBCrossReferences) > 0) {
+      go_terms <- data.frame(
+        go_id = character(0),
+        go_term = character(0),
+        go_category = character(0),
+        go_evidence = character(0),
+        stringsAsFactors = FALSE
+      )
+
+      kegg_refs <- data.frame(
+        kegg_id = character(0),
+        pathway_name = character(0),
+        stringsAsFactors = FALSE
+      )
+
+      for (ref in entry$uniProtKBCrossReferences) {
+        # GO terms
+        if (!is.null(ref$database) && ref$database == "GO" && !is.null(ref$id)) {
+          go_id <- ref$id
+          go_term <- NA_character_
+          go_evidence <- NA_character_
+
+          if (!is.null(ref$properties)) {
+            for (prop in ref$properties) {
+              if (!is.null(prop$key) && !is.null(prop$value)) {
+                if (prop$key == "GoTerm") go_term <- prop$value
+                if (prop$key == "GoEvidenceType") go_evidence <- prop$value
+              }
+            }
+          }
+
+          if (!is.na(go_term)) {
+            new_row <- data.frame(
+              go_id = go_id,
+              go_term = go_term,
+              go_category = substr(go_term, 1, 1),
+              go_evidence = go_evidence,
+              stringsAsFactors = FALSE
+            )
+            go_terms <- rbind(go_terms, new_row)
+          }
+        }
+
+        # KEGG references
+        if (!is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id)) {
+          kegg_id <- ref$id
+          pathway_name <- NA_character_
+
+          if (!is.null(ref$properties)) {
+            for (prop in ref$properties) {
+              if (!is.null(prop$key) && !is.null(prop$value)) {
+                if (prop$key == "Description") pathway_name <- prop$value
+              }
+            }
+          }
+
+          new_row <- data.frame(
+            kegg_id = kegg_id,
+            pathway_name = pathway_name,
+            stringsAsFactors = FALSE
+          )
+          kegg_refs <- rbind(kegg_refs, new_row)
+        }
+      }
+
+      info$go_terms <- go_terms
+      info$kegg_refs <- kegg_refs
+    }
   }
 
-  # If we reach here, all retries failed
-  return(create_empty_annotation(accession))
+  if (debug) {
+    message("Extracted ", nrow(info$go_terms), " GO terms and ",
+            nrow(info$kegg_refs), " KEGG references")
+  }
+
+  return(info)
 }

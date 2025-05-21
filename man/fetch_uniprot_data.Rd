@@ -4,32 +4,30 @@
 \alias{fetch_uniprot_data}
 \title{Fetch and Process UniProt Data for a Protein Accession}
 \usage{
-fetch_uniprot_data(accession, debug = FALSE, retry_max = 3, retry_delay = 2)
+fetch_uniprot_data(
+  accession,
+  debug = FALSE,
+  timeout = 10,
+  retry_max = 3,
+  retry_delay = 2
+)
 }
 \arguments{
 \item{accession}{The UniProt accession number to query}
 
 \item{debug}{If TRUE, print detailed debugging information}
 
+\item{timeout}{Timeout in seconds for the HTTP request. Default is 10.}
+
 \item{retry_max}{Maximum number of retry attempts. Default is 3.}
 
 \item{retry_delay}{Delay in seconds between retries. Default is 2.}
 }
 \value{
-A list containing extracted protein information with these elements:
-\item{accession}{UniProt accession number}
-\item{entry_name}{UniProt entry name/ID}
-\item{gene_names}{Semicolon-separated list of gene names}
-\item{go_terms}{Data frame of GO terms}
-\item{kegg_refs}{Data frame of KEGG references}
+A list containing extracted protein information
 }
 \description{
 This function queries the UniProt REST API for protein information,
 extracts relevant data, and saves the JSON response to a file for caching.
 It directly returns a structured annotation object ready for database storage.
-}
-\examples{
-# Fetch data for a zebrafish protein
-info <- fetch_uniprot_data("Q6DGQ8")
-
 }
