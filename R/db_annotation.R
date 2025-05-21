@@ -636,22 +636,19 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE,
 #' @param max_hits Maximum number of hits to process per query. Default is 5.
 #' @param e_value_threshold E-value threshold for filtering BLAST hits. Default is 1e-10.
 #' @param batch_size Number of annotations to process in each transaction. Default is 500.
-#' @param delay Delay between API calls in seconds. Default is 1.
+#' @param delay Delay between operations in seconds. Default is 1.
 #' @param offline_mode If TRUE, skips UniProt API and uses basic annotations. Default is FALSE.
-#' @param use_cache If TRUE, uses cached API responses if available. Default is FALSE.
+#' @param use_cache If TRUE, uses cached API responses if available. Default is TRUE.
 #' @param store_cache If TRUE, stores API responses in the database. Default is FALSE.
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #' @param debug_accessions Vector of accessions to debug. Default is NULL.
 #'
 #' @return A list containing annotation statistics.
 #'
-#' @importFrom DBI dbExecute dbGetQuery dbListTables
-#' @importFrom httr GET add_headers status_code content
-#' @importFrom jsonlite fromJSON
 #' @export
 annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_threshold = 1e-10,
                                    batch_size = 500, delay = 1, offline_mode = FALSE,
-                                   use_cache = FALSE, store_cache = FALSE, verbose = TRUE,
+                                   use_cache = TRUE, store_cache = FALSE, verbose = TRUE,
                                    debug_accessions = NULL) {
   # Check connection validity
   if (!DBI::dbIsValid(con)) {
@@ -696,6 +693,23 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
 
   if (verbose) message("Found ", length(hit_accessions), " unique hit accessions to annotate.")
 
+  # Find cached JSON files
+  json_dir <- "uniprot_debug"
+  if (dir.exists(json_dir)) {
+    json_files <- list.files(json_dir, pattern = "\\.json$", full.names = FALSE)
+    json_files <- grep("_raw\\.json$", json_files, value = TRUE, invert = TRUE)
+
+    if (verbose) message("Found ", length(json_files), " cached JSON files")
+  } else {
+    json_files <- character(0)
+  }
+
+  # Extract accessions from filenames
+  cached_accessions <- gsub("^uniprot_(.+)\\.json$", "\\1", json_files)
+  if (verbose && length(cached_accessions) > 0) {
+    message("Cached accessions: ", paste(cached_accessions, collapse = ", "))
+  }
+
   # Check if we should use offline mode
   use_api <- !offline_mode
 
@@ -709,92 +723,65 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   }
 
   # Process in online or offline mode
-  if (use_api) {
-    # ONLINE MODE: Query UniProt for each accession or use cache
-    if (verbose) message("Retrieving UniProt data for accessions...")
-
-    uniprot_data <- list()
-    cache_hits <- 0
-    api_calls <- 0
-
-    # Create directory for debug output if needed
-    if (!is.null(debug_accessions) && length(debug_accessions) > 0) {
-      debug_dir <- "uniprot_debug"
-      if (!dir.exists(debug_dir)) dir.create(debug_dir)
-      if (verbose) message("Debug mode enabled for accessions: ", paste(debug_accessions, collapse=", "))
-    }
-
-    for (i in seq_along(hit_accessions)) {
-      acc <- hit_accessions[i]
-      cache_data <- NULL
-
-      # Check if this accession should be debugged
-      enable_debug <- !is.null(debug_accessions) && acc %in% debug_accessions
-
-      # Check cache first if enabled
-      if (use_cache) {
-        cache_data <- get_cached_uniprot_data(con, acc)
-        if (!is.null(cache_data)) {
-          uniprot_data[[acc]] <- cache_data
-          cache_hits <- cache_hits + 1
-
-          # Show progress
-          if (verbose && (i %% 10 == 0 || i == length(hit_accessions))) {
-            message("Processed ", i, " of ", length(hit_accessions), " accessions (",
-                    cache_hits, " from cache, ", api_calls, " API calls)")
-          }
-
-          next  # Skip API call
-        }
-      }
-
-      # Query UniProt API with debugging if requested
-      result <- query_uniprot_api(acc, debug = enable_debug)
-      uniprot_data[[acc]] <- result
-      api_calls <- api_calls + 1
-
-      # Store in cache if enabled
-      if (store_cache) {
-        store_uniprot_data(con, acc, result)
-      }
-
-      # Show progress
-      if (verbose && (i %% 10 == 0 || i == length(hit_accessions))) {
-        message("Processed ", i, " of ", length(hit_accessions), " accessions (",
-                cache_hits, " from cache, ", api_calls, " API calls)")
-      }
-
-      # Add delay between API calls
-      if (api_calls > 0 && i < length(hit_accessions)) {
-        Sys.sleep(delay)
-      }
-    }
-
-    if (verbose) {
-      message("UniProt data retrieval complete: ", cache_hits, " from cache, ",
-              api_calls, " from API")
-    }
-
-    # Extract information from UniProt responses
-    if (verbose) message("Extracting information from UniProt responses...")
-
-    uniprot_info <- list()
-    for (acc in names(uniprot_data)) {
-      # Pass debug flag to extract_uniprot_info for selected accessions
-      enable_debug <- !is.null(debug_accessions) && acc %in% debug_accessions
-      uniprot_info[[acc]] <- extract_uniprot_info(uniprot_data[[acc]], debug = enable_debug)
-    }
-
-    valid_info <- uniprot_info[!sapply(uniprot_info, is.null)]
-
-    if (verbose) message("Successfully extracted information for ", length(valid_info), " of ", length(hit_accessions), " accessions.")
-  } else {
-    # OFFLINE MODE: Skip API queries and create empty info
-    if (verbose) message("Skipping UniProt API queries in offline mode.")
-    valid_info <- list()
+  if (debug_accessions && length(debug_accessions) > 0) {
+    if (verbose) message("Debug mode enabled for accessions: ", paste(debug_accessions, collapse = ", "))
   }
 
-  # Rest of the function remains unchanged...
+  # Process all accessions
+  uniprot_data <- list()
+  cache_hits <- 0
+  api_calls <- 0
+
+  for (i in seq_along(hit_accessions)) {
+    acc <- hit_accessions[i]
+    enable_debug <- !is.null(debug_accessions) && acc %in% debug_accessions
+
+    if (acc %in% cached_accessions) {
+      # Read from cached JSON file
+      if (verbose && enable_debug) message("Reading cached JSON file for ", acc)
+      info <- read_uniprot_json(acc, debug = enable_debug)
+      uniprot_data[[acc]] <- info
+      cache_hits <- cache_hits + 1
+    } else {
+      # Create empty info since we're bypassing the API
+      uniprot_data[[acc]] <- create_empty_annotation(acc)
+    }
+
+    # Show progress
+    if (verbose && (i %% 10 == 0 || i == length(hit_accessions))) {
+      message("Processed ", i, " of ", length(hit_accessions), " accessions (",
+              cache_hits, " from cache, ", api_calls, " API calls)")
+    }
+
+    # Add delay between operations if needed
+    if (i < length(hit_accessions) && delay > 0) {
+      Sys.sleep(delay)
+    }
+  }
+
+  if (verbose) {
+    message("UniProt data retrieval complete: ", cache_hits, " from cache, ",
+            api_calls, " from API")
+  }
+
+  # Extract information from UniProt responses
+  if (verbose) message("Extracting information from UniProt responses...")
+
+  valid_info <- list()
+  for (acc in names(uniprot_data)) {
+    enable_debug <- !is.null(debug_accessions) && acc %in% debug_accessions
+    if (enable_debug) {
+      if (is.null(uniprot_data[[acc]]$error) || is.na(uniprot_data[[acc]]$error)) {
+        message("Processing data for ", acc)
+      } else {
+        message("Error in UniProt data: ", uniprot_data[[acc]]$error)
+      }
+    }
+    valid_info[[acc]] <- uniprot_data[[acc]]
+  }
+
+  if (verbose) message("Successfully extracted information for ", length(valid_info), " of ", length(hit_accessions), " accessions.")
+
   # Get BLAST results to annotate
   blast_results_query <- "
     SELECT blast_result_id, flanking_id, hit_accession, e_value
@@ -818,11 +805,6 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
 
   if (verbose) message("Processing ", nrow(blast_results), " BLAST results in batches of ", batch_size)
 
-  # Helper function for basic annotation when API is unavailable or data is missing
-  store_basic_annotation <- function(con, blast_result_id, hit_accession, gene_name = NULL, verbose = FALSE) {
-    # ... (existing code)
-  }
-
   # Process BLAST results in batches
   successful_annotations <- 0
   annotation_ids <- c()
@@ -845,23 +827,14 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
         blast_result_id <- current_batch$blast_result_id[i]
         hit_accession <- current_batch$hit_accession[i]
 
-        if (use_api && !is.null(valid_info[[hit_accession]])) {
-          # ONLINE MODE: Store complete annotation
-          annotation_id <- store_annotation(
-            con,
-            blast_result_id,
-            valid_info[[hit_accession]],
-            verbose = TRUE  # CHANGED from FALSE to TRUE for debugging
-          )
-        } else {
-          # OFFLINE MODE or missing info: Store basic annotation
-          annotation_id <- store_basic_annotation(
-            con,
-            blast_result_id,
-            hit_accession,
-            verbose = TRUE  # CHANGED from FALSE to TRUE for debugging
-          )
-        }
+        # Store annotation using valid_info
+        annotation_id <- store_annotation(
+          con,
+          blast_result_id,
+          valid_info[[hit_accession]],
+          verbose = TRUE,
+          update_existing = TRUE
+        )
 
         if (!is.null(annotation_id)) {
           batch_success <- batch_success + 1
@@ -887,7 +860,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
 
   if (verbose) message("Successfully annotated ", successful_annotations, " of ", nrow(blast_results), " BLAST results.")
 
-  # Count annotated GO terms and KEGG pathways
+  # Count stored GO terms and KEGG references
   if (verbose) message("Counting stored GO terms and KEGG references...")
 
   # Get a total count from the database for the specific blast parameter ID
@@ -899,17 +872,17 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   go_count <- DBI::dbGetQuery(
     con,
     paste0("SELECT COUNT(*) AS count FROM go_terms g
-         JOIN annotations a ON g.annotation_id = a.annotation_id
-         JOIN blast_results br ON a.blast_result_id = br.blast_result_id
-         WHERE 1=1", blast_params_clause)
+          JOIN annotations a ON g.annotation_id = a.annotation_id
+          JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+          WHERE 1=1", blast_params_clause)
   )$count
 
   kegg_count <- DBI::dbGetQuery(
     con,
     paste0("SELECT COUNT(*) AS count FROM kegg_references k
-         JOIN annotations a ON k.annotation_id = a.annotation_id
-         JOIN blast_results br ON a.blast_result_id = br.blast_result_id
-         WHERE 1=1", blast_params_clause)
+          JOIN annotations a ON k.annotation_id = a.annotation_id
+          JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+          WHERE 1=1", blast_params_clause)
   )$count
 
   if (verbose) {
@@ -930,7 +903,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   list(
     blast_param_id = blast_param_id,
     unique_accessions = length(hit_accessions),
-    successful_extractions = if (use_api) length(valid_info) else 0,
+    successful_extractions = length(valid_info),
     annotated_results = successful_annotations,
     go_terms = go_count,
     kegg_refs = kegg_count,
