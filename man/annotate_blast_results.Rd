@@ -14,12 +14,13 @@ annotate_blast_results(
   offline_mode = FALSE,
   use_cache = TRUE,
   store_cache = TRUE,
+  verify_storage = TRUE,
   verbose = TRUE,
   debug_accessions = NULL
 )
 }
 \arguments{
-\item{con}{A database connection object.}
+\item{con}{Database connection object.}
 
 \item{blast_param_id}{The ID of the BLAST parameters.}
 
@@ -36,6 +37,8 @@ annotate_blast_results(
 \item{use_cache}{If TRUE, uses cached API responses if available. Default is TRUE.}
 
 \item{store_cache}{If TRUE, stores API responses in the database. Default is TRUE.}
+
+\item{verify_storage}{If TRUE, verifies annotation storage after processing. Default is TRUE.}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 
