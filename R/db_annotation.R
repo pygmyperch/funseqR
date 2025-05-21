@@ -1368,13 +1368,14 @@ read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
   if (debug) message("Reading JSON file: ", json_file)
 
   tryCatch({
-    # Change how we read and parse the JSON file
+    # Read as a single string
     json_text <- readChar(json_file, file.info(json_file)$size)
     if (debug) message("Read ", nchar(json_text), " characters")
 
-    parsed <- jsonlite::fromJSON(json_text, simplifyVector = TRUE)
+    # Parse with explicit parameters to prevent simplification
+    parsed <- jsonlite::fromJSON(json_text, simplifyVector = FALSE)
 
-    # Create result structure with better error handling
+    # Create result structure
     result <- list(
       accession = accession,
       entry_name = NA_character_,
@@ -1393,29 +1394,28 @@ read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
       )
     )
 
-    # Check that we have proper parsing results
-    if (!is.list(parsed) || is.null(parsed$results)) {
-      if (debug) message("JSON doesn't have expected 'results' structure")
-      return(result)
-    }
+    # Check for valid structure
+    if (is.list(parsed) && "results" %in% names(parsed) &&
+        length(parsed$results) > 0 && is.list(parsed$results[[1]])) {
 
-    # Extract data if available
-    if (!is.null(parsed$results) && length(parsed$results) > 0) {
+      # Get first result
       entry <- parsed$results[[1]]
 
       # Basic info
-      if (!is.null(entry$primaryAccession))
+      if ("primaryAccession" %in% names(entry))
         result$accession <- entry$primaryAccession
 
-      if (!is.null(entry$uniProtkbId))
+      if ("uniProtkbId" %in% names(entry))
         result$entry_name <- entry$uniProtkbId
 
       # Gene names
-      if (!is.null(entry$genes) && length(entry$genes) > 0) {
+      if ("genes" %in% names(entry) && length(entry$genes) > 0) {
         gene_names <- c()
 
-        for (gene in entry$genes) {
-          if (!is.null(gene$geneName) && !is.null(gene$geneName$value)) {
+        for (i in seq_along(entry$genes)) {
+          gene <- entry$genes[[i]]
+          if (is.list(gene) && "geneName" %in% names(gene) &&
+              is.list(gene$geneName) && "value" %in% names(gene$geneName)) {
             gene_names <- c(gene_names, gene$geneName$value)
           }
         }
@@ -1425,8 +1425,10 @@ read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
         }
       }
 
-      # Extract GO terms and KEGG references
-      if (!is.null(entry$uniProtKBCrossReferences)) {
+      # Handle cross-references
+      if ("uniProtKBCrossReferences" %in% names(entry) &&
+          length(entry$uniProtKBCrossReferences) > 0) {
+
         # Process GO terms
         go_terms <- data.frame(
           go_id = character(0),
@@ -1443,16 +1445,21 @@ read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
           stringsAsFactors = FALSE
         )
 
-        for (ref in entry$uniProtKBCrossReferences) {
+        for (i in seq_along(entry$uniProtKBCrossReferences)) {
+          ref <- entry$uniProtKBCrossReferences[[i]]
+
           # Process GO terms
-          if (!is.null(ref$database) && ref$database == "GO" && !is.null(ref$id)) {
+          if (is.list(ref) && "database" %in% names(ref) &&
+              ref$database == "GO" && "id" %in% names(ref)) {
+
             go_id <- ref$id
             go_term <- NA_character_
             go_evidence <- NA_character_
 
-            if (!is.null(ref$properties)) {
-              for (prop in ref$properties) {
-                if (!is.null(prop$key) && !is.null(prop$value)) {
+            if ("properties" %in% names(ref) && length(ref$properties) > 0) {
+              for (j in seq_along(ref$properties)) {
+                prop <- ref$properties[[j]]
+                if (is.list(prop) && "key" %in% names(prop) && "value" %in% names(prop)) {
                   if (prop$key == "GoTerm") go_term <- prop$value
                   if (prop$key == "GoEvidenceType") go_evidence <- prop$value
                 }
@@ -1460,7 +1467,6 @@ read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
             }
 
             if (!is.na(go_term)) {
-              if (debug) message("Adding GO term: ", go_id, " - ", go_term)
               new_row <- data.frame(
                 go_id = go_id,
                 go_term = go_term,
@@ -1473,19 +1479,21 @@ read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
           }
 
           # Process KEGG references
-          if (!is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id)) {
+          if (is.list(ref) && "database" %in% names(ref) &&
+              ref$database == "KEGG" && "id" %in% names(ref)) {
+
             kegg_id <- ref$id
             pathway_name <- NA_character_
 
-            if (!is.null(ref$properties)) {
-              for (prop in ref$properties) {
-                if (!is.null(prop$key) && !is.null(prop$value)) {
+            if ("properties" %in% names(ref) && length(ref$properties) > 0) {
+              for (j in seq_along(ref$properties)) {
+                prop <- ref$properties[[j]]
+                if (is.list(prop) && "key" %in% names(prop) && "value" %in% names(prop)) {
                   if (prop$key == "Description") pathway_name <- prop$value
                 }
               }
             }
 
-            if (debug) message("Adding KEGG reference: ", kegg_id)
             new_row <- data.frame(
               kegg_id = kegg_id,
               pathway_name = pathway_name,
@@ -1498,11 +1506,11 @@ read_uniprot_json <- function(accession, json_file = NULL, debug = FALSE) {
         result$go_terms <- go_terms
         result$kegg_refs <- kegg_refs
       }
+    }
 
-      if (debug) {
-        message("Extracted ", nrow(result$go_terms), " GO terms and ",
-                nrow(result$kegg_refs), " KEGG references")
-      }
+    if (debug) {
+      message("Extracted ", nrow(result$go_terms), " GO terms and ",
+              nrow(result$kegg_refs), " KEGG references")
     }
 
     return(result)
