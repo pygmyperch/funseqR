@@ -13,28 +13,28 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
   if (!DBI::dbIsValid(con)) {
     stop("Invalid database connection")
   }
-  
+
   # Helper function for null coalescing
   `%||%` <- function(x, y) if (is.null(x) || is.na(x)) y else x
-  
+
   # Get all tables in the database
   all_tables <- DBI::dbListTables(con)
-  
+
   if (verbose) {
     cat("=== funseqR Database Summary ===\n")
     cat("Tables found:", length(all_tables), "\n")
     cat("Tables:", paste(all_tables, collapse = ", "), "\n\n")
   }
-  
+
   # Get basic table counts
   table_counts <- list()
-  
+
   # Core tables with counts
   core_tables <- c("projects", "input_files", "vcf_data", "reference_genomes",
                    "reference_sequences", "flanking_sequences", "blast_parameters",
                    "blast_results", "annotations", "go_terms", "kegg_references",
                    "uniprot_cache", "blast_database_metadata")
-  
+
   for (table in core_tables) {
     if (table %in% all_tables) {
       count_query <- paste0("SELECT COUNT(*) as count FROM ", table)
@@ -51,7 +51,7 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
       if (verbose) cat(sprintf("%-25s: Table not found\n", table))
     }
   }
-  
+
   # Get metadata if available
   metadata <- list()
   if ("metadata" %in% all_tables) {
@@ -59,7 +59,7 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
       metadata_query <- "SELECT * FROM metadata"
       metadata_raw <- DBI::dbGetQuery(con, metadata_query)
       metadata <- setNames(metadata_raw$value, metadata_raw$key)
-      
+
       if (verbose && length(metadata) > 0) {
         cat("\n=== Database Metadata ===\n")
         for (key in names(metadata)) {
@@ -70,12 +70,12 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
       if (verbose) cat("Could not read metadata table\n")
     })
   }
-  
+
   # Get project-level summary
   project_summary <- list()
   if (table_counts$projects > 0) {
     if (verbose) cat("\n=== Project Summary ===\n")
-    
+
     tryCatch({
       project_query <- "
         SELECT p.project_id, p.project_name, p.creation_date,
@@ -92,9 +92,9 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
         GROUP BY p.project_id, p.project_name, p.creation_date
         ORDER BY p.project_id
       "
-      
+
       project_summary <- DBI::dbGetQuery(con, project_query)
-      
+
       if (verbose && nrow(project_summary) > 0) {
         for (i in 1:nrow(project_summary)) {
           proj <- project_summary[i, ]
@@ -104,16 +104,16 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
           cat(sprintf("  BLAST runs: %d, Annotations: %d\n", proj$blast_runs, proj$annotations))
         }
       }
-      
+
     }, error = function(e) {
       if (verbose) cat("Could not generate project summary\n")
     })
   }
-  
+
   # Detailed analysis if requested
   detailed_info <- list()
   if (detail_level %in% c("detailed", "full")) {
-    
+
     # GO term analysis
     if (table_counts$go_terms > 0) {
       tryCatch({
@@ -125,7 +125,7 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
         "
         go_summary <- DBI::dbGetQuery(con, go_summary_query)
         detailed_info$go_categories <- go_summary
-        
+
         if (verbose) {
           cat("\n=== GO Terms by Category ===\n")
           for (i in 1:nrow(go_summary)) {
@@ -141,8 +141,8 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
         if (verbose) cat("Could not analyze GO terms\n")
       })
     }
-    
-    # BLAST database analysis (ENHANCED)
+
+    # BLAST database analysis
     if (table_counts$blast_parameters > 0) {
       tryCatch({
         # Basic BLAST parameters summary
@@ -156,37 +156,37 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
         "
         blast_summary <- DBI::dbGetQuery(con, blast_db_query)
         detailed_info$blast_databases <- blast_summary
-        
+
         # Enhanced: Get database metadata if available
         if ("blast_database_metadata" %in% all_tables && table_counts$blast_database_metadata > 0) {
           db_metadata_query <- "
-            SELECT DISTINCT bm.db_name, bm.db_title, bm.num_sequences, 
+            SELECT DISTINCT bm.db_name, bm.db_title, bm.num_sequences,
                    bm.total_length, bm.db_date, bm.db_version,
                    bm.extraction_date, bp.blast_type,
                    COUNT(DISTINCT bp.blast_param_id) as times_used
             FROM blast_database_metadata bm
             JOIN blast_parameters bp ON bm.blast_param_id = bp.blast_param_id
-            GROUP BY bm.db_name, bm.db_title, bm.num_sequences, 
+            GROUP BY bm.db_name, bm.db_title, bm.num_sequences,
                      bm.total_length, bm.db_date, bm.db_version, bp.blast_type
             ORDER BY times_used DESC, bm.extraction_date DESC
           "
-          
+
           db_metadata_summary <- DBI::dbGetQuery(con, db_metadata_query)
           detailed_info$blast_database_metadata <- db_metadata_summary
-          
+
           if (verbose && nrow(db_metadata_summary) > 0) {
             cat("\n=== BLAST Database Details (with Metadata) ===\n")
             for (i in 1:nrow(db_metadata_summary)) {
               bm <- db_metadata_summary[i, ]
-              cat(sprintf("Database: %s (%s)\n", 
+              cat(sprintf("Database: %s (%s)\n",
                           bm$db_name, bm$blast_type))
-              cat(sprintf("  Title: %s\n", 
+              cat(sprintf("  Title: %s\n",
                           bm$db_title %||% "Unknown"))
-              cat(sprintf("  Sequences: %s\n", 
+              cat(sprintf("  Sequences: %s\n",
                           format(bm$num_sequences %||% 0, big.mark = ",")))
-              cat(sprintf("  Total length: %s bp\n", 
+              cat(sprintf("  Total length: %s bp\n",
                           format(bm$total_length %||% 0, big.mark = ",")))
-              cat(sprintf("  Database date: %s\n", 
+              cat(sprintf("  Database date: %s\n",
                           bm$db_date %||% "Unknown"))
               if (!is.na(bm$db_version) && !is.null(bm$db_version)) {
                 cat(sprintf("  Version: %s\n", bm$db_version))
@@ -212,23 +212,27 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
         if (verbose) cat("Could not analyze BLAST parameters\n")
       })
     }
-    
-    # Chromosome distribution
+
+    # Chromosome distribution (FIXED for SQLite)
     if (table_counts$vcf_data > 0) {
       tryCatch({
+        # SQLite-compatible query (no REGEXP, simpler sorting)
         chrom_query <- "
           SELECT chromosome, COUNT(*) as variant_count
           FROM vcf_data
           GROUP BY chromosome
-          ORDER BY 
-            CASE WHEN chromosome REGEXP '^[0-9]+$' THEN CAST(chromosome AS SIGNED)
-                WHEN chromosome REGEXP '^chr[0-9]+$' THEN CAST(SUBSTRING(chromosome, 4) AS SIGNED)
-                ELSE 999 END,
-           chromosome
+          ORDER BY
+            CASE
+              WHEN chromosome GLOB '[0-9]*' THEN CAST(chromosome AS INTEGER)
+              WHEN chromosome LIKE 'chr%' AND SUBSTR(chromosome, 4) GLOB '[0-9]*'
+                THEN CAST(SUBSTR(chromosome, 4) AS INTEGER)
+              ELSE 999
+            END,
+            chromosome
         "
         chrom_summary <- DBI::dbGetQuery(con, chrom_query)
         detailed_info$chromosome_distribution <- chrom_summary
-        
+
         if (verbose && nrow(chrom_summary) > 0) {
           cat("\n=== Variants by Chromosome ===\n")
           total_variants <- sum(chrom_summary$variant_count)
@@ -242,26 +246,26 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
           }
         }
       }, error = function(e) {
-        if (verbose) cat("Could not analyze chromosome distribution\n")
+        if (verbose) cat("Could not analyze chromosome distribution: ", e$message, "\n")
       })
     }
   }
-  
+
   # Full analysis with sample data
   sample_data <- list()
   if (detail_level == "full" && include_samples) {
-    
+
     if (verbose) cat("\n=== Sample Data ===\n")
-    
+
     # Sample from each major table
     sample_tables <- c("projects", "vcf_data", "annotations", "go_terms")
-    
+
     for (table in sample_tables) {
       if (table %in% all_tables && table_counts[[table]] > 0) {
         tryCatch({
           sample_query <- paste0("SELECT * FROM ", table, " LIMIT 3")
           sample_data[[table]] <- DBI::dbGetQuery(con, sample_query)
-          
+
           if (verbose) {
             cat(sprintf("\n--- Sample from %s ---\n", table))
             print(head(sample_data[[table]], 3))
@@ -272,7 +276,7 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
       }
     }
   }
-  
+
   # Return comprehensive summary
   list(
     database_info = list(
@@ -299,21 +303,21 @@ get_project_summary <- function(con, project_id, verbose = TRUE) {
   if (!DBI::dbIsValid(con)) {
     stop("Invalid database connection")
   }
-  
+
   # Helper function for null coalescing
   `%||%` <- function(x, y) if (is.null(x) || is.na(x)) y else x
-  
+
   # Check if project exists
   project_check <- DBI::dbGetQuery(con,
                                    "SELECT * FROM projects WHERE project_id = ?",
                                    params = list(project_id))
-  
+
   if (nrow(project_check) == 0) {
     stop("Project with ID ", project_id, " not found")
   }
-  
+
   project_info <- project_check[1, ]
-  
+
   if (verbose) {
     cat("=== Project Summary ===\n")
     cat("Project ID:", project_info$project_id, "\n")
@@ -322,11 +326,11 @@ get_project_summary <- function(con, project_id, verbose = TRUE) {
     cat("Created:", project_info$creation_date, "\n")
     cat("Last modified:", project_info$last_modified, "\n\n")
   }
-  
+
   # Get input files
   files_query <- "SELECT * FROM input_files WHERE project_id = ? ORDER BY file_id"
   input_files <- DBI::dbGetQuery(con, files_query, params = list(project_id))
-  
+
   if (verbose && nrow(input_files) > 0) {
     cat("=== Input Files ===\n")
     for (i in 1:nrow(input_files)) {
@@ -337,7 +341,7 @@ get_project_summary <- function(con, project_id, verbose = TRUE) {
     }
     cat("\n")
   }
-  
+
   # Get VCF data summary
   vcf_summary <- NULL
   if (nrow(input_files) > 0) {
@@ -351,7 +355,7 @@ get_project_summary <- function(con, project_id, verbose = TRUE) {
       GROUP BY f.file_id, f.file_name
     ")
     vcf_summary <- DBI::dbGetQuery(con, vcf_query)
-    
+
     if (verbose && nrow(vcf_summary) > 0) {
       cat("=== VCF Data Summary ===\n")
       total_variants <- sum(vcf_summary$variant_count)
@@ -363,7 +367,7 @@ get_project_summary <- function(con, project_id, verbose = TRUE) {
       cat(sprintf("Total variants: %d\n\n", total_variants))
     }
   }
-  
+
   # Get BLAST summary (ENHANCED)
   blast_query <- "
     SELECT bp.blast_param_id, bp.blast_type, bp.db_name, bp.execution_date,
@@ -379,32 +383,32 @@ get_project_summary <- function(con, project_id, verbose = TRUE) {
     ORDER BY bp.execution_date DESC
   "
   blast_summary <- DBI::dbGetQuery(con, blast_query, params = list(project_id))
-  
+
   if (verbose && nrow(blast_summary) > 0) {
     cat("=== BLAST Analysis Summary ===\n")
     for (i in 1:nrow(blast_summary)) {
       bs <- blast_summary[i, ]
       cat(sprintf("BLAST Run %d (%s):\n", bs$blast_param_id, bs$execution_date))
       cat(sprintf("  Database: %s, Type: %s\n", bs$db_name, bs$blast_type))
-      
+
       # Show database metadata if available
       if (!is.na(bs$db_title) && !is.null(bs$db_title)) {
         cat(sprintf("  DB Title: %s\n", bs$db_title))
-        cat(sprintf("  DB Sequences: %s\n", 
+        cat(sprintf("  DB Sequences: %s\n",
                     format(bs$num_sequences %||% 0, big.mark = ",")))
-        cat(sprintf("  DB Length: %s bp\n", 
+        cat(sprintf("  DB Length: %s bp\n",
                     format(bs$total_length %||% 0, big.mark = ",")))
         cat(sprintf("  DB Date: %s\n", bs$db_date %||% "Unknown"))
         if (!is.na(bs$db_version) && !is.null(bs$db_version)) {
           cat(sprintf("  DB Version: %s\n", bs$db_version))
         }
       }
-      
+
       cat(sprintf("  Results: %d, Annotations: %d\n", bs$result_count, bs$annotation_count))
     }
     cat("\n")
   }
-  
+
   # Get annotation summary
   annotation_summary <- data.frame()
   if (nrow(blast_summary) > 0) {
@@ -420,9 +424,9 @@ get_project_summary <- function(con, project_id, verbose = TRUE) {
       LEFT JOIN kegg_references k ON a.annotation_id = k.annotation_id
       WHERE bp.project_id = ", project_id
     )
-    
+
     annotation_summary <- DBI::dbGetQuery(con, annotation_query)
-    
+
     if (verbose && nrow(annotation_summary) > 0) {
       cat("=== Annotation Summary ===\n")
       as <- annotation_summary[1, ]
@@ -432,7 +436,7 @@ get_project_summary <- function(con, project_id, verbose = TRUE) {
       cat(sprintf("KEGG references: %d\n", as$kegg_refs))
     }
   }
-  
+
   # Return comprehensive project summary
   list(
     project_info = project_info,
@@ -455,46 +459,46 @@ get_project_summary <- function(con, project_id, verbose = TRUE) {
 #' @return A list containing table information
 #' @export
 get_table_info <- function(con, table_name, sample_size = 5, include_schema = TRUE, verbose = TRUE) {
-  
+
   if (!DBI::dbIsValid(con)) {
     stop("Invalid database connection")
   }
-  
+
   # Check if table exists
   all_tables <- DBI::dbListTables(con)
   if (!table_name %in% all_tables) {
     stop("Table '", table_name, "' not found in database")
   }
-  
+
   if (verbose) {
     cat("=== Table Information: ", table_name, " ===\n")
   }
-  
+
   # Get table count
   count_query <- paste0("SELECT COUNT(*) as count FROM ", table_name)
   record_count <- DBI::dbGetQuery(con, count_query)$count
-  
+
   if (verbose) {
     cat("Total records:", record_count, "\n")
   }
-  
+
   # Get schema information
   schema_info <- NULL
   if (include_schema) {
     tryCatch({
       schema_query <- paste0("PRAGMA table_info(", table_name, ")")
       schema_info <- DBI::dbGetQuery(con, schema_query)
-      
+
       if (verbose && nrow(schema_info) > 0) {
         cat("\n=== Table Schema ===\n")
         cat(sprintf("%-20s %-15s %-10s %-10s\n", "Column", "Type", "Not Null", "Default"))
         cat(paste(rep("-", 60), collapse = ""), "\n")
-        
+
         for (i in 1:nrow(schema_info)) {
           col <- schema_info[i, ]
-          cat(sprintf("%-20s %-15s %-10s %-10s\n", 
-                      col$name, 
-                      col$type, 
+          cat(sprintf("%-20s %-15s %-10s %-10s\n",
+                      col$name,
+                      col$type,
                       ifelse(col$notnull == 1, "YES", "NO"),
                       ifelse(is.na(col$dflt_value), "NULL", col$dflt_value)))
         }
@@ -503,14 +507,14 @@ get_table_info <- function(con, table_name, sample_size = 5, include_schema = TR
       if (verbose) cat("Could not retrieve schema information\n")
     })
   }
-  
+
   # Get sample data
   sample_data <- NULL
   if (record_count > 0 && sample_size > 0) {
     tryCatch({
       sample_query <- paste0("SELECT * FROM ", table_name, " LIMIT ", sample_size)
       sample_data <- DBI::dbGetQuery(con, sample_query)
-      
+
       if (verbose) {
         cat("\n=== Sample Data ===\n")
         print(sample_data)
@@ -519,12 +523,12 @@ get_table_info <- function(con, table_name, sample_size = 5, include_schema = TR
       if (verbose) cat("Could not retrieve sample data\n")
     })
   }
-  
+
   # Get column statistics for numeric columns
   column_stats <- NULL
   if (record_count > 0 && !is.null(schema_info)) {
     numeric_columns <- schema_info$name[grepl("INTEGER|REAL|NUMERIC", schema_info$type, ignore.case = TRUE)]
-    
+
     if (length(numeric_columns) > 0) {
       tryCatch({
         stats_queries <- lapply(numeric_columns, function(col) {
@@ -535,20 +539,20 @@ get_table_info <- function(con, table_name, sample_size = 5, include_schema = TR
                  "COUNT(DISTINCT ", col, ") as unique_count ",
                  "FROM ", table_name, " WHERE ", col, " IS NOT NULL")
         })
-        
+
         column_stats <- do.call(rbind, lapply(stats_queries, function(query) {
           DBI::dbGetQuery(con, query)
         }))
-        
+
         if (verbose && nrow(column_stats) > 0) {
           cat("\n=== Numeric Column Statistics ===\n")
           cat(sprintf("%-15s %10s %10s %12s %10s\n", "Column", "Min", "Max", "Average", "Unique"))
           cat(paste(rep("-", 65), collapse = ""), "\n")
-          
+
           for (i in 1:nrow(column_stats)) {
             stat <- column_stats[i, ]
             cat(sprintf("%-15s %10.2f %10.2f %12.2f %10d\n",
-                        stat$column_name, stat$min_val, stat$max_val, 
+                        stat$column_name, stat$min_val, stat$max_val,
                         stat$avg_val, stat$unique_count))
           }
         }
@@ -557,7 +561,7 @@ get_table_info <- function(con, table_name, sample_size = 5, include_schema = TR
       })
     }
   }
-  
+
   # Return comprehensive table info
   list(
     table_name = table_name,
@@ -577,14 +581,14 @@ get_table_info <- function(con, table_name, sample_size = 5, include_schema = TR
 #' @return Named vector of table counts
 #' @export
 get_table_counts <- function(con, verbose = TRUE) {
-  
+
   if (!DBI::dbIsValid(con)) {
     stop("Invalid database connection")
   }
-  
+
   all_tables <- DBI::dbListTables(con)
   counts <- setNames(numeric(length(all_tables)), all_tables)
-  
+
   for (table in all_tables) {
     tryCatch({
       count_query <- paste0("SELECT COUNT(*) as count FROM ", table)
@@ -593,15 +597,15 @@ get_table_counts <- function(con, verbose = TRUE) {
       counts[table] <- NA
     })
   }
-  
+
   if (verbose) {
     cat("=== Table Record Counts ===\n")
     for (table in names(counts)) {
-      cat(sprintf("%-25s: %s\n", table, 
+      cat(sprintf("%-25s: %s\n", table,
                   ifelse(is.na(counts[table]), "Error", format(counts[table], big.mark = ","))))
     }
   }
-  
+
   return(counts)
 }
 
@@ -617,7 +621,7 @@ get_blast_database_info <- function(con, db_name = NULL, verbose = TRUE) {
   if (!DBI::dbIsValid(con)) {
     stop("Invalid database connection")
   }
-  
+
   # Check if metadata table exists
   tables <- DBI::dbListTables(con)
   if (!"blast_database_metadata" %in% tables) {
@@ -625,7 +629,7 @@ get_blast_database_info <- function(con, db_name = NULL, verbose = TRUE) {
     cat("Run perform_blast_db() with extract_db_metadata=TRUE to collect this information.\n")
     return(list())
   }
-  
+
   # Build query
   base_query <- "
     SELECT bm.*, bp.project_id, p.project_name,
@@ -640,7 +644,7 @@ get_blast_database_info <- function(con, db_name = NULL, verbose = TRUE) {
     LEFT JOIN blast_results br ON bp.blast_param_id = br.blast_param_id
     LEFT JOIN annotations a ON br.blast_result_id = a.blast_result_id
   "
-  
+
   if (!is.null(db_name)) {
     query <- paste0(base_query, " WHERE bm.db_name = ? GROUP BY bm.metadata_id ORDER BY bm.extraction_date DESC")
     params <- list(db_name)
@@ -648,13 +652,13 @@ get_blast_database_info <- function(con, db_name = NULL, verbose = TRUE) {
     query <- paste0(base_query, " GROUP BY bm.metadata_id ORDER BY usage_count DESC, bm.extraction_date DESC")
     params <- list()
   }
-  
+
   # Execute query
   db_info <- DBI::dbGetQuery(con, query, params = params)
-  
+
   if (verbose && nrow(db_info) > 0) {
     cat("=== BLAST Database Information ===\n")
-    
+
     for (i in 1:nrow(db_info)) {
       info <- db_info[i, ]
       cat(sprintf("\nDatabase: %s\n", info$db_name))
@@ -678,6 +682,6 @@ get_blast_database_info <- function(con, db_name = NULL, verbose = TRUE) {
       cat(paste(rep("-", 50), collapse = ""), "\n")
     }
   }
-  
+
   return(db_info)
 }
