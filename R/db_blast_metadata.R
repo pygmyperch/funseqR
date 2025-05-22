@@ -69,16 +69,23 @@ extract_blast_db_metadata <- function(db_path, db_name, verbose = TRUE) {
         }
       }
 
-      # Date created
+      # Date created (FIXED - handle case where date and longest sequence are on same line)
       if (grepl("Date:", line)) {
-        metadata$db_date <- gsub("^Date:\\s*", "", line)
+        # Extract just the date part, stopping at tab or "Longest sequence"
+        date_part <- gsub("^Date:\\s*", "", line)
+        # Split on tab or "Longest sequence" and take the first part
+        date_part <- strsplit(date_part, "\\t|Longest sequence")[[1]][1]
+        # Trim whitespace
+        metadata$db_date <- trimws(date_part)
       }
 
-      # Longest sequence
+      # Longest sequence (IMPROVED - handle case where it's on same line as date)
       if (grepl("Longest sequence:", line)) {
-        longest_match <- regexpr("[0-9,]+", line)
+        # Extract the number before "residues"
+        longest_match <- regexpr("[0-9,]+\\s+residues", line)
         if (longest_match > 0) {
-          metadata$longest_sequence <- as.numeric(gsub("[^0-9]", "", regmatches(line, longest_match)))
+          longest_text <- regmatches(line, longest_match)
+          metadata$longest_sequence <- as.numeric(gsub("[^0-9]", "", longest_text))
         }
       }
     }
@@ -104,12 +111,24 @@ extract_blast_db_metadata <- function(db_path, db_name, verbose = TRUE) {
       if (verbose) message("Could not extract version information: ", e$message)
     })
 
+    # Ensure all fields are single values (not vectors)
+    metadata <- lapply(metadata, function(x) {
+      if (length(x) > 1) {
+        paste(x, collapse = " ")
+      } else if (length(x) == 0 || is.null(x)) {
+        NA_character_
+      } else {
+        as.character(x)
+      }
+    })
+
     if (verbose) {
       message("Extracted database metadata:")
       message("  Title: ", metadata$db_title %||% "Unknown")
-      message("  Sequences: ", format(metadata$num_sequences %||% 0, big.mark = ","))
-      message("  Total length: ", format(metadata$total_length %||% 0, big.mark = ","))
+      message("  Sequences: ", format(as.numeric(metadata$num_sequences %||% 0), big.mark = ","))
+      message("  Total length: ", format(as.numeric(metadata$total_length %||% 0), big.mark = ","))
       message("  Date: ", metadata$db_date %||% "Unknown")
+      message("  Longest sequence: ", format(as.numeric(metadata$longest_sequence %||% 0), big.mark = ","))
     }
 
     return(metadata)
