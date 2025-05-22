@@ -16,6 +16,7 @@ perform_blast_db(
   threads = 1,
   output_dir = getwd(),
   taxids = NULL,
+  extract_db_metadata = TRUE,
   verbose = TRUE
 )
 }
@@ -48,6 +49,9 @@ Default is the current working directory.}
 \item{taxids}{Optional. Character string specifying NCBI taxonomy IDs to limit the search.
 Default is NULL.}
 
+\item{extract_db_metadata}{Logical. If TRUE, extract and store database metadata.
+Default is TRUE.}
+
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 }
 \value{
@@ -55,8 +59,10 @@ A list containing:
 \item{blast_param_id}{The ID of the registered BLAST parameters.}
 \item{result_count}{The number of BLAST results imported.}
 \item{output_base}{The base name for output files.}
+\item{metadata_id}{The ID of the stored database metadata (if extracted).}
+\item{db_metadata}{The extracted database metadata (if extracted).}
 }
 \description{
 This function retrieves flanking sequences from the database, performs a BLAST search,
-and stores the results back in the database.
+stores the results back in the database, and captures database metadata for reproducibility.
 }
