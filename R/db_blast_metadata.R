@@ -170,6 +170,57 @@ store_blast_db_metadata <- function(con, blast_param_id, metadata, verbose = TRU
     return(existing$metadata_id[1])
   }
 
+  # Debug: Print all metadata values and their types
+  if (verbose) {
+    message("Debugging metadata values:")
+    for (name in names(metadata)) {
+      value <- metadata[[name]]
+      message("  ", name, ": ",
+              "class=", class(value),
+              ", length=", length(value),
+              ", value=", paste(head(value, 3), collapse=", "))
+    }
+  }
+
+  # Ensure all values are single scalars, converting appropriately
+  safe_metadata <- list(
+    blast_param_id = as.integer(blast_param_id),
+    db_path = as.character(metadata$db_path %||% ""),
+    db_name = as.character(metadata$db_name %||% ""),
+    db_full_path = as.character(metadata$db_full_path %||% ""),
+    db_title = as.character(metadata$db_title %||% ""),
+    num_sequences = as.integer(metadata$num_sequences %||% 0),
+    total_length = as.integer(metadata$total_length %||% 0),
+    db_date = as.character(metadata$db_date %||% ""),
+    db_version = as.character(metadata$db_version %||% ""),
+    longest_sequence = as.integer(metadata$longest_sequence %||% 0),
+    extraction_date = as.character(metadata$extraction_date %||% format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
+    raw_output = as.character(metadata$raw_output %||% "")
+  )
+
+  # Convert any NA values to appropriate defaults
+  safe_metadata$db_title[is.na(safe_metadata$db_title)] <- ""
+  safe_metadata$db_date[is.na(safe_metadata$db_date)] <- ""
+  safe_metadata$db_version[is.na(safe_metadata$db_version)] <- ""
+  safe_metadata$raw_output[is.na(safe_metadata$raw_output)] <- ""
+
+  # Ensure numeric fields are not NA
+  safe_metadata$num_sequences[is.na(safe_metadata$num_sequences)] <- 0L
+  safe_metadata$total_length[is.na(safe_metadata$total_length)] <- 0L
+  safe_metadata$longest_sequence[is.na(safe_metadata$longest_sequence)] <- 0L
+
+  # Debug: Print the safe metadata
+  if (verbose) {
+    message("Safe metadata for insertion:")
+    for (name in names(safe_metadata)) {
+      value <- safe_metadata[[name]]
+      message("  ", name, ": ",
+              "class=", class(value),
+              ", length=", length(value),
+              ", value=", value)
+    }
+  }
+
   # Insert metadata
   tryCatch({
     DBI::dbExecute(
@@ -180,18 +231,18 @@ store_blast_db_metadata <- function(con, blast_param_id, metadata, verbose = TRU
         extraction_date, raw_output
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       params = list(
-        blast_param_id,
-        metadata$db_path,
-        metadata$db_name,
-        metadata$db_full_path,
-        metadata$db_title,
-        metadata$num_sequences,
-        metadata$total_length,
-        metadata$db_date,
-        metadata$db_version,
-        metadata$longest_sequence,
-        metadata$extraction_date,
-        metadata$raw_output
+        safe_metadata$blast_param_id,
+        safe_metadata$db_path,
+        safe_metadata$db_name,
+        safe_metadata$db_full_path,
+        safe_metadata$db_title,
+        safe_metadata$num_sequences,
+        safe_metadata$total_length,
+        safe_metadata$db_date,
+        safe_metadata$db_version,
+        safe_metadata$longest_sequence,
+        safe_metadata$extraction_date,
+        safe_metadata$raw_output
       )
     )
 
@@ -207,6 +258,7 @@ store_blast_db_metadata <- function(con, blast_param_id, metadata, verbose = TRU
 
   }, error = function(e) {
     if (verbose) message("Error storing database metadata: ", e$message)
+    if (verbose) message("Error details: ", conditionMessage(e))
     return(NULL)
   })
 }
