@@ -468,6 +468,23 @@ perform_blast_db <- function(con, project_id, vcf_file_id, db_path, db_name,
     message("===========================")
   }
 
+  # Update analysis report if it exists
+  tryCatch({
+    blast_message <- paste0(
+      "BLAST search completed: ", result_count, " results from ", db_name, " database",
+      if (!is.null(db_metadata)) paste0(" (", format(db_metadata$num_sequences %||% 0, big.mark = ","), " sequences)")
+    )
+
+    update_analysis_report(
+      con, project_id,
+      section = "blast_search",
+      message = blast_message,
+      verbose = FALSE
+    )
+  }, error = function(e) {
+    # Silently ignore if no report exists
+  })
+
   return(result)
 }
 

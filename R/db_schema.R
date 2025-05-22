@@ -201,6 +201,20 @@ create_funseq_schema <- function(con, verbose = TRUE) {
     )
   ")
 
+  if (verbose) message("Creating analysis_reports table...")
+  DBI::dbExecute(con, "
+    CREATE TABLE analysis_reports (
+      report_id INTEGER PRIMARY KEY,
+      project_id INTEGER NOT NULL,
+      report_path TEXT NOT NULL,
+      format TEXT NOT NULL,
+      template TEXT NOT NULL,
+      created_date TEXT NOT NULL,
+      last_updated TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects (project_id)
+    )
+  ")
+
   # Create indexes
   if (verbose) message("Creating indexes...")
 
@@ -236,6 +250,9 @@ create_funseq_schema <- function(con, verbose = TRUE) {
   DBI::dbExecute(con, "CREATE INDEX idx_blast_db_meta_param ON blast_database_metadata (blast_param_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_blast_db_meta_name ON blast_database_metadata (db_name)")
   DBI::dbExecute(con, "CREATE INDEX idx_blast_db_meta_date ON blast_database_metadata (extraction_date)")
+
+  # Report indexes
+  DBI::dbExecute(con, "CREATE INDEX idx_reports_project ON analysis_reports (project_id)")
 
   if (verbose) message("Schema creation complete.")
 

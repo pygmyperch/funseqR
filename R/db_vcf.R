@@ -155,6 +155,18 @@ import_vcf_to_db <- function(con, project_id, vcf_file, verbose = TRUE) {
     DBI::dbExecute(con, "ROLLBACK")
     stop("Error importing VCF data: ", e$message)
   })
+
+  # Update analysis report if it exists
+  tryCatch({
+    update_analysis_report(
+      con, project_id,
+      section = "vcf_import",
+      message = paste("Imported", vcf_count, "variants from", basename(vcf_file)),
+      verbose = FALSE
+    )
+  }, error = function(e) {
+    # Silently ignore if no report exists
+  })
 }
 
 #' Get VCF data from the database

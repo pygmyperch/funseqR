@@ -16,37 +16,55 @@
 #'
 #' @importFrom DBI dbExecute dbGetQuery
 #' @export
-create_project <- function(con, project_name, description = NULL, verbose = TRUE) {
+create_project <- function(con, project_name, description = NULL,
+                           create_report = TRUE, report_format = "Rmd",
+                           report_template = "standard", verbose = TRUE) {
   # Check if project name already exists
   existing <- DBI::dbGetQuery(
-    con, 
-    "SELECT project_id FROM projects WHERE project_name = ?", 
+    con,
+    "SELECT project_id FROM projects WHERE project_name = ?",
     params = list(project_name)
   )
-  
+
   if (nrow(existing) > 0) {
     stop("A project with the name '", project_name, "' already exists.")
   }
-  
+
   # Create project
   current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-  
+
   DBI::dbExecute(
     con,
-    "INSERT INTO projects (project_name, description, creation_date, last_modified) 
+    "INSERT INTO projects (project_name, description, creation_date, last_modified)
      VALUES (?, ?, ?, ?)",
     params = list(project_name, description, current_time, current_time)
   )
-  
+
   # Get the ID of the newly created project
   project_id <- DBI::dbGetQuery(
     con,
     "SELECT project_id FROM projects WHERE project_name = ?",
     params = list(project_name)
   )$project_id[1]
-  
+
   if (verbose) message("Created project '", project_name, "' with ID ", project_id)
-  
+
+  if (create_report) {
+    tryCatch({
+      report_path <- create_analysis_report(
+        con, project_id,
+        format = report_format,
+        template = report_template,
+        open_report = interactive(),
+        verbose = verbose
+      )
+
+      if (verbose) message("Created analysis report: ", report_path)
+    }, error = function(e) {
+      if (verbose) message("Could not create analysis report: ", e$message)
+    })
+  }
+
   return(project_id)
 }
 
@@ -77,11 +95,11 @@ get_project <- function(con, project_id) {
     "SELECT * FROM projects WHERE project_id = ?",
     params = list(project_id)
   )
-  
+
   if (nrow(project) == 0) {
     stop("Project with ID ", project_id, " not found.")
   }
-  
+
   return(project)
 }
 
@@ -100,11 +118,11 @@ get_project_id <- function(con, project_name) {
     "SELECT project_id FROM projects WHERE project_name = ?",
     params = list(project_name)
   )
-  
+
   if (nrow(project) == 0) {
     return(NULL)
   }
-  
+
   return(project$project_id[1])
 }
 
@@ -127,15 +145,15 @@ update_project <- function(con, project_id, project_name = NULL, description = N
     "SELECT * FROM projects WHERE project_id = ?",
     params = list(project_id)
   )
-  
+
   if (nrow(project) == 0) {
     stop("Project with ID ", project_id, " not found.")
   }
-  
+
   # Prepare update
   update_parts <- c()
   params <- list()
-  
+
   if (!is.null(project_name)) {
     # Check if the new name conflicts with existing projects
     if (project_name != project$project_name) {
@@ -144,38 +162,38 @@ update_project <- function(con, project_id, project_name = NULL, description = N
         "SELECT project_id FROM projects WHERE project_name = ? AND project_id != ?",
         params = list(project_name, project_id)
       )
-      
+
       if (nrow(existing) > 0) {
         stop("A project with the name '", project_name, "' already exists.")
       }
     }
-    
+
     update_parts <- c(update_parts, "project_name = ?")
     params <- c(params, list(project_name))
   }
-  
+
   if (!is.null(description)) {
     update_parts <- c(update_parts, "description = ?")
     params <- c(params, list(description))
   }
-  
+
   # Add last modified timestamp
   update_parts <- c(update_parts, "last_modified = ?")
   params <- c(params, list(format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
-  
+
   # Add project_id to params
   params <- c(params, list(project_id))
-  
+
   # Execute update
   if (length(update_parts) > 0) {
     query <- paste("UPDATE projects SET", paste(update_parts, collapse = ", "), "WHERE project_id = ?")
     DBI::dbExecute(con, query, params = params)
-    
+
     if (verbose) message("Updated project with ID ", project_id)
   } else {
     if (verbose) message("No changes to update for project with ID ", project_id)
   }
-  
+
   return(TRUE)
 }
 
@@ -199,33 +217,33 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
     "SELECT project_name FROM projects WHERE project_id = ?",
     params = list(project_id)
   )
-  
+
   if (nrow(project) == 0) {
     stop("Project with ID ", project_id, " not found.")
   }
-  
+
   # Confirm deletion
   if (confirm) {
-    answer <- readline(paste0("Are you sure you want to delete the project '", 
-                             project$project_name, "' (ID: ", project_id, 
+    answer <- readline(paste0("Are you sure you want to delete the project '",
+                             project$project_name, "' (ID: ", project_id,
                              ") and all associated data? (y/n): "))
-    
+
     if (tolower(answer) != "y") {
       message("Project deletion cancelled.")
       return(FALSE)
     }
   }
-  
+
   # Start transaction
   DBI::dbExecute(con, "BEGIN TRANSACTION")
-  
+
   tryCatch({
     # Delete all associated data
     # The order matters due to foreign key constraints
-    
+
     # Delete annotations and related data
     if (verbose) message("Deleting annotations data...")
-    
+
     # Get all annotation IDs
     annotation_ids <- DBI::dbGetQuery(
       con,
@@ -235,7 +253,7 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
        WHERE bp.project_id = ?",
       params = list(project_id)
     )$annotation_id
-    
+
     if (length(annotation_ids) > 0) {
       # Delete GO terms
       DBI::dbExecute(
@@ -243,14 +261,14 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
         paste0("DELETE FROM go_terms WHERE annotation_id IN (",
                paste(annotation_ids, collapse = ","), ")")
       )
-      
+
       # Delete KEGG references
       DBI::dbExecute(
         con,
         paste0("DELETE FROM kegg_references WHERE annotation_id IN (",
                paste(annotation_ids, collapse = ","), ")")
       )
-      
+
       # Delete annotations
       DBI::dbExecute(
         con,
@@ -258,17 +276,17 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
                paste(annotation_ids, collapse = ","), ")")
       )
     }
-    
+
     # Delete BLAST results and parameters
     if (verbose) message("Deleting BLAST data...")
-    
+
     # Get all blast parameter IDs
     blast_param_ids <- DBI::dbGetQuery(
       con,
       "SELECT blast_param_id FROM blast_parameters WHERE project_id = ?",
       params = list(project_id)
     )$blast_param_id
-    
+
     if (length(blast_param_ids) > 0) {
       # Delete BLAST results
       DBI::dbExecute(
@@ -276,7 +294,7 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
         paste0("DELETE FROM blast_results WHERE blast_param_id IN (",
                paste(blast_param_ids, collapse = ","), ")")
       )
-      
+
       # Delete BLAST parameters
       DBI::dbExecute(
         con,
@@ -284,17 +302,17 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
                paste(blast_param_ids, collapse = ","), ")")
       )
     }
-    
+
     # Delete flanking sequences
     if (verbose) message("Deleting sequence data...")
-    
+
     # Get all file IDs for this project
     file_ids <- DBI::dbGetQuery(
       con,
       "SELECT file_id FROM input_files WHERE project_id = ?",
       params = list(project_id)
     )$file_id
-    
+
     if (length(file_ids) > 0) {
       # Get all VCF IDs
       vcf_ids <- DBI::dbGetQuery(
@@ -302,7 +320,7 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
         paste0("SELECT vcf_id FROM vcf_data WHERE file_id IN (",
                paste(file_ids, collapse = ","), ")")
       )$vcf_id
-      
+
       if (length(vcf_ids) > 0) {
         # Delete flanking sequences
         DBI::dbExecute(
@@ -311,14 +329,14 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
                  paste(vcf_ids, collapse = ","), ")")
         )
       }
-      
+
       # Get all genome IDs
       genome_ids <- DBI::dbGetQuery(
         con,
         paste0("SELECT genome_id FROM reference_genomes WHERE file_id IN (",
                paste(file_ids, collapse = ","), ")")
       )$genome_id
-      
+
       if (length(genome_ids) > 0) {
         # Delete reference sequences
         DBI::dbExecute(
@@ -326,7 +344,7 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
           paste0("DELETE FROM reference_sequences WHERE genome_id IN (",
                  paste(genome_ids, collapse = ","), ")")
         )
-        
+
         # Delete reference genomes
         DBI::dbExecute(
           con,
@@ -334,7 +352,7 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
                  paste(genome_ids, collapse = ","), ")")
         )
       }
-      
+
       # Delete VCF data
       if (length(vcf_ids) > 0) {
         DBI::dbExecute(
@@ -343,7 +361,7 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
                  paste(file_ids, collapse = ","), ")")
         )
       }
-      
+
       # Delete input files
       DBI::dbExecute(
         con,
@@ -351,7 +369,7 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
                paste(file_ids, collapse = ","), ")")
       )
     }
-    
+
     # Delete project
     if (verbose) message("Deleting project...")
     DBI::dbExecute(
@@ -359,12 +377,12 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
       "DELETE FROM projects WHERE project_id = ?",
       params = list(project_id)
     )
-    
+
     # Commit transaction
     DBI::dbExecute(con, "COMMIT")
-    
+
     if (verbose) message("Project '", project$project_name, "' (ID: ", project_id, ") deleted successfully.")
-    
+
     return(TRUE)
   }, error = function(e) {
     # Rollback transaction on error
@@ -395,59 +413,59 @@ register_input_file <- function(con, project_id, file_path, file_type, calculate
     "SELECT project_id FROM projects WHERE project_id = ?",
     params = list(project_id)
   )
-  
+
   if (nrow(project) == 0) {
     stop("Project with ID ", project_id, " not found.")
   }
-  
+
   # Check if file exists
   if (!file.exists(file_path)) {
     stop("File does not exist: ", file_path)
   }
-  
+
   # Get file name
   file_name <- basename(file_path)
-  
+
   # Calculate hash if requested
   file_hash <- NULL
   if (calculate_hash) {
     if (verbose) message("Calculating file hash...")
     file_hash <- digest::digest(file_path, algo = "sha256", file = TRUE)
   }
-  
+
   # Check if this file has already been registered for this project
   existing <- DBI::dbGetQuery(
     con,
-    "SELECT file_id FROM input_files 
+    "SELECT file_id FROM input_files
      WHERE project_id = ? AND file_name = ? AND file_path = ?",
     params = list(project_id, file_name, file_path)
   )
-  
+
   if (nrow(existing) > 0) {
     if (verbose) message("File already registered with ID ", existing$file_id[1])
     return(existing$file_id[1])
   }
-  
+
   # Register file
   current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-  
+
   DBI::dbExecute(
     con,
     "INSERT INTO input_files (project_id, file_type, file_name, file_path, file_hash, import_date)
      VALUES (?, ?, ?, ?, ?, ?)",
     params = list(project_id, file_type, file_name, file_path, file_hash, current_time)
   )
-  
+
   # Get the ID of the newly registered file
   file_id <- DBI::dbGetQuery(
     con,
-    "SELECT file_id FROM input_files 
+    "SELECT file_id FROM input_files
      WHERE project_id = ? AND file_name = ? AND file_path = ?",
     params = list(project_id, file_name, file_path)
   )$file_id[1]
-  
+
   if (verbose) message("Registered file '", file_name, "' with ID ", file_id)
-  
+
   return(file_id)
 }
 
@@ -467,11 +485,11 @@ list_input_files <- function(con, project_id) {
     "SELECT project_id FROM projects WHERE project_id = ?",
     params = list(project_id)
   )
-  
+
   if (nrow(project) == 0) {
     stop("Project with ID ", project_id, " not found.")
   }
-  
+
   # Get files
   DBI::dbGetQuery(
     con,
@@ -495,10 +513,10 @@ get_input_file <- function(con, file_id) {
     "SELECT * FROM input_files WHERE file_id = ?",
     params = list(file_id)
   )
-  
+
   if (nrow(file_info) == 0) {
     stop("File with ID ", file_id, " not found.")
   }
-  
+
   return(file_info)
 }

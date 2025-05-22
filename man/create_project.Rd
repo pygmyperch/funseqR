@@ -4,7 +4,15 @@
 \alias{create_project}
 \title{Project management functions for funseqR}
 \usage{
-create_project(con, project_name, description = NULL, verbose = TRUE)
+create_project(
+  con,
+  project_name,
+  description = NULL,
+  create_report = TRUE,
+  report_format = "Rmd",
+  report_template = "standard",
+  verbose = TRUE
+)
 }
 \arguments{
 \item{con}{A database connection object.}

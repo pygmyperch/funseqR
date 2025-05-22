@@ -1199,6 +1199,30 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
     result$verification <- verification_results
   }
 
+  # Update analysis report if it exists
+  tryCatch({
+    annotation_message <- paste0(
+      "Annotation completed: ", successful_annotations, " annotations, ",
+      go_count, " GO terms, ", kegg_count, " KEGG references"
+    )
+
+    # Get project_id from blast_param_id
+    project_info <- DBI::dbGetQuery(con,
+                                    "SELECT project_id FROM blast_parameters WHERE blast_param_id = ?",
+                                    params = list(blast_param_id))
+
+    if (nrow(project_info) > 0) {
+      update_analysis_report(
+        con, project_info$project_id[1],
+        section = "annotation",
+        message = annotation_message,
+        verbose = FALSE
+      )
+    }
+  }, error = function(e) {
+    # Silently ignore if no report exists
+  })
+
   return(result)
 }
 
