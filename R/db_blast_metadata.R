@@ -149,7 +149,7 @@ extract_blast_db_metadata <- function(db_path, db_name, verbose = TRUE) {
 #' @return The ID of the stored metadata record, or NULL if storage fails
 #'
 #' @export
-store_blast_db_metadata <- function(con, blast_param_id, metadata, verbose = TRUE) {
+store_blast_db_metadata <- function(con, blast_param_id, metadata, verbose = FALSE) {
   if (is.null(metadata) || !is.list(metadata)) {
     if (verbose) message("No metadata to store")
     return(NULL)

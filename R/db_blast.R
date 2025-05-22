@@ -338,7 +338,7 @@ perform_blast_db <- function(con, project_id, vcf_file_id, db_path, db_name,
     db_metadata <- extract_blast_db_metadata(db_path, db_name, verbose = verbose)
 
     if (!is.null(db_metadata)) {
-      metadata_id <- store_blast_db_metadata(con, blast_param_id, db_metadata, verbose = verbose)
+      metadata_id <- store_blast_db_metadata(con, blast_param_id, db_metadata, verbose = FALSE)
     }
   }
 

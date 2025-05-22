@@ -4,7 +4,7 @@
 \alias{store_blast_db_metadata}
 \title{Store BLAST database metadata in the database}
 \usage{
-store_blast_db_metadata(con, blast_param_id, metadata, verbose = TRUE)
+store_blast_db_metadata(con, blast_param_id, metadata, verbose = FALSE)
 }
 \arguments{
 \item{con}{A database connection object}
