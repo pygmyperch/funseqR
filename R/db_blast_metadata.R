@@ -61,8 +61,9 @@ extract_blast_db_metadata <- function(db_path, db_name, verbose = TRUE) {
       }
 
       # Total length
-      if (grepl("total length", line)) {
-        len_match <- regexpr("[0-9,]+\\s+total length", line)
+      if (grepl("total (residues|letters|length)", line)) {
+        # Look for pattern like "2,224,831 total residues" or "1,234,567 total letters"
+        len_match <- regexpr("[0-9,]+\\s+total\\s+(residues|letters|length)", line)
         if (len_match > 0) {
           len_text <- regmatches(line, len_match)
           metadata$total_length <- as.numeric(gsub("[^0-9]", "", len_text))
