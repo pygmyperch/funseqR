@@ -437,6 +437,39 @@ get_project_summary <- function(con, project_id, verbose = TRUE) {
     }
   }
 
+  # Get reference genome summary
+  genome_summary <- data.frame()
+  tryCatch({
+    genome_query <- "
+      SELECT rg.genome_id, rg.genome_name, rg.genome_build,
+             COUNT(DISTINCT rs.sequence_id) as sequence_count,
+             if.import_date
+      FROM reference_genomes rg
+      JOIN input_files if ON rg.file_id = if.file_id
+      LEFT JOIN reference_sequences rs ON rg.genome_id = rs.genome_id
+      WHERE if.project_id = ?
+      GROUP BY rg.genome_id, rg.genome_name, rg.genome_build, if.import_date
+      ORDER BY if.import_date DESC
+    "
+    
+    genome_summary <- DBI::dbGetQuery(con, genome_query, params = list(project_id))
+    
+    if (verbose && nrow(genome_summary) > 0) {
+      cat("\n=== Reference Genomes ===\n")
+      for (i in 1:nrow(genome_summary)) {
+        gs <- genome_summary[i, ]
+        cat(sprintf("Genome %d: %s\n", gs$genome_id, gs$genome_name))
+        if (!is.na(gs$genome_build) && !is.null(gs$genome_build)) {
+          cat(sprintf("  Build: %s\n", gs$genome_build))
+        }
+        cat(sprintf("  Sequences: %d\n", gs$sequence_count))
+        cat(sprintf("  Import date: %s\n", gs$import_date))
+      }
+    }
+  }, error = function(e) {
+    if (verbose) cat("Could not retrieve reference genome information\n")
+  })
+
   # Return comprehensive project summary
   list(
     project_info = project_info,
@@ -444,6 +477,7 @@ get_project_summary <- function(con, project_id, verbose = TRUE) {
     vcf_summary = vcf_summary,
     blast_summary = blast_summary,
     annotation_summary = annotation_summary,
+    genome_summary = genome_summary,
     analysis_date = Sys.time()
   )
 }
