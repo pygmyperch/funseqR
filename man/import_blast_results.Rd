@@ -8,7 +8,7 @@ import_blast_results(
   con,
   blast_param_id,
   results_file,
-  flanking_ids,
+  vcf_file_id,
   verbose = TRUE
 )
 }
@@ -19,8 +19,7 @@ import_blast_results(
 
 \item{results_file}{A character string specifying the path to the BLAST results file.}
 
-\item{flanking_ids}{A vector of flanking sequence IDs that correspond to the query sequences.
-Must be in the same order as the queries in the BLAST results file.}
+\item{vcf_file_id}{The VCF file ID for looking up flanking sequences.}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 }
@@ -28,5 +27,6 @@ Must be in the same order as the queries in the BLAST results file.}
 The number of BLAST results imported.
 }
 \description{
-This function imports BLAST results from a tabular output file into the database.
+This function imports BLAST results from a file into the database with proper
+mapping between query sequence IDs and flanking sequence IDs.
 }

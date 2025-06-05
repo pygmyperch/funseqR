@@ -115,13 +115,13 @@ list_blast_params <- function(con, project_id) {
 
 #' Import BLAST results into the database
 #'
-#' This function imports BLAST results from a tabular output file into the database.
+#' This function imports BLAST results from a file into the database with proper
+#' mapping between query sequence IDs and flanking sequence IDs.
 #'
 #' @param con A database connection object.
-#' @param blast_param_id The ID of the BLAST parameters associated with these results.
-#' @param results_file A character string specifying the path to the BLAST results file.
-#' @param flanking_ids A vector of flanking sequence IDs that correspond to the query sequences.
-#'   Must be in the same order as the queries in the BLAST results file.
+#' @param blast_param_id The ID of the BLAST parameters.
+#' @param results_file Path to the BLAST results file.
+#' @param vcf_file_id The VCF file ID for looking up flanking sequences.
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #'
 #' @return The number of BLAST results imported.
@@ -129,7 +129,7 @@ list_blast_params <- function(con, project_id) {
 #' @importFrom DBI dbExecute dbGetQuery
 #' @importFrom progress progress_bar
 #' @export
-import_blast_results <- function(con, blast_param_id, results_file, flanking_ids, verbose = TRUE) {
+import_blast_results <- function(con, blast_param_id, results_file, vcf_file_id, verbose = TRUE) {
   # Check if BLAST parameters exist
   params <- DBI::dbGetQuery(
     con,
@@ -158,26 +158,126 @@ import_blast_results <- function(con, blast_param_id, results_file, flanking_ids
     return(0)
   }
 
-  # Match query IDs to flanking IDs
-  if (verbose) message("Matching query IDs to flanking sequence IDs...")
+  if (verbose) message("Found ", nrow(results), " BLAST hits to import")
 
-  # Create a mapping from query IDs to flanking IDs
-  # This assumes the query IDs in the BLAST results match the order of flanking_ids
-  unique_queries <- unique(results$qseqid)
-
-  if (length(unique_queries) > length(flanking_ids)) {
-    stop("More query sequences in BLAST results than provided flanking IDs.")
+  # Create mapping from BLAST query IDs to flanking sequence IDs
+  if (verbose) message("Creating mapping from query IDs to flanking sequence IDs...")
+  
+  # Get all flanking sequences with their chromosome and position info
+  flanking_lookup <- DBI::dbGetQuery(
+    con,
+    "SELECT f.flanking_id, v.chromosome, v.position, f.start_position, f.end_position
+     FROM flanking_sequences f
+     JOIN vcf_data v ON f.vcf_id = v.vcf_id
+     WHERE v.file_id = ?
+     ORDER BY v.chromosome, v.position",
+    params = list(vcf_file_id)
+  )
+  
+  if (nrow(flanking_lookup) == 0) {
+    stop("No flanking sequences found for VCF file ID ", vcf_file_id)
+  }
+  
+  # Create expected sequence names in the same format as get_flanking_sequences
+  flanking_lookup$expected_qseqid <- paste0(
+    flanking_lookup$chromosome, ":",
+    flanking_lookup$position, " (",
+    flanking_lookup$start_position, "-",
+    flanking_lookup$end_position, ")"
+  )
+  
+  # Also create a version without the coordinate suffix for partial matching
+  flanking_lookup$partial_qseqid <- paste0(
+    flanking_lookup$chromosome, ":",
+    flanking_lookup$position
+  )
+  
+  if (verbose) {
+    message("Created lookup table with ", nrow(flanking_lookup), " flanking sequences")
   }
 
   # Map query IDs to flanking IDs
+  unique_queries <- unique(results$qseqid)
   query_to_flanking <- data.frame(
-    qseqid = unique_queries,
-    flanking_id = flanking_ids[1:length(unique_queries)],
+    qseqid = character(0),
+    flanking_id = integer(0),
     stringsAsFactors = FALSE
   )
+  
+  unmatched_queries <- character(0)
+  
+  for (qid in unique_queries) {
+    # Try exact match first
+    exact_match <- flanking_lookup[flanking_lookup$expected_qseqid == qid, ]
+    
+    if (nrow(exact_match) > 0) {
+      query_to_flanking <- rbind(query_to_flanking, data.frame(
+        qseqid = qid,
+        flanking_id = exact_match$flanking_id[1],
+        stringsAsFactors = FALSE
+      ))
+    } else {
+      # Try partial match (chromosome:position)
+      partial_match <- flanking_lookup[flanking_lookup$partial_qseqid == qid, ]
+      
+      if (nrow(partial_match) > 0) {
+        query_to_flanking <- rbind(query_to_flanking, data.frame(
+          qseqid = qid,
+          flanking_id = partial_match$flanking_id[1],
+          stringsAsFactors = FALSE
+        ))
+      } else {
+        # Try to extract chromosome and position from qseqid manually
+        # Handle formats like "CauratusV1_scaffold_1004:51240" or "LG1:12345"
+        parts <- strsplit(qid, ":")[[1]]
+        if (length(parts) >= 2) {
+          chrom <- parts[1]
+          # Extract position (remove any trailing content)
+          pos_part <- parts[2]
+          pos_match <- regexpr("^[0-9]+", pos_part)
+          if (pos_match > 0) {
+            position <- as.integer(regmatches(pos_part, pos_match))
+            
+            manual_match <- flanking_lookup[
+              flanking_lookup$chromosome == chrom & 
+              flanking_lookup$position == position, 
+            ]
+            
+            if (nrow(manual_match) > 0) {
+              query_to_flanking <- rbind(query_to_flanking, data.frame(
+                qseqid = qid,
+                flanking_id = manual_match$flanking_id[1],
+                stringsAsFactors = FALSE
+              ))
+            } else {
+              unmatched_queries <- c(unmatched_queries, qid)
+            }
+          } else {
+            unmatched_queries <- c(unmatched_queries, qid)
+          }
+        } else {
+          unmatched_queries <- c(unmatched_queries, qid)
+        }
+      }
+    }
+  }
+  
+  if (verbose) {
+    message("Successfully mapped ", nrow(query_to_flanking), " out of ", length(unique_queries), " unique query sequences")
+    if (length(unmatched_queries) > 0) {
+      message("Warning: Could not map ", length(unmatched_queries), " query sequences")
+    }
+  }
 
-  # Add flanking IDs to results
-  results <- merge(results, query_to_flanking, by = "qseqid")
+  # Filter results to only include those we can map
+  mapped_results <- merge(results, query_to_flanking, by = "qseqid")
+  
+  if (nrow(mapped_results) == 0) {
+    warning("No BLAST results could be mapped to flanking sequences")
+    return(0)
+  }
+  
+  if (verbose) message("Importing ", nrow(mapped_results), " mapped BLAST results...")
 
   # Start transaction
   DBI::dbExecute(con, "BEGIN TRANSACTION")
@@ -186,7 +286,7 @@ import_blast_results <- function(con, blast_param_id, results_file, flanking_ids
   if (verbose) {
     pb <- progress::progress_bar$new(
       format = "[:bar] :percent ETA: :eta",
-      total = nrow(results),
+      total = nrow(mapped_results),
       clear = FALSE,
       width = 60
     )
@@ -194,13 +294,13 @@ import_blast_results <- function(con, blast_param_id, results_file, flanking_ids
 
   # Import results in batches
   batch_size <- 1000
-  num_batches <- ceiling(nrow(results) / batch_size)
+  num_batches <- ceiling(nrow(mapped_results) / batch_size)
 
   tryCatch({
     for (i in 1:num_batches) {
       start_idx <- (i - 1) * batch_size + 1
-      end_idx <- min(i * batch_size, nrow(results))
-      batch <- results[start_idx:end_idx, ]
+      end_idx <- min(i * batch_size, nrow(mapped_results))
+      batch <- mapped_results[start_idx:end_idx, ]
 
       # Extract description from sseqid if available
       hit_descriptions <- rep(NA_character_, nrow(batch))
@@ -256,16 +356,16 @@ import_blast_results <- function(con, blast_param_id, results_file, flanking_ids
 
       # Update progress bar
       if (verbose) {
-        pb$update(end_idx / nrow(results))
+        pb$update(end_idx / nrow(mapped_results))
       }
     }
 
     # Commit transaction
     DBI::dbExecute(con, "COMMIT")
 
-    if (verbose) message("Imported ", nrow(results), " BLAST results.")
+    if (verbose) message("Successfully imported ", nrow(mapped_results), " BLAST results.")
 
-    return(nrow(results))
+    return(nrow(mapped_results))
   }, error = function(e) {
     # Rollback transaction on error
     DBI::dbExecute(con, "ROLLBACK")
@@ -350,16 +450,6 @@ perform_blast_db <- function(con, project_id, vcf_file_id, db_path, db_name,
     stop("No flanking sequences found for VCF file ID ", vcf_file_id)
   }
 
-  # Get flanking IDs for mapping results later
-  flanking_ids <- DBI::dbGetQuery(
-    con,
-    "SELECT f.flanking_id, v.chromosome, v.position
-     FROM flanking_sequences f
-     JOIN vcf_data v ON f.vcf_id = v.vcf_id
-     WHERE v.file_id = ?
-     ORDER BY v.chromosome, v.position",
-    params = list(vcf_file_id)
-  )
 
   # Construct full database path
   db_file <- file.path(db_path, db_name)
@@ -444,7 +534,7 @@ perform_blast_db <- function(con, project_id, vcf_file_id, db_path, db_name,
     result_count <- 0
   } else {
     result_count <- import_blast_results(
-      con, blast_param_id, output_blast, flanking_ids$flanking_id, verbose = verbose
+      con, blast_param_id, output_blast, vcf_file_id, verbose = verbose
     )
   }
 
