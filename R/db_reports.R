@@ -157,15 +157,25 @@ update_analysis_report <- function(con, project_id, section = "update", message 
                                          timestamp, auto_summary, report_info$format)
   
   if (length(update_start_idx) > 0 && length(update_end_idx) > 0) {
-    # Insert into existing updates section
-    before_updates <- report_lines[1:update_start_idx]
-    after_updates <- report_lines[update_end_idx:length(report_lines)]
+    # Use the first valid pair of markers
+    start_idx <- update_start_idx[1]
+    end_idx <- update_end_idx[length(update_end_idx)]  # Use last end marker
     
-    # Get existing updates
-    existing_updates <- report_lines[(update_start_idx + 1):(update_end_idx - 1)]
+    # Insert into existing updates section
+    before_updates <- report_lines[1:start_idx]
+    after_updates <- report_lines[end_idx:length(report_lines)]
+    
+    # Get existing updates (between first start and last end)
+    if (end_idx > start_idx + 1) {
+      existing_updates <- report_lines[(start_idx + 1):(end_idx - 1)]
+      # Remove any duplicate markers from existing content
+      existing_updates <- existing_updates[!grepl("<!-- DYNAMIC_UPDATES_(START|END) -->", existing_updates)]
+    } else {
+      existing_updates <- character(0)
+    }
     
     # Combine old and new updates
-    updated_lines <- c(before_updates, existing_updates, new_content, after_updates)
+    updated_lines <- c(before_updates, new_content, existing_updates, after_updates)
   } else {
     # Add updates section at the end
     updated_lines <- c(
@@ -182,6 +192,95 @@ update_analysis_report <- function(con, project_id, section = "update", message 
   
   if (verbose) message("Report updated successfully")
   return(invisible(report_info$report_path))
+}
+
+#' Clean up malformed report files
+#'
+#' Fixes reports with duplicate update markers or other formatting issues
+#'
+#' @param report_path Path to the report file
+#' @param verbose Logical. Print progress information. Default is TRUE
+#' @export
+clean_report_file <- function(report_path, verbose = TRUE) {
+  if (!file.exists(report_path)) {
+    stop("Report file does not exist: ", report_path)
+  }
+  
+  if (verbose) message("Cleaning report file: ", report_path)
+  
+  lines <- readLines(report_path, warn = FALSE)
+  
+  # Find all update markers
+  start_markers <- which(grepl("<!-- DYNAMIC_UPDATES_START -->", lines, fixed = TRUE))
+  end_markers <- which(grepl("<!-- DYNAMIC_UPDATES_END -->", lines, fixed = TRUE))
+  
+  if (length(start_markers) <= 1 && length(end_markers) <= 1) {
+    if (verbose) message("Report file is already clean")
+    return(invisible(report_path))
+  }
+  
+  if (verbose) message("Found ", length(start_markers), " start markers and ", length(end_markers), " end markers")
+  
+  # Extract content before first update section
+  if (length(start_markers) > 0) {
+    before_updates <- lines[1:(start_markers[1] - 1)]
+  } else {
+    before_updates <- lines
+  }
+  
+  # Extract all update content (between all markers)
+  update_content <- character(0)
+  if (length(start_markers) > 0 && length(end_markers) > 0) {
+    for (i in seq_along(start_markers)) {
+      if (i <= length(end_markers)) {
+        start_line <- start_markers[i] + 1
+        end_line <- end_markers[i] - 1
+        if (end_line >= start_line) {
+          section_content <- lines[start_line:end_line]
+          # Remove any nested markers
+          section_content <- section_content[!grepl("<!-- DYNAMIC_UPDATES_(START|END) -->", section_content)]
+          update_content <- c(update_content, section_content)
+        }
+      }
+    }
+  }
+  
+  # Extract content after last update section
+  if (length(end_markers) > 0) {
+    last_end <- end_markers[length(end_markers)]
+    if (last_end < length(lines)) {
+      after_updates <- lines[(last_end + 1):length(lines)]
+    } else {
+      after_updates <- character(0)
+    }
+  } else {
+    after_updates <- character(0)
+  }
+  
+  # Reconstruct clean file
+  clean_lines <- c(
+    before_updates,
+    "",
+    "# Analysis Updates",
+    "",
+    "This section is automatically updated as the analysis progresses.",
+    "",
+    "<!-- DYNAMIC_UPDATES_START -->",
+    update_content,
+    "<!-- DYNAMIC_UPDATES_END -->",
+    after_updates
+  )
+  
+  # Remove empty lines at the end
+  while (length(clean_lines) > 0 && clean_lines[length(clean_lines)] == "") {
+    clean_lines <- clean_lines[-length(clean_lines)]
+  }
+  
+  # Write cleaned file
+  writeLines(clean_lines, report_path)
+  
+  if (verbose) message("Report file cleaned successfully")
+  return(invisible(report_path))
 }
 
 #' Generate Report Template
@@ -290,31 +389,99 @@ generate_standard_template <- function(project_info) {
     "), caption = 'Database Table Counts')",
     "```",
     "",
-    "# Project Summary",
+    "# Analysis Workflow Status",
     "",
-    "```{r project-summary}",
+    "```{r workflow-status}",
     "proj_summary <- get_project_summary(con, project_id, verbose = FALSE)",
+    "",
+    "# Create workflow status table",
+    "workflow_status <- data.frame(",
+    "  Step = c('1. VCF Import', '2. Reference Genome', '3. Flanking Sequences', '4. BLAST Search', '5. Annotation'),",
+    "  Status = c(",
+    "    ifelse(nrow(proj_summary$input_files[proj_summary$input_files$file_type == 'VCF', ]) > 0, '✓ Complete', '○ Pending'),",
+    "    ifelse(nrow(proj_summary$genomes) > 0, '✓ Complete', '○ Pending'),",
+    "    ifelse(summary$table_counts$flanking_sequences > 0, '✓ Complete', '○ Pending'),",
+    "    ifelse(nrow(proj_summary$blast_summary) > 0, '✓ Complete', '○ Pending'),",
+    "    ifelse(summary$table_counts$annotations > 0, '✓ Complete', '○ Pending')",
+    "  ),",
+    "  Records = c(",
+    "    ifelse(nrow(proj_summary$vcf_summary) > 0, format(sum(proj_summary$vcf_summary$variant_count), big.mark = ','), '0'),",
+    "    ifelse(nrow(proj_summary$genomes) > 0, format(sum(proj_summary$genomes$sequence_count), big.mark = ','), '0'),",
+    "    format(summary$table_counts$flanking_sequences, big.mark = ','),",
+    "    ifelse(nrow(proj_summary$blast_summary) > 0, format(sum(proj_summary$blast_summary$result_count), big.mark = ','), '0'),",
+    "    format(summary$table_counts$annotations, big.mark = ',')",
+    "  )",
+    ")",
+    "",
+    "kable(workflow_status, caption = 'Analysis Workflow Progress')",
     "```",
     "",
-    "## Input Files",
+    "# Input Data Summary",
     "",
-    "```{r input-files}",
-    "if (nrow(proj_summary$input_files) > 0) {",
-    "  kable(proj_summary$input_files[, c('file_name', 'file_type', 'import_date')],",
-    "        caption = 'Input Files')",
+    "## VCF Files",
+    "",
+    "```{r vcf-files}",
+    "vcf_files <- proj_summary$input_files[proj_summary$input_files$file_type == 'VCF', ]",
+    "if (nrow(vcf_files) > 0) {",
+    "  vcf_display <- merge(vcf_files, proj_summary$vcf_summary, by = 'file_id', all.x = TRUE)",
+    "  vcf_display <- vcf_display[, c('file_name', 'variant_count', 'import_date')]",
+    "  kable(vcf_display, caption = 'VCF Files Imported')",
     "} else {",
-    "  cat('No input files yet.')",
+    "  cat('No VCF files imported yet.')",
     "}",
     "```",
     "",
-    "## BLAST Analyses",
+    "## Reference Genomes",
+    "",
+    "```{r reference-genomes}",
+    "if (nrow(proj_summary$genomes) > 0) {",
+    "  genome_display <- proj_summary$genomes[, c('genome_name', 'genome_build', 'sequence_count', 'import_date')]",
+    "  kable(genome_display, caption = 'Reference Genomes')",
+    "} else {",
+    "  cat('No reference genomes imported yet.')",
+    "}",
+    "```",
+    "",
+    "# Analysis Results",
+    "",
+    "## BLAST Searches",
     "",
     "```{r blast-summary}",
     "if (nrow(proj_summary$blast_summary) > 0) {",
     "  blast_display <- proj_summary$blast_summary[, c('blast_param_id', 'blast_type', 'db_name', 'execution_date', 'result_count')]",
-    "  kable(blast_display, caption = 'BLAST Searches')",
+    "  kable(blast_display, caption = 'BLAST Searches Performed')",
     "} else {",
-    "  cat('No BLAST searches yet.')",
+    "  cat('No BLAST searches performed yet.')",
+    "}",
+    "```",
+    "",
+    "## Functional Annotations",
+    "",
+    "```{r annotation-summary}",
+    "if (summary$table_counts$annotations > 0) {",
+    "  # Get annotation statistics",
+    "  annotation_stats <- DBI::dbGetQuery(con, '",
+    "    SELECT ",
+    "      COUNT(*) as total_annotations,",
+    "      COUNT(DISTINCT uniprot_accession) as unique_proteins,",
+    "      (SELECT COUNT(*) FROM go_terms) as go_terms,",
+    "      (SELECT COUNT(*) FROM kegg_references) as kegg_refs",
+    "    FROM annotations",
+    "  ')",
+    "  ",
+    "  annotation_display <- data.frame(",
+    "    Metric = c('Total Annotations', 'Unique Proteins', 'GO Terms', 'KEGG References'),",
+    "    Count = c(",
+    "      format(annotation_stats$total_annotations, big.mark = ','),",
+    "      format(annotation_stats$unique_proteins, big.mark = ','),",
+    "      format(annotation_stats$go_terms, big.mark = ','),",
+    "      format(annotation_stats$kegg_refs, big.mark = ',')",
+    "    )",
+    "  )",
+    "  ",
+    "  kable(annotation_display, caption = 'Functional Annotation Summary')",
+    "} else {",
+    "  cat('No functional annotations available yet.')",
     "}",
     "```",
     ""
@@ -450,13 +617,146 @@ generate_minimal_template <- function(project_info) {
 }
 
 generate_detailed_template <- function(project_info) {
-  # This would be much longer with detailed plots, statistics, etc.
   c(generate_standard_template(project_info),
     "",
     "# Detailed Analysis",
     "",
-    "```{r plots}",
-    "# Add plots here when data is available",
+    "## Chromosome Distribution",
+    "",
+    "```{r chromosome-distribution, fig.height=6, fig.width=10}",
+    "if (summary$table_counts$vcf_data > 0) {",
+    "  # Get chromosome distribution",
+    "  chrom_dist <- DBI::dbGetQuery(con, '",
+    "    SELECT chromosome, COUNT(*) as variant_count",
+    "    FROM vcf_data v",
+    "    JOIN input_files if ON v.file_id = if.file_id",
+    "    WHERE if.project_id = ?",
+    "    GROUP BY chromosome",
+    "    ORDER BY chromosome",
+    "  ', params = list(project_id))",
+    "  ",
+    "  if (nrow(chrom_dist) > 0) {",
+    "    # Create bar plot of variant distribution",
+    "    p1 <- ggplot(chrom_dist, aes(x = reorder(chromosome, -variant_count), y = variant_count)) +",
+    "      geom_bar(stat = 'identity', fill = 'steelblue', alpha = 0.7) +",
+    "      labs(title = 'Variant Distribution by Chromosome',",
+    "           x = 'Chromosome', y = 'Number of Variants') +",
+    "      theme_minimal() +",
+    "      theme(axis.text.x = element_text(angle = 45, hjust = 1))",
+    "    print(p1)",
+    "  }",
+    "} else {",
+    "  cat('No variant data available for chromosome distribution plot.')",
+    "}",
+    "```",
+    "",
+    "## BLAST Results Quality",
+    "",
+    "```{r blast-quality, fig.height=6, fig.width=10}",
+    "if (summary$table_counts$blast_results > 0) {",
+    "  # Get BLAST result statistics",
+    "  blast_stats <- DBI::dbGetQuery(con, '",
+    "    SELECT e_value, bit_score, percent_identity",
+    "    FROM blast_results br",
+    "    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id",
+    "    WHERE bp.project_id = ?",
+    "  ', params = list(project_id))",
+    "  ",
+    "  if (nrow(blast_stats) > 0) {",
+    "    # E-value distribution",
+    "    p2 <- ggplot(blast_stats, aes(x = log10(e_value))) +",
+    "      geom_histogram(bins = 30, fill = 'orange', alpha = 0.7) +",
+    "      labs(title = 'BLAST E-value Distribution',",
+    "           x = 'log10(E-value)', y = 'Frequency') +",
+    "      theme_minimal()",
+    "    ",
+    "    # Identity vs Bit Score",
+    "    p3 <- ggplot(blast_stats, aes(x = percent_identity, y = bit_score)) +",
+    "      geom_point(alpha = 0.5, color = 'darkgreen') +",
+    "      labs(title = 'BLAST Hit Quality: Identity vs Bit Score',",
+    "           x = 'Percent Identity', y = 'Bit Score') +",
+    "      theme_minimal()",
+    "    ",
+    "    print(p2)",
+    "    print(p3)",
+    "  }",
+    "} else {",
+    "  cat('No BLAST results available for quality plots.')",
+    "}",
+    "```",
+    "",
+    "## GO Term Analysis",
+    "",
+    "```{r go-analysis, fig.height=6, fig.width=10}",
+    "if (summary$table_counts$go_terms > 0) {",
+    "  # Get GO term distribution by category",
+    "  go_dist <- DBI::dbGetQuery(con, '",
+    "    SELECT go_category, COUNT(*) as term_count",
+    "    FROM go_terms gt",
+    "    JOIN annotations a ON gt.annotation_id = a.annotation_id",
+    "    JOIN blast_results br ON a.blast_result_id = br.blast_result_id",
+    "    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id",
+    "    WHERE bp.project_id = ?",
+    "    GROUP BY go_category",
+    "  ', params = list(project_id))",
+    "  ",
+    "  if (nrow(go_dist) > 0) {",
+    "    # Map categories to full names",
+    "    go_dist$category_name <- ifelse(go_dist$go_category == 'P', 'Biological Process',",
+    "                                   ifelse(go_dist$go_category == 'F', 'Molecular Function',",
+    "                                         ifelse(go_dist$go_category == 'C', 'Cellular Component', 'Unknown')))",
+    "    ",
+    "    # Create pie chart",
+    "    p4 <- ggplot(go_dist, aes(x = '', y = term_count, fill = category_name)) +",
+    "      geom_bar(stat = 'identity', width = 1) +",
+    "      coord_polar('y', start = 0) +",
+    "      labs(title = 'GO Term Distribution by Category', fill = 'GO Category') +",
+    "      theme_void()",
+    "    print(p4)",
+    "  }",
+    "} else {",
+    "  cat('No GO terms available for analysis.')",
+    "}",
+    "```",
+    "",
+    "## Data Quality Metrics",
+    "",
+    "```{r quality-metrics}",
+    "# Calculate and display quality metrics",
+    "quality_metrics <- data.frame(",
+    "  Metric = character(0),",
+    "  Value = character(0)",
+    ")",
+    "",
+    "if (summary$table_counts$vcf_data > 0 && summary$table_counts$flanking_sequences > 0) {",
+    "  flanking_success <- round((summary$table_counts$flanking_sequences / summary$table_counts$vcf_data) * 100, 1)",
+    "  quality_metrics <- rbind(quality_metrics, data.frame(",
+    "    Metric = 'Flanking Sequence Success Rate',",
+    "    Value = paste0(flanking_success, '%')",
+    "  ))",
+    "}",
+    "",
+    "if (summary$table_counts$flanking_sequences > 0 && summary$table_counts$blast_results > 0) {",
+    "  blast_hit_rate <- round((summary$table_counts$blast_results / summary$table_counts$flanking_sequences) * 100, 1)",
+    "  quality_metrics <- rbind(quality_metrics, data.frame(",
+    "    Metric = 'BLAST Hit Rate',",
+    "    Value = paste0(blast_hit_rate, '%')",
+    "  ))",
+    "}",
+    "",
+    "if (summary$table_counts$blast_results > 0 && summary$table_counts$annotations > 0) {",
+    "  annotation_rate <- round((summary$table_counts$annotations / summary$table_counts$blast_results) * 100, 1)",
+    "  quality_metrics <- rbind(quality_metrics, data.frame(",
+    "    Metric = 'Annotation Success Rate',",
+    "    Value = paste0(annotation_rate, '%')",
+    "  ))",
+    "}",
+    "",
+    "if (nrow(quality_metrics) > 0) {",
+    "  kable(quality_metrics, caption = 'Analysis Quality Metrics')",
+    "} else {",
+    "  cat('Insufficient data for quality metrics.')",
+    "}",
     "```")
 }
 

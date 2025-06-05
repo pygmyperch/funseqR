@@ -560,9 +560,29 @@ perform_blast_db <- function(con, project_id, vcf_file_id, db_path, db_name,
 
   # Update analysis report if it exists
   tryCatch({
+    # Get query sequence count
+    query_count <- length(flanking_seqs)
+    hit_rate <- if (query_count > 0) round((result_count / query_count) * 100, 1) else 0
+    
     blast_message <- paste0(
-      "BLAST search completed: ", result_count, " results from ", db_name, " database",
-      if (!is.null(db_metadata)) paste0(" (", format(db_metadata$num_sequences %||% 0, big.mark = ","), " sequences)")
+      "**BLAST Search Completed**\n\n",
+      "- **Search type:** ", blast_type, "\n",
+      "- **Database:** ", db_name, "\n",
+      if (!is.null(db_metadata)) {
+        paste0(
+          "- **Database info:** ", db_metadata$db_title %||% "Unknown", "\n",
+          "- **Database sequences:** ", format(db_metadata$num_sequences %||% 0, big.mark = ","), "\n",
+          "- **Database date:** ", db_metadata$db_date %||% "Unknown", "\n"
+        )
+      } else {
+        "- **Database info:** Not available\n"
+      },
+      "- **Query sequences:** ", format(query_count, big.mark = ","), "\n",
+      "- **BLAST hits found:** ", format(result_count, big.mark = ","), "\n",
+      "- **Hit rate:** ", hit_rate, "%\n",
+      "- **E-value threshold:** ", e_value, "\n",
+      "- **Max hits per query:** ", max_hits, "\n",
+      "- **Threads used:** ", threads
     )
 
     update_analysis_report(

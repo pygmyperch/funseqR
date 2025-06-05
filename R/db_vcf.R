@@ -158,10 +158,29 @@ import_vcf_to_db <- function(con, project_id, vcf_file, verbose = TRUE) {
 
   # Update analysis report if it exists
   tryCatch({
+    # Get chromosome distribution for report
+    chrom_summary <- DBI::dbGetQuery(
+      con,
+      "SELECT chromosome, COUNT(*) as variant_count FROM vcf_data 
+       WHERE file_id = ? GROUP BY chromosome ORDER BY chromosome",
+      params = list(file_id)
+    )
+    
+    n_chromosomes <- nrow(chrom_summary)
+    file_size_mb <- round(file.size(vcf_file) / (1024^2), 2)
+    
+    vcf_message <- paste0(
+      "**VCF Import Completed**\n\n",
+      "- **File:** ", basename(vcf_file), " (", file_size_mb, " MB)\n",
+      "- **Variants imported:** ", format(nrow(vcf_entries), big.mark = ","), "\n",
+      "- **Chromosomes/Scaffolds:** ", n_chromosomes, "\n",
+      "- **File ID:** ", file_id
+    )
+    
     update_analysis_report(
       con, project_id,
       section = "vcf_import",
-      message = paste("Imported", vcf_count, "variants from", basename(vcf_file)),
+      message = vcf_message,
       verbose = FALSE
     )
   }, error = function(e) {

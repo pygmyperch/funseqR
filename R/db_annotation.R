@@ -1201,9 +1201,23 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
 
   # Update analysis report if it exists
   tryCatch({
+    # Calculate annotation statistics
+    total_blast_hits <- length(unique_accessions)
+    annotation_rate <- if (total_blast_hits > 0) round((successful_annotations / total_blast_hits) * 100, 1) else 0
+    go_per_annotation <- if (successful_annotations > 0) round(go_count / successful_annotations, 1) else 0
+    kegg_per_annotation <- if (successful_annotations > 0) round(kegg_count / successful_annotations, 1) else 0
+    
     annotation_message <- paste0(
-      "Annotation completed: ", successful_annotations, " annotations, ",
-      go_count, " GO terms, ", kegg_count, " KEGG references"
+      "**Functional Annotation Completed**\n\n",
+      "- **Unique BLAST hits processed:** ", format(total_blast_hits, big.mark = ","), "\n",
+      "- **Successfully annotated:** ", format(successful_annotations, big.mark = ","), " (", annotation_rate, "%)\n",
+      "- **Failed annotations:** ", format(failed_annotations, big.mark = ","), "\n",
+      "- **GO terms extracted:** ", format(go_count, big.mark = ","), " (avg ", go_per_annotation, " per protein)\n",
+      "- **KEGG references:** ", format(kegg_count, big.mark = ","), " (avg ", kegg_per_annotation, " per protein)\n",
+      "- **API calls made:** ", format(api_calls, big.mark = ","), "\n",
+      "- **Cache hits:** ", format(cache_hits, big.mark = ","), "\n",
+      "- **E-value threshold:** ", e_value_threshold, "\n",
+      "- **Max hits per query:** ", max_hits
     )
 
     # Get project_id from blast_param_id

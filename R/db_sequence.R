@@ -136,6 +136,34 @@ import_reference_to_db <- function(con, project_id, genome_file, genome_name = N
     
     if (verbose) message("Imported ", length(genome_data), " sequences.")
     
+    # Update analysis report if it exists
+    tryCatch({
+      # Calculate genome statistics
+      total_length <- sum(sapply(genome_data, length))
+      file_size_mb <- round(file.size(genome_file) / (1024^2), 2)
+      avg_seq_length <- round(total_length / length(genome_data))
+      
+      genome_message <- paste0(
+        "**Reference Genome Import Completed**\n\n",
+        "- **File:** ", basename(genome_file), " (", file_size_mb, " MB)\n",
+        "- **Genome:** ", genome_name %||% "Unknown", 
+        if (!is.null(genome_build)) paste0(" (build ", genome_build, ")") else "", "\n",
+        "- **Sequences imported:** ", format(length(genome_data), big.mark = ","), "\n",
+        "- **Total length:** ", format(total_length, big.mark = ","), " bp\n",
+        "- **Average sequence length:** ", format(avg_seq_length, big.mark = ","), " bp\n",
+        "- **Genome ID:** ", genome_id
+      )
+      
+      update_analysis_report(
+        con, project_id,
+        section = "genome_import",
+        message = genome_message,
+        verbose = FALSE
+      )
+    }, error = function(e) {
+      # Silently ignore if no report exists
+    })
+    
     return(list(file_id = file_id, genome_id = genome_id, sequence_count = length(genome_data)))
   }, error = function(e) {
     # Rollback transaction on error
@@ -416,6 +444,48 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
     DBI::dbExecute(con, "COMMIT")
     
     if (verbose) message("Extracted ", flanking_count, " flanking sequences.")
+    
+    # Update analysis report if it exists
+    tryCatch({
+      # Get project ID from VCF file
+      project_info <- DBI::dbGetQuery(
+        con,
+        "SELECT if.project_id FROM input_files if 
+         JOIN vcf_data v ON if.file_id = v.file_id 
+         WHERE v.file_id = ? LIMIT 1",
+        params = list(vcf_file_id)
+      )
+      
+      if (nrow(project_info) > 0) {
+        # Get genome info
+        genome_info <- DBI::dbGetQuery(
+          con,
+          "SELECT g.genome_name, g.genome_build FROM genomes g WHERE g.genome_id = ?",
+          params = list(genome_id)
+        )
+        
+        success_rate <- round((flanking_count / nrow(vcf_data)) * 100, 1)
+        
+        flanking_message <- paste0(
+          "**Flanking Sequence Extraction Completed**\n\n",
+          "- **Reference genome:** ", genome_info$genome_name %||% "Unknown", 
+          if (!is.null(genome_info$genome_build)) paste0(" (", genome_info$genome_build, ")") else "", "\n",
+          "- **Flank size:** ±", format(flank_size, big.mark = ","), " bp\n",
+          "- **Total variants:** ", format(nrow(vcf_data), big.mark = ","), "\n",
+          "- **Successfully extracted:** ", format(flanking_count, big.mark = ","), " (", success_rate, "%)\n",
+          "- **Skipped variants:** ", format(nrow(vcf_data) - flanking_count, big.mark = ",")
+        )
+        
+        update_analysis_report(
+          con, project_info$project_id[1],
+          section = "flanking_extraction",
+          message = flanking_message,
+          verbose = FALSE
+        )
+      }
+    }, error = function(e) {
+      # Silently ignore if no report exists
+    })
     
     return(list(vcf_count = nrow(vcf_data), flanking_count = flanking_count))
   }, error = function(e) {
