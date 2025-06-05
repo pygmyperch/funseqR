@@ -11,9 +11,6 @@ clean_report_file(report_path, verbose = TRUE)
 
 \item{verbose}{Logical. Print progress information. Default is TRUE}
 }
-\value{
-Invisibly returns the path to the cleaned report file
-}
 \description{
 Fixes reports with duplicate update markers or other formatting issues
 }

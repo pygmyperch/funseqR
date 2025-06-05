@@ -2,6 +2,7 @@
 
 export(annotate_blast_results)
 export(begin_transaction)
+export(clean_report_file)
 export(close_funseq_db)
 export(commit_transaction)
 export(connect_funseq_db)

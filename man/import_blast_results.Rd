@@ -15,9 +15,9 @@ import_blast_results(
 \arguments{
 \item{con}{A database connection object.}
 
-\item{blast_param_id}{The ID of the BLAST parameters associated with these results.}
+\item{blast_param_id}{The ID of the BLAST parameters.}
 
-\item{results_file}{A character string specifying the path to the BLAST results file.}
+\item{results_file}{Path to the BLAST results file.}
 
 \item{vcf_file_id}{The VCF file ID for looking up flanking sequences.}
 
