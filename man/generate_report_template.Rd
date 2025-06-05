@@ -4,9 +4,11 @@
 \alias{generate_report_template}
 \title{Generate Report Template}
 \usage{
-generate_report_template(project_info, format, template)
+generate_report_template(con, project_info, format, template)
 }
 \arguments{
+\item{con}{Database connection}
+
 \item{project_info}{Project information}
 
 \item{format}{Report format ("Rmd" or "Qmd")}
