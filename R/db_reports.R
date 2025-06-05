@@ -88,7 +88,7 @@ create_analysis_report <- function(con, project_id, report_path = NULL, format =
   store_report_info(con, project_id, report_path, format, template)
   
   # Create the report template
-  template_content <- generate_report_template(project_info, format, template)
+  template_content <- generate_report_template(con, project_info, format, template)
   
   # Write the template
   writeLines(template_content, report_path)
@@ -285,11 +285,12 @@ clean_report_file <- function(report_path, verbose = TRUE) {
 
 #' Generate Report Template
 #'
+#' @param con Database connection
 #' @param project_info Project information
 #' @param format Report format ("Rmd" or "Qmd")
 #' @param template Template type
 #' @return Character vector of template content
-generate_report_template <- function(project_info, format, template) {
+generate_report_template <- function(con, project_info, format, template) {
   
   # YAML header
   if (format == "Qmd") {
@@ -394,33 +395,38 @@ generate_standard_template <- function(project_info) {
     "```{r workflow-status}",
     "proj_summary <- get_project_summary(con, project_id, verbose = FALSE)",
     "",
-    "# Create workflow status table with safe data access",
-    "# VCF files check",
-    "vcf_files <- proj_summary$input_files[tolower(proj_summary$input_files$file_type) == 'vcf', ]",
-    "vcf_status <- ifelse(nrow(vcf_files) > 0, '✓ Complete', '○ Pending')",
-    "vcf_records <- ifelse(nrow(proj_summary$vcf_summary) > 0, format(sum(proj_summary$vcf_summary$variant_count), big.mark = ','), '0')",
+    "# Simplified workflow status - bulletproof approach",
+    "workflow_steps <- c('1. VCF Import', '2. Reference Genome', '3. Flanking Sequences', '4. BLAST Search', '5. Annotation')",
     "",
-    "# Reference genome check", 
-    "genome_status <- ifelse(nrow(proj_summary$genomes) > 0, '✓ Complete', '○ Pending')",
-    "genome_records <- ifelse(nrow(proj_summary$genomes) > 0, format(sum(proj_summary$genomes$sequence_count), big.mark = ','), '0')",
+    "# Get counts safely",
+    "vcf_count <- tryCatch(summary$table_counts$vcf_data, error = function(e) 0)",
+    "genome_count <- tryCatch(summary$table_counts$reference_sequences, error = function(e) 0)",
+    "flanking_count <- tryCatch(summary$table_counts$flanking_sequences, error = function(e) 0)",
+    "blast_count <- tryCatch(summary$table_counts$blast_results, error = function(e) 0)",
+    "annotation_count <- tryCatch(summary$table_counts$annotations, error = function(e) 0)",
     "",
-    "# Flanking sequences check",
-    "flanking_status <- ifelse(summary$table_counts$flanking_sequences > 0, '✓ Complete', '○ Pending')",
-    "flanking_records <- format(summary$table_counts$flanking_sequences, big.mark = ',')",
+    "# Create status and records vectors",
+    "workflow_status_values <- c(",
+    "  ifelse(vcf_count > 0, '✓ Complete', '○ Pending'),",
+    "  ifelse(genome_count > 0, '✓ Complete', '○ Pending'),",
+    "  ifelse(flanking_count > 0, '✓ Complete', '○ Pending'),",
+    "  ifelse(blast_count > 0, '✓ Complete', '○ Pending'),",
+    "  ifelse(annotation_count > 0, '✓ Complete', '○ Pending')",
+    ")",
     "",
-    "# BLAST search check",
-    "blast_status <- ifelse(nrow(proj_summary$blast_summary) > 0, '✓ Complete', '○ Pending')",
-    "blast_records <- ifelse(nrow(proj_summary$blast_summary) > 0, format(sum(proj_summary$blast_summary$result_count), big.mark = ','), '0')",
+    "workflow_records_values <- c(",
+    "  format(vcf_count, big.mark = ','),",
+    "  format(genome_count, big.mark = ','),",
+    "  format(flanking_count, big.mark = ','),",
+    "  format(blast_count, big.mark = ','),",
+    "  format(annotation_count, big.mark = ',')",
+    ")",
     "",
-    "# Annotation check",
-    "annotation_status <- ifelse(summary$table_counts$annotations > 0, '✓ Complete', '○ Pending')",
-    "annotation_records <- format(summary$table_counts$annotations, big.mark = ',')",
-    "",
-    "# Build the data frame",
+    "# Create the data frame",
     "workflow_status <- data.frame(",
-    "  Step = c('1. VCF Import', '2. Reference Genome', '3. Flanking Sequences', '4. BLAST Search', '5. Annotation'),",
-    "  Status = c(vcf_status, genome_status, flanking_status, blast_status, annotation_status),", 
-    "  Records = c(vcf_records, genome_records, flanking_records, blast_records, annotation_records),",
+    "  Step = workflow_steps,",
+    "  Status = workflow_status_values,",
+    "  Records = workflow_records_values,",
     "  stringsAsFactors = FALSE",
     ")",
     "",
@@ -432,11 +438,21 @@ generate_standard_template <- function(project_info) {
     "## VCF Files",
     "",
     "```{r vcf-files}",
-    "vcf_files <- proj_summary$input_files[proj_summary$input_files$file_type == 'VCF', ]",
-    "if (nrow(vcf_files) > 0) {",
-    "  vcf_display <- merge(vcf_files, proj_summary$vcf_summary, by = 'file_id', all.x = TRUE)",
-    "  vcf_display <- vcf_display[, c('file_name', 'variant_count', 'import_date')]",
-    "  kable(vcf_display, caption = 'VCF Files Imported')",
+    "if ('input_files' %in% names(proj_summary) && nrow(proj_summary$input_files) > 0) {",
+    "  vcf_files <- proj_summary$input_files[tolower(proj_summary$input_files$file_type) == 'vcf', ]",
+    "  if (nrow(vcf_files) > 0) {",
+    "    if ('vcf_summary' %in% names(proj_summary) && 'file_id' %in% names(vcf_files) && 'file_id' %in% names(proj_summary$vcf_summary)) {",
+    "      vcf_display <- merge(vcf_files, proj_summary$vcf_summary, by = 'file_id', all.x = TRUE)",
+    "      vcf_display <- vcf_display[, c('file_name', 'variant_count', 'import_date')]",
+    "      kable(vcf_display, caption = 'VCF Files Imported')",
+    "    } else {",
+    "      # Show just the input files if summary merge fails",
+    "      vcf_display <- vcf_files[, c('file_name', 'import_date')]",
+    "      kable(vcf_display, caption = 'VCF Files Imported')",
+    "    }",
+    "  } else {",
+    "    cat('No VCF files imported yet.')",
+    "  }",
     "} else {",
     "  cat('No VCF files imported yet.')",
     "}",
@@ -445,7 +461,7 @@ generate_standard_template <- function(project_info) {
     "## Reference Genomes",
     "",
     "```{r reference-genomes}",
-    "if (nrow(proj_summary$genomes) > 0) {",
+    "if ('genomes' %in% names(proj_summary) && nrow(proj_summary$genomes) > 0) {",
     "  genome_display <- proj_summary$genomes[, c('genome_name', 'genome_build', 'sequence_count', 'import_date')]",
     "  kable(genome_display, caption = 'Reference Genomes')",
     "} else {",
@@ -458,7 +474,7 @@ generate_standard_template <- function(project_info) {
     "## BLAST Searches",
     "",
     "```{r blast-summary}",
-    "if (nrow(proj_summary$blast_summary) > 0) {",
+    "if ('blast_summary' %in% names(proj_summary) && nrow(proj_summary$blast_summary) > 0) {",
     "  blast_display <- proj_summary$blast_summary[, c('blast_param_id', 'blast_type', 'db_name', 'execution_date', 'result_count')]",
     "  kable(blast_display, caption = 'BLAST Searches Performed')",
     "} else {",
@@ -667,7 +683,7 @@ generate_detailed_template <- function(project_info) {
     "if (summary$table_counts$blast_results > 0) {",
     "  # Get BLAST result statistics",
     "  blast_stats <- DBI::dbGetQuery(con, '",
-    "    SELECT e_value, bit_score, percent_identity",
+    "    SELECT br.e_value, br.bit_score, br.percent_identity",
     "    FROM blast_results br",
     "    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id",
     "    WHERE bp.project_id = ?",
