@@ -100,7 +100,7 @@ link_candidates_to_annotations <- function(con, candidate_file_id, background_fi
     ORDER BY c.chromosome, c.position
   "
   
-  result <- DBI::dbGetQuery(con, query, params = list(candidate_file_id, background_file_id))
+  result <- DBI::dbGetQuery(con, query, list(candidate_file_id, background_file_id))
   
   if (verbose) {
     message("Linkage complete:")
@@ -144,7 +144,7 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
     JOIN blast_results br ON fs.flanking_id = br.flanking_id
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     WHERE v.file_id = ?
-  ", params = list(foreground_file_id))$count
+  ", list(foreground_file_id))$count
   
   if (foreground_direct_count > 0) {
     # Standard query for datasets with their own annotations
@@ -164,7 +164,7 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
     "
     
     if (verbose) message("  - Extracting foreground GO terms...")
-    foreground_go <- DBI::dbGetQuery(con, go_query, params = list(foreground_file_id))
+    foreground_go <- DBI::dbGetQuery(con, go_query, list(foreground_file_id))
   } else {
     # For candidate files, use the linked annotations
     if (verbose) message("  - Extracting foreground GO terms via linkage...")
@@ -187,7 +187,7 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
     "
     
     foreground_go <- DBI::dbGetQuery(con, foreground_go_query, 
-                                   params = list(foreground_file_id, background_file_id))
+                                   list(foreground_file_id, background_file_id))
   }
   
   # Background always uses standard query
@@ -207,7 +207,7 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
   "
   
   if (verbose) message("  - Extracting background GO terms...")
-  background_go <- DBI::dbGetQuery(con, background_go_query, params = list(background_file_id))
+  background_go <- DBI::dbGetQuery(con, background_go_query, list(background_file_id))
   
   # Create gene-to-GO mapping lists
   foreground_gene2go <- split(foreground_go$go_id, foreground_go$uniprot_accession)
@@ -410,7 +410,7 @@ store_go_enrichment_results <- function(con, project_id, foreground_file_id, bac
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   "
   
-  DBI::dbExecute(con, analysis_query, params = list(
+  DBI::dbExecute(con, analysis_query, list(
     project_id,
     foreground_file_id,
     background_file_id,
@@ -448,7 +448,7 @@ store_go_enrichment_results <- function(con, project_id, foreground_file_id, bac
     
     for (i in 1:nrow(results_to_insert)) {
       row_data <- as.list(results_to_insert[i, ])
-      DBI::dbExecute(con, result_query, params = row_data)
+      DBI::dbExecute(con, result_query, row_data)
     }
   }
   
@@ -474,7 +474,7 @@ get_go_enrichment_results <- function(con, enrichment_id, significance_filter = 
   
   # Get analysis metadata
   analysis_query <- "SELECT * FROM go_enrichment_analyses WHERE enrichment_id = ?"
-  analysis_info <- DBI::dbGetQuery(con, analysis_query, params = list(enrichment_id))
+  analysis_info <- DBI::dbGetQuery(con, analysis_query, list(enrichment_id))
   
   if (nrow(analysis_info) == 0) {
     stop("No enrichment analysis found with ID: ", enrichment_id)
@@ -487,7 +487,7 @@ get_go_enrichment_results <- function(con, enrichment_id, significance_filter = 
     ORDER BY p_adjusted, fold_enrichment DESC
   "
   
-  results <- DBI::dbGetQuery(con, results_query, params = list(enrichment_id))
+  results <- DBI::dbGetQuery(con, results_query, list(enrichment_id))
   
   # Apply significance filter if requested
   if (!is.null(significance_filter)) {
