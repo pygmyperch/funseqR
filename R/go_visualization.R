@@ -262,30 +262,33 @@ create_go_comparison_plot <- function(bp_results = NULL, mf_results = NULL, cc_r
   all_results <- list()
   
   if (!is.null(bp_results) && nrow(bp_results) > 0) {
-    bp_top <- bp_results %>%
-      dplyr::filter(significance_level %in% c("significant", "highly_significant")) %>%
-      dplyr::arrange(p_adjusted) %>%
-      dplyr::slice_head(n = top_n) %>%
-      dplyr::mutate(ontology_name = "Biological Process")
-    all_results[["BP"]] <- bp_top
+    bp_filtered <- bp_results[bp_results$significance_level %in% c("significant", "highly_significant"), ]
+    if (nrow(bp_filtered) > 0) {
+      bp_ordered <- bp_filtered[order(bp_filtered$p_adjusted), ]
+      bp_top <- if (nrow(bp_ordered) > top_n) bp_ordered[1:top_n, ] else bp_ordered
+      bp_top$ontology_name <- "Biological Process"
+      all_results[["BP"]] <- bp_top
+    }
   }
   
   if (!is.null(mf_results) && nrow(mf_results) > 0) {
-    mf_top <- mf_results %>%
-      dplyr::filter(significance_level %in% c("significant", "highly_significant")) %>%
-      dplyr::arrange(p_adjusted) %>%
-      dplyr::slice_head(n = top_n) %>%
-      dplyr::mutate(ontology_name = "Molecular Function")
-    all_results[["MF"]] <- mf_top
+    mf_filtered <- mf_results[mf_results$significance_level %in% c("significant", "highly_significant"), ]
+    if (nrow(mf_filtered) > 0) {
+      mf_ordered <- mf_filtered[order(mf_filtered$p_adjusted), ]
+      mf_top <- if (nrow(mf_ordered) > top_n) mf_ordered[1:top_n, ] else mf_ordered
+      mf_top$ontology_name <- "Molecular Function"
+      all_results[["MF"]] <- mf_top
+    }
   }
   
   if (!is.null(cc_results) && nrow(cc_results) > 0) {
-    cc_top <- cc_results %>%
-      dplyr::filter(significance_level %in% c("significant", "highly_significant")) %>%
-      dplyr::arrange(p_adjusted) %>%
-      dplyr::slice_head(n = top_n) %>%
-      dplyr::mutate(ontology_name = "Cellular Component")
-    all_results[["CC"]] <- cc_top
+    cc_filtered <- cc_results[cc_results$significance_level %in% c("significant", "highly_significant"), ]
+    if (nrow(cc_filtered) > 0) {
+      cc_ordered <- cc_filtered[order(cc_filtered$p_adjusted), ]
+      cc_top <- if (nrow(cc_ordered) > top_n) cc_ordered[1:top_n, ] else cc_ordered
+      cc_top$ontology_name <- "Cellular Component"
+      all_results[["CC"]] <- cc_top
+    }
   }
   
   if (length(all_results) == 0) {
@@ -295,12 +298,11 @@ create_go_comparison_plot <- function(bp_results = NULL, mf_results = NULL, cc_r
   }
   
   # Combine all results
-  combined_data <- dplyr::bind_rows(all_results) %>%
-    dplyr::mutate(
-      go_term_short = stringr::str_trunc(go_term, 45),
-      neg_log10_padj = -log10(p_adjusted),
-      ontology_name = factor(ontology_name, levels = c("Biological Process", "Molecular Function", "Cellular Component"))
-    )
+  combined_data <- do.call(rbind, all_results)
+  combined_data$go_term_short <- stringr::str_trunc(combined_data$go_term, 45)
+  combined_data$neg_log10_padj <- -log10(combined_data$p_adjusted)
+  combined_data$ontology_name <- factor(combined_data$ontology_name, 
+                                       levels = c("Biological Process", "Molecular Function", "Cellular Component"))
   
   # Create faceted plot
   p <- ggplot2::ggplot(combined_data, ggplot2::aes(x = fold_enrichment, y = reorder(go_term_short, fold_enrichment))) +
@@ -346,23 +348,28 @@ create_interactive_go_plot <- function(enrichment_results, max_terms = 25, min_f
   }
   
   # Prepare data
-  plot_data <- enrichment_results %>%
-    dplyr::filter(significance_level %in% c("significant", "highly_significant"),
-                  fold_enrichment >= min_fold_enrichment) %>%
-    dplyr::arrange(p_adjusted) %>%
-    dplyr::slice_head(n = max_terms) %>%
-    dplyr::mutate(
-      go_term_short = stringr::str_trunc(go_term, 50),
-      neg_log10_padj = -log10(p_adjusted),
-      hover_text = paste0(
-        "<b>", go_term, "</b><br>",
-        "GO ID: ", go_id, "<br>",
-        "Genes: ", foreground_count, "/", total_foreground, "<br>",
-        "Background: ", background_count, "/", total_background, "<br>",
-        "Fold Enrichment: ", round(fold_enrichment, 2), "<br>",
-        "FDR: ", format(p_adjusted, scientific = TRUE, digits = 3)
-      )
-    )
+  filtered_data <- enrichment_results[
+    enrichment_results$significance_level %in% c("significant", "highly_significant") & 
+    enrichment_results$fold_enrichment >= min_fold_enrichment, 
+  ]
+  
+  if (nrow(filtered_data) == 0) {
+    return(NULL)
+  }
+  
+  ordered_data <- filtered_data[order(filtered_data$p_adjusted), ]
+  plot_data <- if (nrow(ordered_data) > max_terms) ordered_data[1:max_terms, ] else ordered_data
+  
+  plot_data$go_term_short <- stringr::str_trunc(plot_data$go_term, 50)
+  plot_data$neg_log10_padj <- -log10(plot_data$p_adjusted)
+  plot_data$hover_text <- paste0(
+    "<b>", plot_data$go_term, "</b><br>",
+    "GO ID: ", plot_data$go_id, "<br>",
+    "Genes: ", plot_data$foreground_count, "/", plot_data$total_foreground, "<br>",
+    "Background: ", plot_data$background_count, "/", plot_data$total_background, "<br>",
+    "Fold Enrichment: ", round(plot_data$fold_enrichment, 2), "<br>",
+    "FDR: ", format(plot_data$p_adjusted, scientific = TRUE, digits = 3)
+  )
   
   if (nrow(plot_data) == 0) {
     return(NULL)
