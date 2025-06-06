@@ -134,8 +134,7 @@ create_go_bubble_plot <- function(enrichment_results, max_terms = 20, min_fold_e
 #' print(p2)
 #' }
 #'
-#' @importFrom ggplot2 ggplot aes geom_treemap geom_treemap_text scale_fill_viridis_c
-#' @importFrom ggplot2 labs theme_void
+#' @importFrom ggplot2 ggplot aes scale_fill_viridis_c labs theme_void
 #' @export
 create_go_treemap <- function(enrichment_results, min_fold_enrichment = 2, title = NULL, color_palette = "viridis") {
   
@@ -217,27 +216,32 @@ create_go_summary_table <- function(enrichment_results, max_terms = 15,
     return(data.frame(Message = "No enrichment results to display"))
   }
   
-  summary_table <- enrichment_results %>%
-    dplyr::filter(significance_level %in% significance_filter) %>%
-    dplyr::arrange(p_adjusted) %>%
-    dplyr::slice_head(n = max_terms) %>%
-    dplyr::mutate(
-      GO_ID = go_id,
-      GO_Term = stringr::str_trunc(go_term, 60),
-      Category = go_category,
-      Genes = foreground_count,
-      Background = background_count,
-      Fold_Enrichment = round(fold_enrichment, 2),
-      P_Value = format(p_value, scientific = TRUE, digits = 2),
-      FDR = format(p_adjusted, scientific = TRUE, digits = 2),
-      Significance = case_when(
-        significance_level == "highly_significant" ~ "***",
-        significance_level == "significant" ~ "**",
-        significance_level == "trending" ~ "*",
-        TRUE ~ ""
-      )
-    ) %>%
-    dplyr::select(GO_ID, GO_Term, Category, Genes, Background, Fold_Enrichment, P_Value, FDR, Significance)
+  # Filter by significance
+  filtered_results <- enrichment_results[enrichment_results$significance_level %in% significance_filter, ]
+  
+  # Arrange by p_adjusted
+  filtered_results <- filtered_results[order(filtered_results$p_adjusted), ]
+  
+  # Take top max_terms
+  if (nrow(filtered_results) > max_terms) {
+    filtered_results <- filtered_results[1:max_terms, ]
+  }
+  
+  # Create summary table
+  summary_table <- data.frame(
+    GO_ID = filtered_results$go_id,
+    GO_Term = stringr::str_trunc(filtered_results$go_term, 60),
+    Category = filtered_results$go_category,
+    Genes = filtered_results$foreground_count,
+    Background = filtered_results$background_count,
+    Fold_Enrichment = round(filtered_results$fold_enrichment, 2),
+    P_Value = format(filtered_results$p_value, scientific = TRUE, digits = 2),
+    FDR = format(filtered_results$p_adjusted, scientific = TRUE, digits = 2),
+    Significance = ifelse(filtered_results$significance_level == "highly_significant", "***",
+                          ifelse(filtered_results$significance_level == "significant", "**",
+                                 ifelse(filtered_results$significance_level == "trending", "*", ""))),
+    stringsAsFactors = FALSE
+  )
   
   return(summary_table)
 }

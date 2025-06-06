@@ -1,0 +1,347 @@
+---
+title: "GO Enrichment Analysis with funseqR"
+author: "funseqR Development Team"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{GO Enrichment Analysis with funseqR}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+## Introduction
+
+The GO enrichment functionality in funseqR enables comparative analysis between candidate loci (e.g., adaptive SNPs, outliers) and background datasets to identify overrepresented biological processes, molecular functions, and cellular components. This vignette demonstrates how to perform GO enrichment analysis on your annotated genomic data.
+
+## Prerequisites
+
+Before running GO enrichment analysis, you need:
+
+1. A completed funseqR analysis with:
+   - VCF data imported
+   - BLAST searches performed
+   - Functional annotations retrieved from UniProt
+   - GO terms extracted and stored
+
+2. Two datasets:
+   - **Background dataset**: Full set of variants (e.g., all SNPs)
+   - **Foreground dataset**: Candidate variants of interest (e.g., adaptive loci, FST outliers)
+
+## Quick Start
+
+### Complete Workflow
+
+The easiest way to perform GO enrichment is using the high-level workflow function:
+
+```{r complete-workflow}
+library(funseqR)
+
+# Connect to your database
+con <- connect_funseq_db("your_analysis.db")
+
+# Run complete GO enrichment workflow
+results <- run_go_enrichment_workflow(
+  con = con,
+  project_id = 1,
+  candidate_vcf_file = "candidate_loci.vcf",
+  background_file_id = 1,  # File ID of your background dataset
+  ontologies = c("BP", "MF"),  # Test Biological Process and Molecular Function
+  min_genes = 5,               # Minimum genes for testing
+  store_results = TRUE,        # Save to database
+  create_plots = TRUE          # Generate visualizations
+)
+
+# View summary
+print(results$summary)
+
+# Display bubble plot for Biological Processes
+print(results$plots$BP_bubble)
+
+# Close connection
+close_funseq_db(con)
+```
+
+## Step-by-Step Workflow
+
+For more control over the analysis, you can run each step individually:
+
+### Step 1: Import Candidate Dataset
+
+```{r import-candidates}
+# Import candidate VCF and link to existing annotations
+candidate_import <- import_candidate_loci(
+  con = con,
+  project_id = 1,
+  candidate_vcf_file = "adaptive_loci.vcf",
+  background_file_id = 1  # Reference to full dataset
+)
+
+print(candidate_import$linked_annotations)
+```
+
+### Step 2: Extract GO Terms
+
+```{r extract-go-terms}
+# Extract GO terms for both foreground and background
+go_data <- extract_go_terms_for_enrichment(
+  con = con,
+  foreground_file_id = candidate_import$file_id,
+  background_file_id = 1
+)
+
+# Check the data structure
+cat("Foreground genes:", length(go_data$foreground$genes), "\n")
+cat("Background genes:", length(go_data$background$genes), "\n")
+cat("Total GO terms:", nrow(go_data$all_go_terms), "\n")
+```
+
+### Step 3: Perform Enrichment Testing
+
+```{r enrichment-testing}
+# Test Biological Process ontology
+bp_results <- perform_go_enrichment(
+  go_data = go_data,
+  ontology = "BP",
+  min_genes = 5,    # Minimum genes for testing
+  max_genes = 500   # Maximum genes (excludes very broad terms)
+)
+
+# Test Molecular Function ontology
+mf_results <- perform_go_enrichment(go_data, "MF")
+
+# View top results
+head(bp_results[bp_results$p_adjusted < 0.05, ])
+```
+
+### Step 4: Create Visualizations
+
+```{r create-visualizations}
+# Bubble plot for Biological Processes
+bp_bubble <- create_go_bubble_plot(
+  enrichment_results = bp_results,
+  max_terms = 20,
+  min_fold_enrichment = 1.5
+)
+print(bp_bubble)
+
+# Treemap visualization (requires treemapify package)
+if (requireNamespace("treemapify", quietly = TRUE)) {
+  bp_treemap <- create_go_treemap(bp_results)
+  print(bp_treemap)
+}
+
+# Summary table for publication
+summary_table <- create_go_summary_table(bp_results, max_terms = 15)
+print(summary_table)
+```
+
+### Step 5: Store Results
+
+```{r store-results}
+# Store enrichment results in database for future retrieval
+enrichment_id <- store_go_enrichment_results(
+  con = con,
+  project_id = 1,
+  foreground_file_id = candidate_import$file_id,
+  background_file_id = 1,
+  enrichment_results = bp_results,
+  ontology = "BP",
+  parameters = list(min_genes = 5, max_genes = 500)
+)
+
+cat("Stored with analysis ID:", enrichment_id, "\n")
+```
+
+## Visualization Options
+
+### Bubble Plots
+
+Bubble plots show GO terms ordered by fold enrichment, with bubble size representing gene count and color representing significance:
+
+```{r bubble-plots}
+# Basic bubble plot
+bp_plot <- create_go_bubble_plot(bp_results)
+
+# Customized bubble plot
+bp_custom <- create_go_bubble_plot(
+  enrichment_results = bp_results,
+  max_terms = 15,
+  min_fold_enrichment = 2.0,
+  title = "Adaptive Loci: Biological Process Enrichment",
+  color_palette = "viridis"
+)
+```
+
+### Treemaps
+
+Treemaps show hierarchical visualization where area represents gene count:
+
+```{r treemaps}
+# Requires treemapify package
+if (requireNamespace("treemapify", quietly = TRUE)) {
+  treemap_plot <- create_go_treemap(
+    enrichment_results = bp_results,
+    min_fold_enrichment = 2.0,
+    title = "GO Enrichment Treemap"
+  )
+  print(treemap_plot)
+}
+```
+
+### Multi-Ontology Comparison
+
+Compare enrichment across different GO ontologies:
+
+```{r comparison-plot}
+# Perform enrichment for all ontologies
+bp_results <- perform_go_enrichment(go_data, "BP")
+mf_results <- perform_go_enrichment(go_data, "MF")
+cc_results <- perform_go_enrichment(go_data, "CC")
+
+# Create comparison plot
+comparison_plot <- create_go_comparison_plot(
+  bp_results = bp_results,
+  mf_results = mf_results,
+  cc_results = cc_results,
+  top_n = 8
+)
+print(comparison_plot)
+```
+
+### Interactive Plots
+
+Create interactive visualizations with plotly:
+
+```{r interactive-plots}
+if (requireNamespace("plotly", quietly = TRUE)) {
+  interactive_plot <- create_interactive_go_plot(
+    enrichment_results = bp_results,
+    max_terms = 25
+  )
+  
+  # Save as HTML file
+  htmlwidgets::saveWidget(interactive_plot, "go_enrichment_interactive.html")
+}
+```
+
+## Retrieving Stored Results
+
+Previously stored enrichment results can be retrieved:
+
+```{r retrieve-results}
+# Retrieve stored analysis
+stored_results <- get_go_enrichment_results(
+  con = con,
+  enrichment_id = enrichment_id
+)
+
+# View analysis metadata
+print(stored_results$analysis_info)
+
+# Get only significant results
+significant_only <- get_go_enrichment_results(
+  con = con,
+  enrichment_id = enrichment_id,
+  significance_filter = c("significant", "highly_significant")
+)
+```
+
+## Interpretation Guidelines
+
+### Statistical Considerations
+
+1. **Multiple Testing**: All p-values are corrected using FDR (Benjamini-Hochberg)
+2. **Gene Set Size**: Terms with < 5 genes are excluded by default to avoid low power
+3. **Fold Enrichment**: Values > 1 indicate overrepresentation
+4. **Background Choice**: Use the largest appropriate gene set as background
+
+### Biological Interpretation
+
+1. **Significance Levels**:
+   - FDR < 0.01: Highly significant
+   - FDR < 0.05: Significant
+   - FDR < 0.1: Trending
+
+2. **Fold Enrichment**:
+   - 1.5-2x: Modest enrichment
+   - 2-5x: Strong enrichment
+   - >5x: Very strong enrichment (check for artifacts)
+
+3. **Gene Count**: Consider both statistical significance and biological relevance
+
+### Common Issues
+
+1. **No Significant Results**: Check if background and foreground are appropriate
+2. **Too Many Broad Terms**: Increase `max_genes` filter
+3. **Very High Enrichment**: May indicate technical artifacts or very specific processes
+
+## Integration with Reports
+
+Add GO enrichment to your analysis reports:
+
+```{r report-integration}
+# Generate report section
+go_section <- generate_go_enrichment_report_section(
+  con = con,
+  project_id = 1,
+  candidate_file_pattern = "candidate|adaptive|outlier",
+  max_terms_plot = 15,
+  include_treemap = TRUE
+)
+
+# This returns R Markdown code that can be included in reports
+```
+
+## Example: Snapper Adaptive Loci
+
+Here's a complete example using snapper genomic data:
+
+```{r snapper-example}
+library(funseqR)
+
+# Setup
+con <- connect_funseq_db("snapper_analysis.db")
+
+# Full workflow for candidate adaptive loci vs background
+results <- run_go_enrichment_workflow(
+  con = con,
+  project_id = 1,
+  candidate_vcf_file = "SA448_855.vcf",     # 855 candidate SNPs
+  background_file_id = 1,                    # SA448_14699.vcf (full dataset)
+  ontologies = c("BP", "MF"),
+  min_genes = 5,
+  verbose = TRUE
+)
+
+# Display results
+cat("Analysis Summary:\n")
+cat("Candidate genes:", results$summary$foreground_genes, "\n")
+cat("Background genes:", results$summary$background_genes, "\n")
+cat("Significant BP terms:", results$summary$summary_stats$Significant_Terms[1], "\n")
+cat("Significant MF terms:", results$summary$summary_stats$Significant_Terms[2], "\n")
+
+# Save plots
+ggsave("snapper_bp_enrichment.png", results$plots$BP_bubble, 
+       width = 12, height = 8, dpi = 300)
+ggsave("snapper_mf_enrichment.png", results$plots$MF_bubble, 
+       width = 12, height = 6, dpi = 300)
+
+# Export summary table
+write.csv(results$plots$BP_table, "snapper_go_summary.csv", row.names = FALSE)
+
+close_funseq_db(con)
+```
+
+## Conclusion
+
+The GO enrichment functionality in funseqR provides a comprehensive framework for identifying biological processes and functions enriched in candidate loci. The workflow is designed to integrate seamlessly with existing funseqR analyses and provides publication-ready visualizations and statistical results.
+
+For questions or issues, please refer to the funseqR documentation or open an issue on the project repository.

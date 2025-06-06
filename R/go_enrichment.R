@@ -136,8 +136,62 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
   
   if (verbose) message("Extracting GO terms for enrichment analysis...")
   
-  # Query to get GO terms for a dataset
-  go_query <- "
+  # First check if foreground file has direct annotations (complete analysis)
+  # or if it's a candidate file that needs to use linkage data
+  foreground_direct_count <- DBI::dbGetQuery(con, "
+    SELECT COUNT(*) as count FROM vcf_data v
+    JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id
+    JOIN annotations a ON br.blast_result_id = a.blast_result_id
+    WHERE v.file_id = ?
+  ", params = list(foreground_file_id))$count
+  
+  if (foreground_direct_count > 0) {
+    # Standard query for datasets with their own annotations
+    go_query <- "
+      SELECT DISTINCT 
+        a.uniprot_accession,
+        gt.go_id,
+        gt.go_term,
+        gt.go_category,
+        gt.go_evidence
+      FROM vcf_data v
+      JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+      WHERE v.file_id = ?
+    "
+    
+    if (verbose) message("  - Extracting foreground GO terms...")
+    foreground_go <- DBI::dbGetQuery(con, go_query, params = list(foreground_file_id))
+  } else {
+    # For candidate files, use the linked annotations
+    if (verbose) message("  - Extracting foreground GO terms via linkage...")
+    
+    foreground_go_query <- "
+      SELECT DISTINCT 
+        a.uniprot_accession,
+        gt.go_id,
+        gt.go_term,
+        gt.go_category,
+        gt.go_evidence
+      FROM vcf_data c
+      JOIN vcf_data r ON (c.chromosome = r.chromosome 
+                         AND c.position = r.position)
+      JOIN flanking_sequences fs ON r.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id  
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+      WHERE c.file_id = ? AND r.file_id = ?
+    "
+    
+    foreground_go <- DBI::dbGetQuery(con, foreground_go_query, 
+                                   params = list(foreground_file_id, background_file_id))
+  }
+  
+  # Background always uses standard query
+  background_go_query <- "
     SELECT DISTINCT 
       a.uniprot_accession,
       gt.go_id,
@@ -152,11 +206,8 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
     WHERE v.file_id = ?
   "
   
-  if (verbose) message("  - Extracting foreground GO terms...")
-  foreground_go <- DBI::dbGetQuery(con, go_query, params = list(foreground_file_id))
-  
   if (verbose) message("  - Extracting background GO terms...")
-  background_go <- DBI::dbGetQuery(con, go_query, params = list(background_file_id))
+  background_go <- DBI::dbGetQuery(con, background_go_query, params = list(background_file_id))
   
   # Create gene-to-GO mapping lists
   foreground_gene2go <- split(foreground_go$go_id, foreground_go$uniprot_accession)
@@ -242,7 +293,9 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
   if (verbose) message("  - Foreground genes: ", total_fg, ", Background genes: ", total_bg)
   
   # Calculate enrichment for each GO term
-  enrichment_results <- map_dfr(relevant_terms, function(go_term) {
+  enrichment_list <- list()
+  
+  for (go_term in relevant_terms) {
     
     # Count genes with this GO term in each set
     fg_with_term <- sum(sapply(go_data$foreground$gene2go, function(x) go_term %in% x))
@@ -250,12 +303,12 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
     
     # Apply gene count filters
     if (bg_with_term < min_genes || bg_with_term > max_genes) {
-      return(NULL)
+      next
     }
     
     # Skip if no foreground genes have this term
     if (fg_with_term == 0) {
-      return(NULL)
+      next
     }
     
     # Hypergeometric test
@@ -269,7 +322,7 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
     # Get GO term details
     term_info <- go_data$all_go_terms[go_data$all_go_terms$go_id == go_term, ][1, ]
     
-    data.frame(
+    enrichment_list[[length(enrichment_list) + 1]] <- data.frame(
       go_id = go_term,
       go_term = term_info$go_term,
       go_category = ontology,
@@ -282,7 +335,14 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
       p_value = p_value,
       stringsAsFactors = FALSE
     )
-  })
+  }
+  
+  # Combine all results
+  if (length(enrichment_list) > 0) {
+    enrichment_results <- do.call(rbind, enrichment_list)
+  } else {
+    enrichment_results <- data.frame()
+  }
   
   # Handle case where no terms pass filters
   if (is.null(enrichment_results) || nrow(enrichment_results) == 0) {
