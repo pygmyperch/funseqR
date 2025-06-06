@@ -428,29 +428,27 @@ store_go_enrichment_results <- function(con, project_id, foreground_file_id, bac
   if (nrow(enrichment_results) > 0) {
     
     # Prepare results for insertion
-    results_to_insert <- enrichment_results %>%
-      mutate(enrichment_id = enrichment_id) %>%
-      select(enrichment_id, go_id, go_term, go_category, foreground_count, background_count,
-             total_foreground, total_background, expected_count, fold_enrichment, 
-             p_value, p_adjusted, significance_level)
+    results_to_insert <- enrichment_results
+    results_to_insert$enrichment_id <- enrichment_id
     
-    # Insert results in batches
-    batch_size <- 1000
-    for (i in seq(1, nrow(results_to_insert), batch_size)) {
-      end_idx <- min(i + batch_size - 1, nrow(results_to_insert))
-      batch <- results_to_insert[i:end_idx, ]
-      
-      # Create parameterized query
-      result_query <- "
-        INSERT INTO go_enrichment_results 
-        (enrichment_id, go_id, go_term, go_category, foreground_count, background_count,
-         total_foreground, total_background, expected_count, fold_enrichment, 
-         p_value, p_adjusted, significance_level)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      "
-      
-      # Execute batch insert
-      DBI::dbExecute(con, result_query, params = batch)
+    # Select only the columns we need in the right order
+    results_to_insert <- results_to_insert[, c("enrichment_id", "go_id", "go_term", "go_category", 
+                                             "foreground_count", "background_count", "total_foreground", 
+                                             "total_background", "expected_count", "fold_enrichment", 
+                                             "p_value", "p_adjusted", "significance_level")]
+    
+    # Insert results row by row (more reliable than batch insert)
+    result_query <- "
+      INSERT INTO go_enrichment_results 
+      (enrichment_id, go_id, go_term, go_category, foreground_count, background_count,
+       total_foreground, total_background, expected_count, fold_enrichment, 
+       p_value, p_adjusted, significance_level)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    "
+    
+    for (i in 1:nrow(results_to_insert)) {
+      row_data <- as.list(results_to_insert[i, ])
+      DBI::dbExecute(con, result_query, params = row_data)
     }
   }
   
@@ -493,8 +491,7 @@ get_go_enrichment_results <- function(con, enrichment_id, significance_filter = 
   
   # Apply significance filter if requested
   if (!is.null(significance_filter)) {
-    results <- results %>%
-      filter(significance_level %in% significance_filter)
+    results <- results[results$significance_level %in% significance_filter, ]
   }
   
   return(list(
