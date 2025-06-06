@@ -215,6 +215,45 @@ create_funseq_schema <- function(con, verbose = TRUE) {
     )
   ")
 
+  if (verbose) message("Creating go_enrichment_analyses table...")
+  DBI::dbExecute(con, "
+    CREATE TABLE go_enrichment_analyses (
+      enrichment_id INTEGER PRIMARY KEY,
+      project_id INTEGER NOT NULL,
+      foreground_file_id INTEGER NOT NULL,
+      background_file_id INTEGER NOT NULL,
+      ontology TEXT NOT NULL,
+      analysis_date TEXT NOT NULL,
+      total_foreground_genes INTEGER,
+      total_background_genes INTEGER,
+      analysis_parameters TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects (project_id),
+      FOREIGN KEY (foreground_file_id) REFERENCES input_files (file_id),
+      FOREIGN KEY (background_file_id) REFERENCES input_files (file_id)
+    )
+  ")
+
+  if (verbose) message("Creating go_enrichment_results table...")
+  DBI::dbExecute(con, "
+    CREATE TABLE go_enrichment_results (
+      result_id INTEGER PRIMARY KEY,
+      enrichment_id INTEGER NOT NULL,
+      go_id TEXT NOT NULL,
+      go_term TEXT NOT NULL,
+      go_category TEXT NOT NULL,
+      foreground_count INTEGER NOT NULL,
+      background_count INTEGER NOT NULL,
+      total_foreground INTEGER NOT NULL,
+      total_background INTEGER NOT NULL,
+      expected_count REAL,
+      fold_enrichment REAL,
+      p_value REAL NOT NULL,
+      p_adjusted REAL,
+      significance_level TEXT,
+      FOREIGN KEY (enrichment_id) REFERENCES go_enrichment_analyses (enrichment_id)
+    )
+  ")
+
   # Create indexes
   if (verbose) message("Creating indexes...")
 
@@ -253,6 +292,16 @@ create_funseq_schema <- function(con, verbose = TRUE) {
 
   # Report indexes
   DBI::dbExecute(con, "CREATE INDEX idx_reports_project ON analysis_reports (project_id)")
+
+  # GO enrichment indexes
+  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_project ON go_enrichment_analyses (project_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_fg_file ON go_enrichment_analyses (foreground_file_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_bg_file ON go_enrichment_analyses (background_file_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_ontology ON go_enrichment_analyses (ontology)")
+  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_analysis ON go_enrichment_results (enrichment_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_go ON go_enrichment_results (go_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_category ON go_enrichment_results (go_category)")
+  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_significance ON go_enrichment_results (significance_level)")
 
   if (verbose) message("Schema creation complete.")
 
