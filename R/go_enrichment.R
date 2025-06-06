@@ -448,6 +448,7 @@ store_go_enrichment_results <- function(con, project_id, foreground_file_id, bac
     
     for (i in 1:nrow(results_to_insert)) {
       row_data <- as.list(results_to_insert[i, ])
+      names(row_data) <- NULL  # Remove names to use with anonymous placeholders
       DBI::dbExecute(con, result_query, row_data)
     }
   }

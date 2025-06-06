@@ -49,7 +49,7 @@ run_go_enrichment_workflow <- function(con, project_id, candidate_vcf_file, back
     # Get all VCF files for this project, excluding the candidate file
     input_files <- DBI::dbGetQuery(con, 
       "SELECT file_id, file_name FROM input_files WHERE project_id = ? AND file_type = 'vcf'",
-      params = list(project_id))
+      list(project_id))
     
     # Exclude files with "candidate" or similar in the name
     candidate_patterns <- c("candidate", "adaptive", "outlier", "fst", "selection")
