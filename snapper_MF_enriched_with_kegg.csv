@@ -1,0 +1,9 @@
+"chromosome","position","ref","alt","uniprot_accession","gene_names","entry_name","e_value","bit_score","percent_identity","go_id","go_term","go_category","kegg_id","pathway_name","fold_enrichment","p_value","p_adjusted","significance_level","foreground_count","background_count"
+"LG1",9180682,"T","C","Q9W7R3","tenm4","TEN4_DANRE",1.09e-12,67,79.412,"GO:0050839","F:cell adhesion molecule binding","F",NA,NA,9.48387096774194,0.00114702621053496,0.0845447791353707,"trending",3,3
+"LG1",9180682,"T","C","Q9W7R4","tenm3","TEN3_DANRE",1.32e-12,66.6,76.471,"GO:0050839","F:cell adhesion molecule binding","F",NA,NA,9.48387096774194,0.00114702621053496,0.0845447791353707,"trending",3,3
+"LG1",9180682,"T","C","Q9W7R3","tenm4","TEN4_DANRE",7.66e-12,64.3,70,"GO:0050839","F:cell adhesion molecule binding","F",NA,NA,9.48387096774194,0.00114702621053496,0.0845447791353707,"trending",3,3
+"LG21",18653546,"C","T","Q66I42","msna","MOESA_DANRE",1.42e-44,158,75.269,"GO:0050839","F:cell adhesion molecule binding","F","dre:286739","-",9.48387096774194,0.00114702621053496,0.0845447791353707,"trending",3,3
+"LG12",1329681,"T","C","P0DQV9","","LEC_SCOPL",2.05e-43,143,71.111,"GO:0030246","F:carbohydrate binding","F",NA,NA,6.32258064516129,0.00149636777230745,0.0845447791353707,"trending",4,6
+"LG5",5064619,"T","A","Q9I931","","FUCL1_ANGJA",1.07e-30,112,73.239,"GO:0030246","F:carbohydrate binding","F",NA,NA,6.32258064516129,0.00149636777230745,0.0845447791353707,"trending",4,6
+"LG5",5064619,"T","A","Q7SIC1","","FUCL_ANGAN",1.13e-29,108,68.056,"GO:0030246","F:carbohydrate binding","F",NA,NA,6.32258064516129,0.00149636777230745,0.0845447791353707,"trending",4,6
+"LG5",5064619,"T","A","Q9I928","","FUCL4_ANGJA",1.67e-28,106,69.444,"GO:0030246","F:carbohydrate binding","F",NA,NA,6.32258064516129,0.00149636777230745,0.0845447791353707,"trending",4,6
