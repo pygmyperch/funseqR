@@ -910,3 +910,82 @@ refresh_analysis_report <- function(con, project_id, render_html = FALSE, open_h
     }
   }
 }
+
+#' Add GO Enrichment Summary to Dynamic Report
+#' 
+#' @param con Database connection
+#' @param project_id Project ID
+#' @param go_content_file Path to GO report content RDS file
+#' @param verbose Logical. Print progress information
+#' 
+#' @export
+add_go_enrichment_to_report <- function(con, project_id, go_content_file, verbose = TRUE) {
+  
+  if (verbose) message("Adding GO enrichment summary to dynamic report...")
+  
+  # Check if GO content file exists
+  if (!file.exists(go_content_file)) {
+    stop("GO content file not found: ", go_content_file)
+  }
+  
+  # Load GO content
+  go_content <- readRDS(go_content_file)
+  
+  # Get report info
+  report_info <- get_report_info(con, project_id)
+  
+  if (is.null(report_info)) {
+    stop("No report found for project ", project_id, ". Create a report first.")
+  }
+  
+  # Read current report
+  if (!file.exists(report_info$report_path)) {
+    stop("Report file not found: ", report_info$report_path)
+  }
+  
+  report_lines <- readLines(report_info$report_path)
+  
+  # Find insertion point (before "# Analysis Updates" section)
+  updates_idx <- which(grepl("^# Analysis Updates", report_lines))
+  
+  if (length(updates_idx) == 0) {
+    # Add at end if no updates section found
+    insertion_point <- length(report_lines) + 1
+  } else {
+    insertion_point <- updates_idx[1]
+  }
+  
+  # Create GO enrichment section
+  go_section <- c(
+    "",
+    "# GO Enrichment Analysis",
+    "",
+    paste0("*Analysis Date: ", go_content$analysis_date, "*"),
+    "",
+    go_content$summary_text,
+    ""
+  )
+  
+  # Insert GO section
+  new_report <- c(
+    report_lines[1:(insertion_point-1)],
+    go_section,
+    report_lines[insertion_point:length(report_lines)]
+  )
+  
+  # Write updated report
+  writeLines(new_report, report_info$report_path)
+  
+  # Update timestamp in database
+  current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  DBI::dbExecute(con,
+                 "UPDATE analysis_reports SET last_updated = ? WHERE project_id = ?",
+                 list(current_time, project_id))
+  
+  if (verbose) {
+    message("GO enrichment summary added to report: ", report_info$report_path)
+    message("Report updated with ", go_content$total_enriched, " enriched GO terms")
+  }
+  
+  return(invisible(report_info$report_path))
+}
