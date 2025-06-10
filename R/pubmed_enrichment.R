@@ -406,11 +406,47 @@ generate_reference_list <- function(literature_data, output_file = NULL, format 
   
   references <- c()
   
-  # Group by gene
-  for (gene in unique(literature_data$gene)) {
-    gene_papers <- literature_data[literature_data$gene == gene, ]
+  # Group by gene - handle both old and new data structures
+  if ("gene" %in% names(literature_data)) {
+    # Old structure - group by gene column
+    grouping_var <- "gene"
+    group_values <- unique(literature_data$gene)
+  } else if ("uniprot_accession" %in% names(literature_data)) {
+    # New structure - group by uniprot_accession
+    grouping_var <- "uniprot_accession"
+    group_values <- unique(literature_data$uniprot_accession)
+  } else {
+    stop("Literature data must have either 'gene' or 'uniprot_accession' column")
+  }
+  
+  for (group_value in group_values) {
+    # Skip empty group values
+    if (is.na(group_value) || group_value == "" || is.null(group_value)) {
+      next
+    }
     
-    references <- c(references, paste("\n## References for", gene, "\n"))
+    gene_papers <- literature_data[literature_data[[grouping_var]] == group_value, ]
+    
+    # Remove duplicate papers by PMID within this gene group
+    if ("pmid" %in% names(gene_papers)) {
+      gene_papers <- gene_papers[!duplicated(gene_papers$pmid), ]
+    }
+    
+    # Create a readable gene identifier
+    if (grouping_var == "uniprot_accession") {
+      # Use gene_name if available, otherwise entry_name, otherwise uniprot_accession
+      if ("gene_name" %in% names(gene_papers) && !is.na(gene_papers$gene_name[1]) && gene_papers$gene_name[1] != "") {
+        gene_display <- paste0(gene_papers$gene_name[1], " (", group_value, ")")
+      } else if ("entry_name" %in% names(gene_papers) && !is.na(gene_papers$entry_name[1]) && gene_papers$entry_name[1] != "") {
+        gene_display <- paste0(gene_papers$entry_name[1], " (", group_value, ")")
+      } else {
+        gene_display <- group_value
+      }
+    } else {
+      gene_display <- group_value
+    }
+    
+    references <- c(references, paste("\n## References for", gene_display, "\n"))
     
     for (i in 1:nrow(gene_papers)) {
       paper <- gene_papers[i, ]
