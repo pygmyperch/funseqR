@@ -49,4 +49,9 @@ This function uses multiple search strategies to find relevant literature:
 \item Custom search terms provided by user
 \item Known functional mappings (lectin, chymotrypsinogen, etc.)
 }
+
+Each search strategy can find up to max_results papers. The function tries
+different strategies sequentially and stops early if sufficient papers are found.
+For each search term, multiple query variations are attempted (species-specific,
+broad taxonomic, functional combinations).
 }
