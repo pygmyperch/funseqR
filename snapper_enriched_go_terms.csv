@@ -1,6 +1,0 @@
-"ontology_name","go_id","go_term","foreground_count","background_count","fold_enrichment","p_value","p_adjusted","significance_level"
-"Cellular Component","GO:0043204","C:perikaryon",6,10,5.69032258064516,0.000180206347504368,0.00675773803141379,"highly_significant"
-"Cellular Component","GO:0005576","C:extracellular region",16,56,2.70967741935484,9.69408471049629e-05,0.00675773803141379,"highly_significant"
-"Cellular Component","GO:0031463","C:Cul3-RING ubiquitin ligase complex",5,11,4.3108504398827,0.00330053687273326,0.0825134218183316,"trending"
-"Molecular Function","GO:0050839","F:cell adhesion molecule binding",3,3,9.48387096774194,0.00114702621053496,0.0845447791353707,"trending"
-"Molecular Function","GO:0030246","F:carbohydrate binding",4,6,6.32258064516129,0.00149636777230745,0.0845447791353707,"trending"
