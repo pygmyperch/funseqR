@@ -1,3 +1,5 @@
+# EXPORTED
+
 #' Database connection utilities for funseqR
 #'
 #' These functions manage connections to the SQLite database that stores funseqR data.
@@ -24,43 +26,43 @@ create_funseq_db <- function(db_path, force = FALSE, verbose = TRUE) {
   if (file.exists(db_path) && !force) {
     stop("Database file already exists. Use force=TRUE to overwrite.")
   }
-  
+
   # Delete existing file if force=TRUE
   if (file.exists(db_path) && force) {
     file.remove(db_path)
     if (verbose) message("Existing database file removed.")
   }
-  
+
   # Create directory if it doesn't exist
   db_dir <- dirname(db_path)
   if (!dir.exists(db_dir)) {
     dir.create(db_dir, recursive = TRUE)
     if (verbose) message("Created directory: ", db_dir)
   }
-  
+
   # Connect to database
   if (verbose) message("Creating new database: ", db_path)
   con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
-  
+
   # Initialize schema
   if (verbose) message("Initializing database schema...")
   create_funseq_schema(con, verbose = verbose)
-  
+
   # Add package version info
   package_version <- as.character(packageVersion("funseqR"))
   r_version <- paste(R.version$major, R.version$minor, sep = ".")
-  
+
   query <- paste0(
     "INSERT INTO metadata (key, value) VALUES ",
     "('funseqR_version', '", package_version, "'), ",
     "('r_version', '", r_version, "'), ",
     "('creation_date', '", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "')"
   )
-  
+
   DBI::dbExecute(con, query)
-  
+
   if (verbose) message("Database initialization complete.")
-  
+
   return(con)
 }
 
@@ -82,34 +84,34 @@ connect_funseq_db <- function(db_path, verbose = TRUE) {
   if (!file.exists(db_path)) {
     stop("Database file does not exist: ", db_path)
   }
-  
+
   # Connect to database
   if (verbose) message("Connecting to database: ", db_path)
   con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
-  
+
   # Check if it's a valid funseqR database
   tables <- DBI::dbListTables(con)
   required_tables <- c("metadata", "projects", "input_files")
-  
+
   if (!all(required_tables %in% tables)) {
     DBI::dbDisconnect(con)
     stop("The file does not appear to be a valid funseqR database.")
   }
-  
+
   # Get and display database info
   if (verbose) {
     metadata <- DBI::dbGetQuery(con, "SELECT key, value FROM metadata")
     version <- metadata$value[metadata$key == "funseqR_version"]
     creation_date <- metadata$value[metadata$key == "creation_date"]
-    
+
     message("Connected to funseqR database (version: ", version, ")")
     message("Creation date: ", creation_date)
-    
+
     # Get project count
     project_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) FROM projects")[[1]]
     message("Projects in database: ", project_count)
   }
-  
+
   return(con)
 }
 
@@ -160,9 +162,12 @@ get_db_path <- function(con) {
   if (!DBI::dbIsValid(con)) {
     stop("Invalid database connection.")
   }
-  
+
   return(DBI::dbGetInfo(con)$dbname)
 }
+
+
+# INTERNAL
 
 #' Begin a transaction in the database
 #'
@@ -172,7 +177,6 @@ get_db_path <- function(con) {
 #'
 #' @importFrom DBI dbExecute
 #'
-#' @export
 begin_transaction <- function(con) {
   DBI::dbExecute(con, "BEGIN TRANSACTION")
   return(invisible(NULL))
@@ -186,7 +190,6 @@ begin_transaction <- function(con) {
 #'
 #' @importFrom DBI dbExecute
 #'
-#' @export
 commit_transaction <- function(con) {
   DBI::dbExecute(con, "COMMIT")
   return(invisible(NULL))
@@ -200,7 +203,6 @@ commit_transaction <- function(con) {
 #'
 #' @importFrom DBI dbExecute
 #'
-#' @export
 rollback_transaction <- function(con) {
   DBI::dbExecute(con, "ROLLBACK")
   return(invisible(NULL))

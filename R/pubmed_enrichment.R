@@ -23,7 +23,7 @@
 #' 3. Functional names derived from entry names
 #' 4. Custom search terms provided by user
 #' 5. Known functional mappings (lectin, chymotrypsinogen, etc.)
-#' 
+#'
 #' Each search strategy can find up to max_results papers. The function tries
 #' different strategies sequentially and stops early if sufficient papers are found.
 #' For each search term, multiple query variations are attempted (species-specific,
@@ -34,23 +34,23 @@ search_pubmed_enhanced <- function(uniprot_accession, gene_name = "", entry_name
                                  species = "danio rerio", max_results = 5,
                                  custom_search_term = NULL, include_functional_mapping = TRUE,
                                  verbose = TRUE) {
-  
-  if (verbose) message("Searching PubMed for: ", uniprot_accession, 
+
+  if (verbose) message("Searching PubMed for: ", uniprot_accession,
                       if(gene_name != "") paste0(" (", gene_name, ")") else "")
-  
+
   # Create multiple search strategies
   search_terms <- c()
-  
+
   # Strategy 1: Use gene name if available and reasonable length
   if (!is.na(gene_name) && gene_name != "" && nchar(gene_name) >= 3 && nchar(gene_name) <= 10) {
     search_terms <- c(search_terms, gene_name)
   }
-  
+
   # Strategy 2: Use UniProt accession
   if (!is.na(uniprot_accession) && uniprot_accession != "") {
     search_terms <- c(search_terms, uniprot_accession)
   }
-  
+
   # Strategy 3: Extract meaningful parts from entry name
   if (!is.na(entry_name) && entry_name != "") {
     # Extract the prefix before underscore (often the functional name)
@@ -59,18 +59,18 @@ search_pubmed_enhanced <- function(uniprot_accession, gene_name = "", entry_name
       search_terms <- c(search_terms, entry_parts[1])
     }
   }
-  
+
   # Strategy 4: Custom search term provided by user
   if (!is.null(custom_search_term) && custom_search_term != "") {
     search_terms <- c(search_terms, custom_search_term)
   }
-  
+
   # Strategy 5: Known functional mappings
   if (include_functional_mapping) {
     functional_terms <- list(
       "LEC" = "lectin",
       "CTRB" = "chymotrypsinogen B",
-      "CTRA" = "chymotrypsinogen A", 
+      "CTRA" = "chymotrypsinogen A",
       "CTXB" = "cytotoxin",
       "STXA" = "stonustoxin",
       "STXB" = "stonustoxin",
@@ -83,28 +83,28 @@ search_pubmed_enhanced <- function(uniprot_accession, gene_name = "", entry_name
       "MYO1" = "myosin",
       "POC1" = "POC1 centriolar protein"
     )
-    
+
     for (term in names(functional_terms)) {
       if (grepl(term, entry_name, ignore.case = TRUE)) {
         search_terms <- c(search_terms, functional_terms[[term]])
       }
     }
   }
-  
+
   # Remove duplicates and empty terms
   search_terms <- unique(search_terms[search_terms != "" & !is.na(search_terms)])
-  
+
   if (length(search_terms) == 0) {
     if (verbose) message("  No valid search terms found")
     return(data.frame())
   }
-  
+
   if (verbose) message("  Search terms: ", paste(search_terms, collapse = ", "))
-  
+
   all_papers <- list()
-  
+
   for (term in search_terms) {
-    
+
     # Create species-specific search terms
     species_terms <- c()
     if (species != "") {
@@ -120,76 +120,76 @@ search_pubmed_enhanced <- function(uniprot_accession, gene_name = "", entry_name
         )
       }
     }
-    
+
     # Try multiple search strategies for each term
     search_queries <- c()
-    
+
     # Query A: Specific with full species name
     if (length(species_terms) > 0) {
       search_queries <- c(search_queries,
         paste0('"', term, '"[Title/Abstract] AND ', species_terms[1], '[MeSH Terms OR Title/Abstract]')
       )
     }
-    
+
     # Query B: Broader with fish terms
     search_queries <- c(search_queries,
       paste0('"', term, '"[Title/Abstract] AND ("fish"[Title/Abstract] OR "teleost"[Title/Abstract])')
     )
-    
+
     # Query C: UniProt accession specific search (if term is the accession)
     if (term == uniprot_accession) {
       search_queries <- c(search_queries,
         paste0('"', term, '"[All Fields]')
       )
     }
-    
+
     # Query D: Very broad functional search
     search_queries <- c(search_queries,
       paste0('"', term, '"[Title/Abstract]')
     )
-    
+
     # Query E: Custom search term combination
     if (!is.null(custom_search_term) && custom_search_term != "" && term != custom_search_term) {
       search_queries <- c(search_queries,
         paste0('"', term, '"[Title/Abstract] AND "', custom_search_term, '"[Title/Abstract]')
       )
     }
-    
+
     for (query in search_queries) {
-      
+
       tryCatch({
-        
+
         # URL encode the search term
         encoded_search <- URLencode(query, reserved = TRUE)
-        
+
         # NCBI E-utilities URLs
         esearch_url <- paste0("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?",
-                             "db=pubmed&term=", encoded_search, 
+                             "db=pubmed&term=", encoded_search,
                              "&retmax=", max_results, "&retmode=xml")
-        
+
         # Search for PMIDs
         search_response <- xml2::read_xml(esearch_url)
         pmids <- xml2::xml_text(xml2::xml_find_all(search_response, "//Id"))
-        
+
         if (length(pmids) > 0) {
           if (verbose) message("    Found ", length(pmids), " papers with: ", substr(query, 1, 60), "...")
-          
+
           # Get paper details
           pmid_list <- paste(pmids, collapse = ",")
           efetch_url <- paste0("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?",
                               "db=pubmed&id=", pmid_list, "&retmode=xml")
-          
+
           Sys.sleep(0.5)  # Be respectful to NCBI servers
-          
+
           fetch_response <- xml2::read_xml(efetch_url)
           articles <- xml2::xml_find_all(fetch_response, "//PubmedArticle")
-          
+
           for (i in seq_along(articles)) {
             article <- articles[[i]]
-            
+
             pmid <- xml2::xml_text(xml2::xml_find_first(article, ".//PMID"))
             title <- xml2::xml_text(xml2::xml_find_first(article, ".//ArticleTitle"))
-            
+
             # Authors
             author_nodes <- xml2::xml_find_all(article, ".//Author")
             authors <- sapply(author_nodes, function(auth) {
@@ -213,17 +213,17 @@ search_pubmed_enhanced <- function(uniprot_accession, gene_name = "", entry_name
             } else {
               "No authors listed"
             }
-            
+
             # Journal and year
             journal <- xml2::xml_text(xml2::xml_find_first(article, ".//Journal/Title"))
             year <- xml2::xml_text(xml2::xml_find_first(article, ".//PubDate/Year"))
-            
+
             # Abstract (first 300 characters)
             abstract <- xml2::xml_text(xml2::xml_find_first(article, ".//Abstract/AbstractText"))
             if (!is.na(abstract) && nchar(abstract) > 300) {
               abstract <- paste0(substr(abstract, 1, 300), "...")
             }
-            
+
             paper_info <- data.frame(
               uniprot_accession = uniprot_accession,
               gene_name = gene_name,
@@ -239,46 +239,43 @@ search_pubmed_enhanced <- function(uniprot_accession, gene_name = "", entry_name
               pubmed_url = paste0("https://pubmed.ncbi.nlm.nih.gov/", pmid %||% ""),
               stringsAsFactors = FALSE
             )
-            
+
             all_papers[[paste0(pmid, "_", term)]] <- paper_info
           }
-          
+
           # If we found papers with this query, don't try more aggressive searches for this term
           if (length(pmids) >= 2) break
         }
-        
+
         Sys.sleep(0.3)  # Be respectful
-        
+
       }, error = function(e) {
         if (verbose) message("    Error with query: ", e$message)
       })
     }
-    
+
     # If we found papers with this term, don't try other terms unless we have very few
     if (length(all_papers) >= 3) break
   }
-  
+
   if (length(all_papers) > 0) {
     result <- do.call(rbind, all_papers)
     # Remove duplicates by PMID
     result <- result[!duplicated(result$pmid), ]
-    
+
     # Sort by year (newest first)
     if (nrow(result) > 0 && !all(is.na(result$year))) {
       result$year_numeric <- as.numeric(result$year)
       result <- result[order(-result$year_numeric, na.last = TRUE), ]
       result$year_numeric <- NULL
     }
-    
+
     return(result)
   } else {
     if (verbose) message("  No papers found")
     return(data.frame())
   }
 }
-
-# Helper function for null coalescing
-`%||%` <- function(x, y) if (is.null(x) || length(x) == 0 || is.na(x)) y else x
 
 #' Get literature for enriched genes with enhanced search
 #'
@@ -299,9 +296,9 @@ get_literature_for_enriched_genes <- function(con, candidate_file_id, background
                                              enriched_go_ids, species = "danio rerio",
                                              max_papers_per_gene = 3, custom_search_term = NULL,
                                              include_functional_mapping = TRUE, verbose = TRUE) {
-  
+
   if (verbose) message("Getting literature for enriched genes...")
-  
+
   # Get unique genes associated with enriched GO terms
   gene_query <- paste(
     "SELECT",
@@ -321,25 +318,25 @@ get_literature_for_enriched_genes <- function(con, candidate_file_id, background
     "GROUP BY a.uniprot_accession, a.gene_names, a.entry_name",
     "ORDER BY n_enriched_go_terms DESC, a.gene_names"
   )
-  
+
   genes <- DBI::dbGetQuery(con, gene_query, list(candidate_file_id, background_file_id))
-  
+
   if (nrow(genes) == 0) {
     if (verbose) message("No genes found for enriched GO terms")
     return(list(genes = data.frame(), literature = data.frame()))
   }
-  
+
   if (verbose) message("Found ", nrow(genes), " unique genes")
-  
+
   if (verbose) message("Searching literature for ", nrow(genes), " genes")
-  
+
   # Search PubMed for each gene using enhanced search
   all_literature <- list()
-  
+
   for (i in 1:nrow(genes)) {
-    
+
     if (verbose) message("  [", i, "/", nrow(genes), "] ", genes$uniprot_accession[i])
-    
+
     papers <- search_pubmed_enhanced(
       uniprot_accession = genes$uniprot_accession[i],
       gene_name = genes$gene_names[i],
@@ -350,7 +347,7 @@ get_literature_for_enriched_genes <- function(con, candidate_file_id, background
       include_functional_mapping = include_functional_mapping,
       verbose = FALSE
     )
-    
+
     if (nrow(papers) > 0) {
       # Add gene metadata from the original query
       if ("n_enriched_go_terms" %in% names(genes)) {
@@ -359,14 +356,14 @@ get_literature_for_enriched_genes <- function(con, candidate_file_id, background
       if ("go_terms" %in% names(genes)) {
         papers$associated_go_terms <- genes$go_terms[i]
       }
-      
+
       all_literature[[genes$uniprot_accession[i]]] <- papers
     }
-    
+
     # Be respectful to NCBI servers
     Sys.sleep(1)
   }
-  
+
   # Combine literature results
   if (length(all_literature) > 0) {
     literature_df <- do.call(rbind, all_literature)
@@ -374,14 +371,14 @@ get_literature_for_enriched_genes <- function(con, candidate_file_id, background
   } else {
     literature_df <- data.frame()
   }
-  
+
   if (verbose) {
     message("Literature search complete:")
     message("  Genes searched: ", nrow(genes))
     message("  Papers found: ", nrow(literature_df))
     message("  Genes with literature: ", length(unique(literature_df$uniprot_accession)))
   }
-  
+
   return(list(
     genes = genes,
     literature = literature_df,
@@ -403,14 +400,14 @@ get_literature_for_enriched_genes <- function(con, candidate_file_id, background
 #'
 #' @export
 generate_reference_list <- function(literature_data, output_file = NULL, format = "apa") {
-  
+
   if (nrow(literature_data) == 0) {
     message("No literature data to format")
     return(character(0))
   }
-  
+
   references <- c()
-  
+
   # Group by gene - handle both old and new data structures
   if ("gene" %in% names(literature_data)) {
     # Old structure - group by gene column
@@ -423,20 +420,20 @@ generate_reference_list <- function(literature_data, output_file = NULL, format 
   } else {
     stop("Literature data must have either 'gene' or 'uniprot_accession' column")
   }
-  
+
   for (group_value in group_values) {
     # Skip empty group values
     if (is.na(group_value) || group_value == "" || is.null(group_value)) {
       next
     }
-    
+
     gene_papers <- literature_data[literature_data[[grouping_var]] == group_value, ]
-    
+
     # Remove duplicate papers by PMID within this gene group
     if ("pmid" %in% names(gene_papers)) {
       gene_papers <- gene_papers[!duplicated(gene_papers$pmid), ]
     }
-    
+
     # Create a readable gene identifier
     if (grouping_var == "uniprot_accession") {
       # Use gene_name if available, otherwise entry_name, otherwise uniprot_accession
@@ -450,12 +447,12 @@ generate_reference_list <- function(literature_data, output_file = NULL, format 
     } else {
       gene_display <- group_value
     }
-    
+
     references <- c(references, paste("\n## References for", gene_display, "\n"))
-    
+
     for (i in 1:nrow(gene_papers)) {
       paper <- gene_papers[i, ]
-      
+
       if (format == "apa") {
         # APA format
         ref <- paste0(
@@ -484,16 +481,16 @@ generate_reference_list <- function(literature_data, output_file = NULL, format 
           "Associated GO terms: ", paper$associated_go_terms, "\n"
         )
       }
-      
+
       references <- c(references, paste(i, ".", ref, "\n"))
     }
   }
-  
+
   # Write to file if requested
   if (!is.null(output_file)) {
     writeLines(references, output_file)
     message("References written to: ", output_file)
   }
-  
+
   return(references)
 }

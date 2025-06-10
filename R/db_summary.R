@@ -569,7 +569,6 @@ get_table_info <- function(con, table_name, sample_size = 5, include_schema = TR
           paste0("SELECT '", col, "' as column_name, ",
                  "MIN(", col, ") as min_val, ",
                  "MAX(", col, ") as max_val, ",
-                 "AVG(", col, ") as avg_val, ",
                  "COUNT(DISTINCT ", col, ") as unique_count ",
                  "FROM ", table_name, " WHERE ", col, " IS NOT NULL")
         })
@@ -580,14 +579,14 @@ get_table_info <- function(con, table_name, sample_size = 5, include_schema = TR
 
         if (verbose && nrow(column_stats) > 0) {
           cat("\n=== Numeric Column Statistics ===\n")
-          cat(sprintf("%-15s %10s %10s %12s %10s\n", "Column", "Min", "Max", "Average", "Unique"))
-          cat(paste(rep("-", 65), collapse = ""), "\n")
+          cat(sprintf("%-15s %10s %10s %10s\n", "Column", "Min", "Max", "Unique"))
+          cat(paste(rep("-", 50), collapse = ""), "\n")
 
           for (i in 1:nrow(column_stats)) {
             stat <- column_stats[i, ]
-            cat(sprintf("%-15s %10.2f %10.2f %12.2f %10d\n",
+            cat(sprintf("%-15s %10.2f %10.2f %10d\n",
                         stat$column_name, stat$min_val, stat$max_val,
-                        stat$avg_val, stat$unique_count))
+                        stat$unique_count))
           }
         }
       }, error = function(e) {

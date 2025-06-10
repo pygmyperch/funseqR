@@ -32,7 +32,7 @@ and background datasets. Creates gene-to-GO mappings required for enrichment tes
 }
 \examples{
 \dontrun{
-go_data <- extract_go_terms_for_enrichment(con, candidate_file_id, background_file_id)
+go_data <- extract_go_terms_for_enrichment(con, foreground_file_id, background_file_id)
 str(go_data)
 }
 

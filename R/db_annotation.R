@@ -1,223 +1,4 @@
-#' Ensure the uniprot_cache table exists
-#'
-#' @param con A database connection object
-#' @param verbose Logical. If TRUE, print progress information
-#' @return Invisible NULL
-#' @export
-ensure_uniprot_cache_table <- function(con, verbose = FALSE) {
-  # Check if table exists
-  tables <- DBI::dbListTables(con)
-  if ("uniprot_cache" %in% tables) {
-    if (verbose) message("UniProt cache table already exists")
-    return(invisible(NULL))
-  }
-
-  # Create table
-  if (verbose) message("Creating UniProt cache table...")
-
-  DBI::dbExecute(con, "
-    CREATE TABLE uniprot_cache (
-      cache_id INTEGER PRIMARY KEY,
-      accession TEXT NOT NULL UNIQUE,
-      response_json TEXT NOT NULL,
-      retrieval_date TEXT NOT NULL
-    )
-  ")
-
-  DBI::dbExecute(con, "CREATE INDEX idx_uniprot_cache_accession ON uniprot_cache (accession)")
-
-  if (verbose) message("UniProt cache table created successfully")
-  return(invisible(NULL))
-}
-
-#' Get cached UniProt data
-#'
-#' @param con A database connection object
-#' @param accession The UniProt accession number
-#' @param debug If TRUE, print debugging information
-#' @return The cached UniProt data or NULL if not found
-#' @export
-get_cached_uniprot_data <- function(con, accession, debug = FALSE) {
-  if (is.null(con) || !DBI::dbIsValid(con)) {
-    if (debug) message("Invalid database connection")
-    return(NULL)
-  }
-
-  # Check if the table exists
-  tables <- DBI::dbListTables(con)
-  if (!"uniprot_cache" %in% tables) {
-    if (debug) message("UniProt cache table doesn't exist")
-    return(NULL)
-  }
-
-  # Check if data exists in cache
-  tryCatch({
-    cache_query <- "SELECT response_json, retrieval_date FROM uniprot_cache WHERE accession = ?"
-    cache_result <- DBI::dbGetQuery(con, cache_query, params = list(accession))
-
-    if (nrow(cache_result) == 0 || is.null(cache_result$response_json)) {
-      if (debug) message("No cache entry found for ", accession)
-      return(NULL)
-    }
-
-    # Get the JSON text
-    json_text <- cache_result$response_json[1]
-    retrieval_date <- cache_result$retrieval_date[1]
-
-    if (is.na(json_text) || nchar(json_text) == 0) {
-      if (debug) message("Cache entry for ", accession, " is empty")
-      return(NULL)
-    }
-
-    if (debug) {
-      message("Found cache entry for ", accession, " retrieved on ", retrieval_date)
-      message("JSON length: ", nchar(json_text), " chars")
-      if (nchar(json_text) > 0) {
-        message("First 50 chars: ", substr(json_text, 1, 50), "...")
-      }
-    }
-
-    # Check for placeholder entries
-    if (grepl('"empty"\\s*:\\s*true', json_text)) {
-      if (debug) message("Cache entry is a placeholder, ignoring")
-      return(NULL)
-    }
-
-    # Create a response object - without trying to parse the JSON
-    # We'll leave the parsing to extract_uniprot_info to avoid duplicate parsing
-    result <- list(
-      accession = accession,
-      url = NA_character_,
-      status_code = 200,
-      content = json_text,   # Original JSON text
-      data = NULL,           # We won't parse here to avoid issues
-      error = NA_character_,
-      from_cache = TRUE,
-      retrieval_date = retrieval_date
-    )
-
-    return(result)
-  }, error = function(e) {
-    if (debug) message("Error retrieving cache data for ", accession, ": ", e$message)
-    return(NULL)
-  })
-}
-
-#' Store UniProt data in cache with robust error handling
-#'
-#' @param con A database connection object
-#' @param accession The UniProt accession number
-#' @param response The UniProt API response
-#' @param debug If TRUE, print debugging information
-#' @return TRUE if storage successful, FALSE otherwise
-#' @export
-store_uniprot_data <- function(con, accession, response, debug = FALSE) {
-  # Initialize json_data to a fallback value
-  json_data <- paste0('{"accession":"', accession, '","empty":true,"timestamp":"',
-                      format(Sys.time(), "%Y-%m-%d %H:%M:%S"), '"}')
-
-  if (debug) {
-    message("Attempting to store data for accession: ", accession)
-  }
-
-  # First check if the connection is valid
-  if (is.null(con) || !DBI::dbIsValid(con)) {
-    if (debug) message("Database connection is invalid or NULL")
-    return(FALSE)
-  }
-
-  # Handle the response object carefully with separate conditionals
-  if (!is.null(response)) {
-    # Determine if it's a list
-    if (is.list(response)) {
-      # Try content field if it exists
-      if (!is.null(names(response)) && "content" %in% names(response)) {
-        # Content exists, check if it's usable
-        content_val <- response$content
-        if (!is.null(content_val) && is.character(content_val) && !is.na(content_val) && nchar(content_val) > 0) {
-          json_data <- content_val
-          if (debug) message("Using content field as JSON")
-        }
-      }
-      # If content didn't work, try data field
-      else if (!is.null(names(response)) && "data" %in% names(response) && !is.null(response$data)) {
-        tryCatch({
-          json_text <- jsonlite::toJSON(response$data, auto_unbox = TRUE)
-          if (!is.null(json_text) && nchar(json_text) > 0) {
-            json_data <- json_text
-            if (debug) message("Converted data field to JSON")
-          }
-        }, error = function(e) {
-          if (debug) message("Error converting data to JSON: ", e$message)
-        })
-      }
-      # As last resort, try to convert the whole response
-      else {
-        tryCatch({
-          json_text <- jsonlite::toJSON(response, auto_unbox = TRUE)
-          if (!is.null(json_text) && nchar(json_text) > 0) {
-            json_data <- json_text
-            if (debug) message("Converted entire response to JSON")
-          }
-        }, error = function(e) {
-          if (debug) message("Error converting response to JSON: ", e$message)
-        })
-      }
-    }
-    else if (is.character(response) && !is.na(response) && nchar(response) > 0) {
-      # The response itself is a string, try to use it directly
-      json_data <- response
-      if (debug) message("Using response as JSON string")
-    }
-  }
-
-  # Store in database
-  success <- FALSE
-  tryCatch({
-    current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-
-    # First check if we need to create the table
-    tables <- DBI::dbListTables(con)
-    if (!"uniprot_cache" %in% tables) {
-      if (debug) message("Creating uniprot_cache table")
-      DBI::dbExecute(con, "
-        CREATE TABLE uniprot_cache (
-          cache_id INTEGER PRIMARY KEY,
-          accession TEXT NOT NULL UNIQUE,
-          response_json TEXT NOT NULL,
-          retrieval_date TEXT NOT NULL
-        )
-      ")
-      DBI::dbExecute(con, "CREATE INDEX idx_uniprot_cache_accession ON uniprot_cache (accession)")
-    }
-
-    # Check if entry exists
-    existing_query <- "SELECT COUNT(*) AS count FROM uniprot_cache WHERE accession = ?"
-    existing <- DBI::dbGetQuery(con, existing_query, params = list(accession))
-    has_existing <- FALSE
-    if (nrow(existing) > 0 && !is.null(existing$count) && existing$count > 0) {
-      has_existing <- TRUE
-    }
-
-    if (has_existing) {
-      # Update existing record
-      update_query <- "UPDATE uniprot_cache SET response_json = ?, retrieval_date = ? WHERE accession = ?"
-      result <- DBI::dbExecute(con, update_query, params = list(json_data, current_time, accession))
-      if (debug) message("Updated existing record for ", accession)
-      success <- TRUE
-    } else {
-      # Insert new record
-      insert_query <- "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)"
-      result <- DBI::dbExecute(con, insert_query, params = list(accession, json_data, current_time))
-      if (debug) message("Created new record for ", accession)
-      success <- TRUE
-    }
-  }, error = function(e) {
-    if (debug) message("Database error: ", e$message)
-  })
-
-  return(success)
-}
+# EXPORTED
 
 #' Test connection to the UniProt API using working endpoints
 #'
@@ -269,537 +50,6 @@ test_uniprot_connection <- function(verbose = FALSE) {
     if (verbose) message("Error testing UniProt connection: ", e$message)
     return(FALSE)
   })
-}
-
-#' Updated connection check for annotate_blast_results function
-#'
-#' Place this code within your annotate_blast_results function
-#' to replace the existing connection check
-check_uniprot_connection <- function(verbose = TRUE) {
-  if (verbose) message("Testing UniProt API connection...")
-  connection_result <- test_uniprot_connection(verbose = verbose)
-
-  if (!connection_result) {
-    message("\nUniProt API connection failed. Possible causes:")
-    message("1. Temporary service disruption")
-    message("2. Network connectivity issues")
-    message("3. API endpoint changes")
-    message("\nOptions:")
-    message("- Try again later")
-    message("- Use offline_mode=TRUE to continue without annotations")
-    message("- Check for package updates")
-    stop("Cannot connect to UniProt API")
-  }
-
-  if (verbose) message("UniProt API connection successful.")
-  return(TRUE)
-}
-
-#' Extract UniProt information from API response
-#'
-#' @param uniprot_data The response from query_uniprot_api
-#' @param debug If TRUE, print debugging information
-#'
-#' @return A list containing extracted information
-#' @export
-extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
-  # Initialize standard result structure
-  result <- list(
-    accession = if (!is.null(uniprot_data$accession)) uniprot_data$accession else "Unknown",
-    entry_name = NA_character_,
-    gene_names = "",
-    go_terms = data.frame(
-      go_id = character(0),
-      go_term = character(0),
-      go_category = character(0),
-      go_evidence = character(0),
-      stringsAsFactors = FALSE
-    ),
-    kegg_refs = data.frame(
-      kegg_id = character(0),
-      pathway_name = character(0),
-      stringsAsFactors = FALSE
-    )
-  )
-
-  # Validate input
-  if (is.null(uniprot_data) || !is.list(uniprot_data)) {
-    if (debug) message("No valid UniProt data provided")
-    return(result)
-  }
-
-  # Parse content field (most reliable source)
-  entry <- NULL
-
-  if (!is.null(uniprot_data$content) && is.character(uniprot_data$content) && nchar(uniprot_data$content) > 0) {
-    if (debug) message("Parsing content field, length: ", nchar(uniprot_data$content))
-
-    tryCatch({
-      # CRITICAL FIX: Use simplifyVector = FALSE to preserve nested structures
-      parsed <- jsonlite::fromJSON(uniprot_data$content, simplifyVector = FALSE)
-
-      # Find the entry data
-      if (!is.null(parsed$results) && is.list(parsed$results) && length(parsed$results) > 0) {
-        entry <- parsed$results[[1]]
-        if (debug) message("Found entry in results array")
-      } else if (!is.null(parsed$primaryAccession)) {
-        entry <- parsed
-        if (debug) message("Found entry at root level")
-      }
-    }, error = function(e) {
-      if (debug) message("Error parsing JSON content: ", e$message)
-    })
-  }
-
-  # Try data field if content parsing failed
-  if (is.null(entry) && !is.null(uniprot_data$data)) {
-    if (debug) message("Trying data field")
-
-    if (is.list(uniprot_data$data)) {
-      if (!is.null(uniprot_data$data$results) && is.list(uniprot_data$data$results) &&
-          length(uniprot_data$data$results) > 0) {
-        entry <- uniprot_data$data$results[[1]]
-      } else if (!is.null(uniprot_data$data$primaryAccession)) {
-        entry <- uniprot_data$data
-      }
-    }
-  }
-
-  # Return empty result if no entry found
-  if (is.null(entry)) {
-    if (debug) message("No entry data found in response")
-    return(result)
-  }
-
-  # Extract basic info
-  if (!is.null(entry$primaryAccession)) {
-    result$accession <- entry$primaryAccession
-    if (debug) message("Found accession: ", result$accession)
-  }
-
-  if (!is.null(entry$uniProtkbId)) {
-    result$entry_name <- entry$uniProtkbId
-    if (debug) message("Found entry name: ", result$entry_name)
-  }
-
-  # Extract gene names
-  if (!is.null(entry$genes) && is.list(entry$genes) && length(entry$genes) > 0) {
-    gene_names <- c()
-
-    for (i in seq_along(entry$genes)) {
-      gene <- entry$genes[[i]]
-      if (is.list(gene) && !is.null(gene$geneName) &&
-          is.list(gene$geneName) && !is.null(gene$geneName$value)) {
-        gene_names <- c(gene_names, gene$geneName$value)
-        if (debug) message("Found gene name: ", gene$geneName$value)
-      }
-    }
-
-    if (length(gene_names) > 0) {
-      result$gene_names <- paste(gene_names, collapse = ";")
-      if (debug) message("Combined gene names: ", result$gene_names)
-    }
-  }
-
-  # Extract GO terms and KEGG references
-  if (!is.null(entry$uniProtKBCrossReferences) && is.list(entry$uniProtKBCrossReferences)) {
-    if (debug) message("Processing ", length(entry$uniProtKBCrossReferences), " cross-references")
-
-    go_terms <- data.frame(
-      go_id = character(0),
-      go_term = character(0),
-      go_category = character(0),
-      go_evidence = character(0),
-      stringsAsFactors = FALSE
-    )
-
-    kegg_refs <- data.frame(
-      kegg_id = character(0),
-      pathway_name = character(0),
-      stringsAsFactors = FALSE
-    )
-
-    # Process each cross-reference
-    for (i in seq_along(entry$uniProtKBCrossReferences)) {
-      ref <- entry$uniProtKBCrossReferences[[i]]
-
-      # Process GO terms - FIXED: properly check structure and extract fields
-      if (is.list(ref) && !is.null(ref$database) && ref$database == "GO" && !is.null(ref$id)) {
-        if (debug) message("Processing GO reference: ", ref$id)
-
-        go_id <- ref$id
-        go_term <- NA_character_
-        go_evidence <- NA_character_
-
-        # Extract properties - FIXED: properly handle the properties list
-        if (!is.null(ref$properties) && is.list(ref$properties)) {
-          for (j in seq_along(ref$properties)) {
-            prop <- ref$properties[[j]]
-
-            if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
-              if (prop$key == "GoTerm") {
-                go_term <- prop$value
-                if (debug) message("  Found GO term: ", go_term)
-              }
-              if (prop$key == "GoEvidenceType") {
-                go_evidence <- prop$value
-                if (debug) message("  Found GO evidence: ", go_evidence)
-              }
-            }
-          }
-        }
-
-        # Add GO term if we have one
-        if (!is.na(go_term)) {
-          # Extract category (C, F, P) from the term
-          go_category <- substr(go_term, 1, 1)
-
-          new_row <- data.frame(
-            go_id = go_id,
-            go_term = go_term,
-            go_category = go_category,
-            go_evidence = go_evidence,
-            stringsAsFactors = FALSE
-          )
-          go_terms <- rbind(go_terms, new_row)
-
-          if (debug) message("Added GO term: ", go_id, " - ", go_term)
-        }
-      }
-
-      # Process KEGG references
-      if (is.list(ref) && !is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id)) {
-        if (debug) message("Processing KEGG reference: ", ref$id)
-
-        kegg_id <- ref$id
-        pathway_name <- NA_character_
-
-        # Extract properties - same pattern as GO terms
-        if (!is.null(ref$properties) && is.list(ref$properties)) {
-          for (j in seq_along(ref$properties)) {
-            prop <- ref$properties[[j]]
-
-            if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
-              if (prop$key == "Description" || prop$key == "PathwayName") {
-                pathway_name <- prop$value
-                if (debug) message("  Found pathway name: ", pathway_name)
-              }
-            }
-          }
-        }
-
-        # Add KEGG reference
-        new_row <- data.frame(
-          kegg_id = kegg_id,
-          pathway_name = pathway_name,
-          stringsAsFactors = FALSE
-        )
-        kegg_refs <- rbind(kegg_refs, new_row)
-
-        if (debug) message("Added KEGG reference: ", kegg_id)
-      }
-    }
-
-    # Update result with extracted data
-    result$go_terms <- go_terms
-    result$kegg_refs <- kegg_refs
-
-    if (debug) {
-      message("Extracted ", nrow(go_terms), " GO terms and ", nrow(kegg_refs), " KEGG references")
-    }
-  } else if (debug) {
-    message("No cross-references found or not a list structure")
-  }
-
-  return(result)
-}
-
-#' Create an empty annotation structure
-#'
-#' @param accession The accession number
-#' @return A list with empty annotation structures
-#' @export
-create_empty_annotation <- function(accession) {
-  list(
-    accession = accession,
-    entry_name = NA_character_,
-    gene_names = "",
-    go_terms = data.frame(
-      go_id = character(0),
-      go_term = character(0),
-      go_category = character(0),
-      go_evidence = character(0),
-      stringsAsFactors = FALSE
-    ),
-    kegg_refs = data.frame(
-      kegg_id = character(0),
-      pathway_name = character(0),
-      stringsAsFactors = FALSE
-    )
-  )
-}
-
-#' Store annotation in the database
-#'
-#' This function stores UniProt annotation in the database or adds GO terms and KEGG references
-#' to existing annotations if they're missing.
-#'
-#' @param con A database connection object.
-#' @param blast_result_id The ID of the BLAST result to annotate.
-#' @param uniprot_info A list containing UniProt information as returned by extract_uniprot_info.
-#' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
-#' @param update_existing Logical. If TRUE, add GO terms and KEGG references to existing annotations. Default is TRUE.
-#'
-#' @return The ID of the annotation.
-#'
-#' @export
-store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE, update_existing = TRUE) {
-  if (is.null(uniprot_info)) {
-    if (verbose) message("Cannot store NULL annotation")
-    return(NULL)
-  }
-
-  # Check for required fields
-  accession <- uniprot_info$accession
-  if (is.null(accession) || is.na(accession) || nchar(accession) == 0) {
-    if (verbose) message("Missing accession in annotation data")
-    return(NULL)
-  }
-
-  # Debugging
-  if (verbose) {
-    message("Storing annotation for blast_result_id: ", blast_result_id)
-    message("UniProt info: accession=", accession,
-            ", entry_name=", ifelse(is.null(uniprot_info$entry_name) || is.na(uniprot_info$entry_name), "NA", uniprot_info$entry_name),
-            ", gene_names=", ifelse(is.null(uniprot_info$gene_names) || is.na(uniprot_info$gene_names), "", uniprot_info$gene_names))
-
-    # Log what we have for GO terms and KEGG refs
-    if (!is.null(uniprot_info$go_terms) && is.data.frame(uniprot_info$go_terms)) {
-      message("GO terms: ", nrow(uniprot_info$go_terms), " entries")
-    } else {
-      message("GO terms: NULL or not a data frame")
-    }
-
-    if (!is.null(uniprot_info$kegg_refs) && is.data.frame(uniprot_info$kegg_refs)) {
-      message("KEGG refs: ", nrow(uniprot_info$kegg_refs), " entries")
-    } else {
-      message("KEGG refs: NULL or not a data frame")
-    }
-  }
-
-  # Check if annotation already exists
-  existing <- DBI::dbGetQuery(
-    con,
-    "SELECT annotation_id FROM annotations WHERE blast_result_id = ? AND uniprot_accession = ?",
-    params = list(blast_result_id, accession)
-  )
-
-  annotation_id <- NULL
-
-  if (nrow(existing) > 0) {
-    annotation_id <- existing$annotation_id[1]
-    if (verbose) message("Annotation already exists with ID ", annotation_id)
-
-    # Check for GO terms and KEGG refs if updating existing annotations
-    if (update_existing) {
-      go_count <- DBI::dbGetQuery(
-        con,
-        "SELECT COUNT(*) AS count FROM go_terms WHERE annotation_id = ?",
-        params = list(annotation_id)
-      )$count
-
-      kegg_count <- DBI::dbGetQuery(
-        con,
-        "SELECT COUNT(*) AS count FROM kegg_references WHERE annotation_id = ?",
-        params = list(annotation_id)
-      )$count
-
-      if (verbose) {
-        message("Existing annotation has ", go_count, " GO terms and ", kegg_count, " KEGG references")
-      }
-
-      if (go_count == 0 && kegg_count == 0) {
-        if (verbose) message("Adding missing GO terms and KEGG references to existing annotation")
-      } else {
-        if (verbose) message("Skipping - annotation already has GO terms or KEGG references")
-        return(annotation_id)
-      }
-    } else {
-      return(annotation_id)
-    }
-  } else {
-    # Create new annotation
-    tryCatch({
-      # Add annotation
-      current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-
-      # Handle entry_name properly - if it's NULL, NA, or not length 1, use NULL in the query
-      entry_name <- NULL
-      if (!is.null(uniprot_info$entry_name) &&
-          length(uniprot_info$entry_name) == 1 &&
-          !is.na(uniprot_info$entry_name)) {
-        entry_name <- uniprot_info$entry_name
-      }
-
-      # Handle gene_names
-      gene_names <- ""
-      if (!is.null(uniprot_info$gene_names) &&
-          length(uniprot_info$gene_names) == 1 &&
-          !is.na(uniprot_info$gene_names)) {
-        gene_names <- uniprot_info$gene_names
-      }
-
-      # Use a query that only includes entry_name if it's not NULL
-      if (is.null(entry_name)) {
-        query <- "INSERT INTO annotations (blast_result_id, uniprot_accession, gene_names, retrieval_date) VALUES (?, ?, ?, ?)"
-        params <- list(blast_result_id, accession, gene_names, current_time)
-      } else {
-        query <- "INSERT INTO annotations (blast_result_id, uniprot_accession, entry_name, gene_names, retrieval_date) VALUES (?, ?, ?, ?, ?)"
-        params <- list(blast_result_id, accession, entry_name, gene_names, current_time)
-      }
-
-      # Execute the query
-      DBI::dbExecute(con, query, params = params)
-
-      # Get the ID of the newly created annotation
-      annotation_id <- DBI::dbGetQuery(
-        con,
-        "SELECT annotation_id FROM annotations WHERE blast_result_id = ? AND uniprot_accession = ? ORDER BY annotation_id DESC LIMIT 1",
-        params = list(blast_result_id, accession)
-      )$annotation_id[1]
-
-      if (verbose) message("Created new annotation with ID ", annotation_id)
-    }, error = function(e) {
-      warning("Error creating annotation: ", e$message)
-      return(NULL)
-    })
-  }
-
-  # Add GO terms
-  go_count <- 0
-  if (!is.null(annotation_id) && !is.null(uniprot_info$go_terms) &&
-      is.data.frame(uniprot_info$go_terms) && nrow(uniprot_info$go_terms) > 0) {
-    if (verbose) message("Adding ", nrow(uniprot_info$go_terms), " GO terms")
-
-    tryCatch({
-      for (i in 1:nrow(uniprot_info$go_terms)) {
-        # Get values with proper NULL handling
-        go_id <- uniprot_info$go_terms$go_id[i]
-        if (is.na(go_id)) next
-
-        # Check if GO term already exists
-        go_exists <- DBI::dbGetQuery(
-          con,
-          "SELECT COUNT(*) AS count FROM go_terms WHERE annotation_id = ? AND go_id = ?",
-          params = list(annotation_id, go_id)
-        )$count > 0
-
-        if (go_exists) {
-          if (verbose) message("GO term ", go_id, " already exists, skipping")
-          next
-        }
-
-        # Prepare parameters for insertion
-        go_term <- uniprot_info$go_terms$go_term[i]
-        go_category <- uniprot_info$go_terms$go_category[i]
-        go_evidence <- uniprot_info$go_terms$go_evidence[i]
-
-        # Handle NULL/NA values
-        if (is.na(go_term)) go_term <- NULL
-        if (is.na(go_category)) go_category <- NULL
-        if (is.na(go_evidence)) go_evidence <- NULL
-
-        # Build query based on what's available
-        fields <- c("annotation_id", "go_id")
-        values <- c("?", "?")
-        insert_params <- list(annotation_id, go_id)
-
-        if (!is.null(go_term)) {
-          fields <- c(fields, "go_term")
-          values <- c(values, "?")
-          insert_params <- c(insert_params, list(go_term))
-        }
-
-        if (!is.null(go_category)) {
-          fields <- c(fields, "go_category")
-          values <- c(values, "?")
-          insert_params <- c(insert_params, list(go_category))
-        }
-
-        if (!is.null(go_evidence)) {
-          fields <- c(fields, "go_evidence")
-          values <- c(values, "?")
-          insert_params <- c(insert_params, list(go_evidence))
-        }
-
-        # Create and execute the insertion query
-        insert_query <- paste0(
-          "INSERT INTO go_terms (", paste(fields, collapse = ", "), ") ",
-          "VALUES (", paste(values, collapse = ", "), ")"
-        )
-
-        DBI::dbExecute(con, insert_query, params = insert_params)
-        go_count <- go_count + 1
-      }
-
-      if (verbose) message("Added ", go_count, " GO terms")
-    }, error = function(e) {
-      warning("Error inserting GO terms: ", e$message)
-    })
-  } else if (verbose) {
-    message("No GO terms to add")
-  }
-
-  # Add KEGG references
-  kegg_count <- 0
-  if (!is.null(annotation_id) && !is.null(uniprot_info$kegg_refs) &&
-      is.data.frame(uniprot_info$kegg_refs) && nrow(uniprot_info$kegg_refs) > 0) {
-    if (verbose) message("Adding ", nrow(uniprot_info$kegg_refs), " KEGG references")
-
-    tryCatch({
-      for (i in 1:nrow(uniprot_info$kegg_refs)) {
-        # Get values with proper NULL handling
-        kegg_id <- uniprot_info$kegg_refs$kegg_id[i]
-        if (is.na(kegg_id)) next
-
-        # Check if KEGG reference already exists
-        kegg_exists <- DBI::dbGetQuery(
-          con,
-          "SELECT COUNT(*) AS count FROM kegg_references WHERE annotation_id = ? AND kegg_id = ?",
-          params = list(annotation_id, kegg_id)
-        )$count > 0
-
-        if (kegg_exists) {
-          if (verbose) message("KEGG reference ", kegg_id, " already exists, skipping")
-          next
-        }
-
-        # Prepare parameters for insertion
-        pathway_name <- uniprot_info$kegg_refs$pathway_name[i]
-        if (is.na(pathway_name)) pathway_name <- NULL
-
-        # Build query based on what's available
-        if (is.null(pathway_name)) {
-          insert_query <- "INSERT INTO kegg_references (annotation_id, kegg_id) VALUES (?, ?)"
-          insert_params <- list(annotation_id, kegg_id)
-        } else {
-          insert_query <- "INSERT INTO kegg_references (annotation_id, kegg_id, pathway_name) VALUES (?, ?, ?)"
-          insert_params <- list(annotation_id, kegg_id, pathway_name)
-        }
-
-        DBI::dbExecute(con, insert_query, params = insert_params)
-        kegg_count <- kegg_count + 1
-      }
-
-      if (verbose) message("Added ", kegg_count, " KEGG references")
-    }, error = function(e) {
-      warning("Error inserting KEGG references: ", e$message)
-    })
-  } else if (verbose) {
-    message("No KEGG references to add")
-  }
-
-  return(annotation_id)
 }
 
 #' Process BLAST results and retrieve UniProt annotations
@@ -879,7 +129,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   # Test UniProt API connection only if not in offline mode
   if (!offline_mode && !use_cache) {
     if (verbose) message("Testing UniProt API connection...")
-    check_uniprot_connection(verbose = verbose)
+    require_uniprot_connection(verbose = verbose)
   } else if (offline_mode) {
     if (verbose) message("Offline mode enabled - skipping API connection test")
   }
@@ -1206,7 +456,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
     annotation_rate <- if (total_blast_hits > 0) round((successful_annotations / total_blast_hits) * 100, 1) else 0
     go_per_annotation <- if (successful_annotations > 0) round(go_count / successful_annotations, 1) else 0
     kegg_per_annotation <- if (successful_annotations > 0) round(kegg_count / successful_annotations, 1) else 0
-    
+
     annotation_message <- paste0(
       "**Functional Annotation Completed**\n\n",
       "- **Unique BLAST hits processed:** ", format(total_blast_hits, big.mark = ","), "\n",
@@ -1236,162 +486,6 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
   }, error = function(e) {
     # Silently ignore if no report exists
   })
-
-  return(result)
-}
-
-#' Query the UniProt API for a protein accession
-#'
-#' @param accession The UniProt accession number
-#' @param fields The fields to retrieve from UniProt (for search endpoint)
-#' @param debug If TRUE, save the API response to a file for debugging
-#'
-#' @return A list containing API response with consistent structure
-#' @export
-query_uniprot_api <- function(accession,
-                              fields = "accession,id,gene_names,go,xref_kegg,organism_name,protein_name",
-                              debug = FALSE) {
-  # Create result structure
-  result <- list(
-    accession = accession,
-    url = NA_character_,
-    status_code = NA_integer_,
-    content = NA_character_,
-    data = NULL,
-    error = NA_character_
-  )
-
-  # Try direct URL first (more reliable and complete)
-  url <- paste0("https://rest.uniprot.org/uniprotkb/", accession, ".json")
-  result$url <- url
-
-  if (debug) message("Querying direct URL: ", url)
-
-  # Make HTTP request with proper headers
-  headers <- c(
-    "User-Agent" = "R/funseqR UniProt Client",
-    "Accept" = "application/json"
-  )
-
-  # Try direct URL
-  response <- httr::GET(
-    url,
-    httr::add_headers(.headers = headers),
-    httr::timeout(30)
-  )
-
-  # Get status code
-  status <- httr::status_code(response)
-  result$status_code <- status
-
-  # If direct URL fails, try search endpoint
-  if (status != 200) {
-    if (debug) message("Direct URL failed with status ", status, ", trying search endpoint...")
-
-    search_url <- paste0("https://rest.uniprot.org/uniprotkb/search?query=accession:",
-                         accession, "&fields=", URLencode(fields), "&format=json")
-
-    response <- httr::GET(
-      search_url,
-      httr::add_headers(.headers = headers),
-      httr::timeout(30)
-    )
-
-    status <- httr::status_code(response)
-    result$status_code <- status
-    result$url <- search_url
-
-    if (debug) message("Search URL status code: ", status)
-  }
-
-  # Process response if successful
-  if (status == 200) {
-    # Get the raw content
-    raw_content <- httr::content(response, "raw")
-
-    if (length(raw_content) > 0) {
-      if (debug) message("Raw content length: ", length(raw_content), " bytes")
-
-      # Check for gzip compression (magic bytes 0x1f 0x8b)
-      is_gzipped <- length(raw_content) > 2 && raw_content[1] == 0x1f && raw_content[2] == 0x8b
-
-      if (is_gzipped) {
-        if (debug) message("Content is gzip compressed, decompressing...")
-
-        # Decompress gzipped content
-        tryCatch({
-          # Save to a temporary file and use gzfile
-          temp_gz <- tempfile(fileext = ".gz")
-          writeBin(raw_content, temp_gz)
-
-          con <- gzfile(temp_gz, "rb")
-          text_lines <- readLines(con, warn = FALSE)
-          close(con)
-          text_content <- paste(text_lines, collapse = "\n")
-
-          if (debug) {
-            message("Decompressed content length: ", nchar(text_content), " chars")
-            if (nchar(text_content) > 0) {
-              message("First 100 chars: ", substr(text_content, 1, 100))
-            }
-          }
-
-          # Store decompressed content
-          result$content <- text_content
-
-          # Save to debug file if requested
-          if (debug) {
-            debug_dir <- "uniprot_debug"
-            if (!dir.exists(debug_dir)) dir.create(debug_dir)
-            json_file <- file.path(debug_dir, paste0("uniprot_", accession, ".json"))
-            writeLines(text_content, json_file)
-            message("Saved decompressed JSON to ", json_file)
-          }
-
-          # Parse the JSON
-          if (nchar(text_content) > 0) {
-            parsed_data <- jsonlite::fromJSON(text_content, flatten = TRUE)
-            result$data <- parsed_data
-
-            if (debug) {
-              message("Successfully parsed JSON")
-            }
-          }
-        }, error = function(e) {
-          if (debug) message("Error decompressing or parsing content: ", e$message)
-          result$error <- paste("Error processing content:", e$message)
-        })
-      } else {
-        # Not compressed, process normally
-        tryCatch({
-          text_content <- rawToChar(raw_content)
-          result$content <- text_content
-
-          if (debug) {
-            message("Content length: ", nchar(text_content), " chars")
-            if (nchar(text_content) > 0) {
-              message("First 100 chars: ", substr(text_content, 1, 100))
-            }
-          }
-
-          # Parse the JSON if we have content
-          if (nchar(text_content) > 0) {
-            parsed_data <- jsonlite::fromJSON(text_content, flatten = TRUE)
-            result$data <- parsed_data
-          }
-        }, error = function(e) {
-          if (debug) message("Error processing content: ", e$message)
-          result$error <- paste("Error processing content:", e$message)
-        })
-      }
-    } else {
-      if (debug) message("Empty response content (0 bytes)")
-      result$error <- "Empty response content"
-    }
-  } else {
-    if (debug) message("Request failed with status code: ", status)
-    result$error <- paste("HTTP request failed with status code:", status)
-  }
 
   return(result)
 }
@@ -1990,6 +1084,911 @@ fetch_uniprot_data <- function(accession, debug = FALSE, timeout = 10,
   return(create_empty_annotation(accession))
 }
 
+
+# INTERNAL
+
+#' Ensure the uniprot_cache table exists
+#'
+#' @param con A database connection object
+#' @param verbose Logical. If TRUE, print progress information
+#' @return Invisible NULL
+#' @export
+ensure_uniprot_cache_table <- function(con, verbose = FALSE) {
+  # Check if table exists
+  tables <- DBI::dbListTables(con)
+  if ("uniprot_cache" %in% tables) {
+    if (verbose) message("UniProt cache table already exists")
+    return(invisible(NULL))
+  }
+
+  # Create table
+  if (verbose) message("Creating UniProt cache table...")
+
+  DBI::dbExecute(con, "
+    CREATE TABLE uniprot_cache (
+      cache_id INTEGER PRIMARY KEY,
+      accession TEXT NOT NULL UNIQUE,
+      response_json TEXT NOT NULL,
+      retrieval_date TEXT NOT NULL
+    )
+  ")
+
+  DBI::dbExecute(con, "CREATE INDEX idx_uniprot_cache_accession ON uniprot_cache (accession)")
+
+  if (verbose) message("UniProt cache table created successfully")
+  return(invisible(NULL))
+}
+
+#' Get cached UniProt data
+#'
+#' @param con A database connection object
+#' @param accession The UniProt accession number
+#' @param debug If TRUE, print debugging information
+#' @return The cached UniProt data or NULL if not found
+#' @export
+get_cached_uniprot_data <- function(con, accession, debug = FALSE) {
+  if (is.null(con) || !DBI::dbIsValid(con)) {
+    if (debug) message("Invalid database connection")
+    return(NULL)
+  }
+
+  # Check if the table exists
+  tables <- DBI::dbListTables(con)
+  if (!"uniprot_cache" %in% tables) {
+    if (debug) message("UniProt cache table doesn't exist")
+    return(NULL)
+  }
+
+  # Check if data exists in cache
+  tryCatch({
+    cache_query <- "SELECT response_json, retrieval_date FROM uniprot_cache WHERE accession = ?"
+    cache_result <- DBI::dbGetQuery(con, cache_query, params = list(accession))
+
+    if (nrow(cache_result) == 0 || is.null(cache_result$response_json)) {
+      if (debug) message("No cache entry found for ", accession)
+      return(NULL)
+    }
+
+    # Get the JSON text
+    json_text <- cache_result$response_json[1]
+    retrieval_date <- cache_result$retrieval_date[1]
+
+    if (is.na(json_text) || nchar(json_text) == 0) {
+      if (debug) message("Cache entry for ", accession, " is empty")
+      return(NULL)
+    }
+
+    if (debug) {
+      message("Found cache entry for ", accession, " retrieved on ", retrieval_date)
+      message("JSON length: ", nchar(json_text), " chars")
+      if (nchar(json_text) > 0) {
+        message("First 50 chars: ", substr(json_text, 1, 50), "...")
+      }
+    }
+
+    # Check for placeholder entries
+    if (grepl('"empty"\\s*:\\s*true', json_text)) {
+      if (debug) message("Cache entry is a placeholder, ignoring")
+      return(NULL)
+    }
+
+    # Create a response object - without trying to parse the JSON
+    # We'll leave the parsing to extract_uniprot_info to avoid duplicate parsing
+    result <- list(
+      accession = accession,
+      url = NA_character_,
+      status_code = 200,
+      content = json_text,   # Original JSON text
+      data = NULL,           # We won't parse here to avoid issues
+      error = NA_character_,
+      from_cache = TRUE,
+      retrieval_date = retrieval_date
+    )
+
+    return(result)
+  }, error = function(e) {
+    if (debug) message("Error retrieving cache data for ", accession, ": ", e$message)
+    return(NULL)
+  })
+}
+
+#' Store UniProt data in cache with robust error handling
+#'
+#' @param con A database connection object
+#' @param accession The UniProt accession number
+#' @param response The UniProt API response
+#' @param debug If TRUE, print debugging information
+#' @return TRUE if storage successful, FALSE otherwise
+#' @export
+store_uniprot_data <- function(con, accession, response, debug = FALSE) {
+  # Initialize json_data to a fallback value
+  json_data <- paste0('{"accession":"', accession, '","empty":true,"timestamp":"',
+                      format(Sys.time(), "%Y-%m-%d %H:%M:%S"), '"}')
+
+  if (debug) {
+    message("Attempting to store data for accession: ", accession)
+  }
+
+  # First check if the connection is valid
+  if (is.null(con) || !DBI::dbIsValid(con)) {
+    if (debug) message("Database connection is invalid or NULL")
+    return(FALSE)
+  }
+
+  # Handle the response object carefully with separate conditionals
+  if (!is.null(response)) {
+    # Determine if it's a list
+    if (is.list(response)) {
+      # Try content field if it exists
+      if (!is.null(names(response)) && "content" %in% names(response)) {
+        # Content exists, check if it's usable
+        content_val <- response$content
+        if (!is.null(content_val) && is.character(content_val) && !is.na(content_val) && nchar(content_val) > 0) {
+          json_data <- content_val
+          if (debug) message("Using content field as JSON")
+        }
+      }
+      # If content didn't work, try data field
+      else if (!is.null(names(response)) && "data" %in% names(response) && !is.null(response$data)) {
+        tryCatch({
+          json_text <- jsonlite::toJSON(response$data, auto_unbox = TRUE)
+          if (!is.null(json_text) && nchar(json_text) > 0) {
+            json_data <- json_text
+            if (debug) message("Converted data field to JSON")
+          }
+        }, error = function(e) {
+          if (debug) message("Error converting data to JSON: ", e$message)
+        })
+      }
+      # As last resort, try to convert the whole response
+      else {
+        tryCatch({
+          json_text <- jsonlite::toJSON(response, auto_unbox = TRUE)
+          if (!is.null(json_text) && nchar(json_text) > 0) {
+            json_data <- json_text
+            if (debug) message("Converted entire response to JSON")
+          }
+        }, error = function(e) {
+          if (debug) message("Error converting response to JSON: ", e$message)
+        })
+      }
+    }
+    else if (is.character(response) && !is.na(response) && nchar(response) > 0) {
+      # The response itself is a string, try to use it directly
+      json_data <- response
+      if (debug) message("Using response as JSON string")
+    }
+  }
+
+  # Store in database
+  success <- FALSE
+  tryCatch({
+    current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+
+    # First check if we need to create the table
+    tables <- DBI::dbListTables(con)
+    if (!"uniprot_cache" %in% tables) {
+      if (debug) message("Creating uniprot_cache table")
+      DBI::dbExecute(con, "
+        CREATE TABLE uniprot_cache (
+          cache_id INTEGER PRIMARY KEY,
+          accession TEXT NOT NULL UNIQUE,
+          response_json TEXT NOT NULL,
+          retrieval_date TEXT NOT NULL
+        )
+      ")
+      DBI::dbExecute(con, "CREATE INDEX idx_uniprot_cache_accession ON uniprot_cache (accession)")
+    }
+
+    # Check if entry exists
+    existing_query <- "SELECT COUNT(*) AS count FROM uniprot_cache WHERE accession = ?"
+    existing <- DBI::dbGetQuery(con, existing_query, params = list(accession))
+    has_existing <- FALSE
+    if (nrow(existing) > 0 && !is.null(existing$count) && existing$count > 0) {
+      has_existing <- TRUE
+    }
+
+    if (has_existing) {
+      # Update existing record
+      update_query <- "UPDATE uniprot_cache SET response_json = ?, retrieval_date = ? WHERE accession = ?"
+      result <- DBI::dbExecute(con, update_query, params = list(json_data, current_time, accession))
+      if (debug) message("Updated existing record for ", accession)
+      success <- TRUE
+    } else {
+      # Insert new record
+      insert_query <- "INSERT INTO uniprot_cache (accession, response_json, retrieval_date) VALUES (?, ?, ?)"
+      result <- DBI::dbExecute(con, insert_query, params = list(accession, json_data, current_time))
+      if (debug) message("Created new record for ", accession)
+      success <- TRUE
+    }
+  }, error = function(e) {
+    if (debug) message("Database error: ", e$message)
+  })
+
+  return(success)
+}
+
+#' connection check for annotate_blast_results function
+#'
+require_uniprot_connection <- function(verbose = TRUE) {
+  if (verbose) message("Testing UniProt API connection...")
+  connection_result <- test_uniprot_connection(verbose = verbose)
+
+  if (!connection_result) {
+    message("\nUniProt API connection failed. Possible causes:")
+    message("1. Temporary service disruption")
+    message("2. Network connectivity issues")
+    message("3. API endpoint changes")
+    message("\nOptions:")
+    message("- Try again later")
+    message("- Use offline_mode=TRUE to continue without annotations")
+    message("- Check for package updates")
+    stop("Cannot connect to UniProt API")
+  }
+
+  if (verbose) message("UniProt API connection successful.")
+  return(TRUE)
+}
+
+#' Extract UniProt information from API response
+#'
+#' @param uniprot_data The response from query_uniprot_api
+#' @param debug If TRUE, print debugging information
+#'
+#' @return A list containing extracted information
+extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
+  # Initialize standard result structure
+  result <- list(
+    accession = if (!is.null(uniprot_data$accession)) uniprot_data$accession else "Unknown",
+    entry_name = NA_character_,
+    gene_names = "",
+    go_terms = data.frame(
+      go_id = character(0),
+      go_term = character(0),
+      go_category = character(0),
+      go_evidence = character(0),
+      stringsAsFactors = FALSE
+    ),
+    kegg_refs = data.frame(
+      kegg_id = character(0),
+      pathway_name = character(0),
+      stringsAsFactors = FALSE
+    )
+  )
+
+  # Validate input
+  if (is.null(uniprot_data) || !is.list(uniprot_data)) {
+    if (debug) message("No valid UniProt data provided")
+    return(result)
+  }
+
+  # Parse content field (most reliable source)
+  entry <- NULL
+
+  if (!is.null(uniprot_data$content) && is.character(uniprot_data$content) && nchar(uniprot_data$content) > 0) {
+    if (debug) message("Parsing content field, length: ", nchar(uniprot_data$content))
+
+    tryCatch({
+      # CRITICAL FIX: Use simplifyVector = FALSE to preserve nested structures
+      parsed <- jsonlite::fromJSON(uniprot_data$content, simplifyVector = FALSE)
+
+      # Find the entry data
+      if (!is.null(parsed$results) && is.list(parsed$results) && length(parsed$results) > 0) {
+        entry <- parsed$results[[1]]
+        if (debug) message("Found entry in results array")
+      } else if (!is.null(parsed$primaryAccession)) {
+        entry <- parsed
+        if (debug) message("Found entry at root level")
+      }
+    }, error = function(e) {
+      if (debug) message("Error parsing JSON content: ", e$message)
+    })
+  }
+
+  # Try data field if content parsing failed
+  if (is.null(entry) && !is.null(uniprot_data$data)) {
+    if (debug) message("Trying data field")
+
+    if (is.list(uniprot_data$data)) {
+      if (!is.null(uniprot_data$data$results) && is.list(uniprot_data$data$results) &&
+          length(uniprot_data$data$results) > 0) {
+        entry <- uniprot_data$data$results[[1]]
+      } else if (!is.null(uniprot_data$data$primaryAccession)) {
+        entry <- uniprot_data$data
+      }
+    }
+  }
+
+  # Return empty result if no entry found
+  if (is.null(entry)) {
+    if (debug) message("No entry data found in response")
+    return(result)
+  }
+
+  # Extract basic info
+  if (!is.null(entry$primaryAccession)) {
+    result$accession <- entry$primaryAccession
+    if (debug) message("Found accession: ", result$accession)
+  }
+
+  if (!is.null(entry$uniProtkbId)) {
+    result$entry_name <- entry$uniProtkbId
+    if (debug) message("Found entry name: ", result$entry_name)
+  }
+
+  # Extract gene names
+  if (!is.null(entry$genes) && is.list(entry$genes) && length(entry$genes) > 0) {
+    gene_names <- c()
+
+    for (i in seq_along(entry$genes)) {
+      gene <- entry$genes[[i]]
+      if (is.list(gene) && !is.null(gene$geneName) &&
+          is.list(gene$geneName) && !is.null(gene$geneName$value)) {
+        gene_names <- c(gene_names, gene$geneName$value)
+        if (debug) message("Found gene name: ", gene$geneName$value)
+      }
+    }
+
+    if (length(gene_names) > 0) {
+      result$gene_names <- paste(gene_names, collapse = ";")
+      if (debug) message("Combined gene names: ", result$gene_names)
+    }
+  }
+
+  # Extract GO terms and KEGG references
+  if (!is.null(entry$uniProtKBCrossReferences) && is.list(entry$uniProtKBCrossReferences)) {
+    if (debug) message("Processing ", length(entry$uniProtKBCrossReferences), " cross-references")
+
+    go_terms <- data.frame(
+      go_id = character(0),
+      go_term = character(0),
+      go_category = character(0),
+      go_evidence = character(0),
+      stringsAsFactors = FALSE
+    )
+
+    kegg_refs <- data.frame(
+      kegg_id = character(0),
+      pathway_name = character(0),
+      stringsAsFactors = FALSE
+    )
+
+    # Process each cross-reference
+    for (i in seq_along(entry$uniProtKBCrossReferences)) {
+      ref <- entry$uniProtKBCrossReferences[[i]]
+
+      # Process GO terms - FIXED: properly check structure and extract fields
+      if (is.list(ref) && !is.null(ref$database) && ref$database == "GO" && !is.null(ref$id)) {
+        if (debug) message("Processing GO reference: ", ref$id)
+
+        go_id <- ref$id
+        go_term <- NA_character_
+        go_evidence <- NA_character_
+
+        # Extract properties - FIXED: properly handle the properties list
+        if (!is.null(ref$properties) && is.list(ref$properties)) {
+          for (j in seq_along(ref$properties)) {
+            prop <- ref$properties[[j]]
+
+            if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
+              if (prop$key == "GoTerm") {
+                go_term <- prop$value
+                if (debug) message("  Found GO term: ", go_term)
+              }
+              if (prop$key == "GoEvidenceType") {
+                go_evidence <- prop$value
+                if (debug) message("  Found GO evidence: ", go_evidence)
+              }
+            }
+          }
+        }
+
+        # Add GO term if we have one
+        if (!is.na(go_term)) {
+          # Extract category (C, F, P) from the term
+          go_category <- substr(go_term, 1, 1)
+
+          new_row <- data.frame(
+            go_id = go_id,
+            go_term = go_term,
+            go_category = go_category,
+            go_evidence = go_evidence,
+            stringsAsFactors = FALSE
+          )
+          go_terms <- rbind(go_terms, new_row)
+
+          if (debug) message("Added GO term: ", go_id, " - ", go_term)
+        }
+      }
+
+      # Process KEGG references
+      if (is.list(ref) && !is.null(ref$database) && ref$database == "KEGG" && !is.null(ref$id)) {
+        if (debug) message("Processing KEGG reference: ", ref$id)
+
+        kegg_id <- ref$id
+        pathway_name <- NA_character_
+
+        # Extract properties - same pattern as GO terms
+        if (!is.null(ref$properties) && is.list(ref$properties)) {
+          for (j in seq_along(ref$properties)) {
+            prop <- ref$properties[[j]]
+
+            if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
+              if (prop$key == "Description" || prop$key == "PathwayName") {
+                pathway_name <- prop$value
+                if (debug) message("  Found pathway name: ", pathway_name)
+              }
+            }
+          }
+        }
+
+        # Add KEGG reference
+        new_row <- data.frame(
+          kegg_id = kegg_id,
+          pathway_name = pathway_name,
+          stringsAsFactors = FALSE
+        )
+        kegg_refs <- rbind(kegg_refs, new_row)
+
+        if (debug) message("Added KEGG reference: ", kegg_id)
+      }
+    }
+
+    # Update result with extracted data
+    result$go_terms <- go_terms
+    result$kegg_refs <- kegg_refs
+
+    if (debug) {
+      message("Extracted ", nrow(go_terms), " GO terms and ", nrow(kegg_refs), " KEGG references")
+    }
+  } else if (debug) {
+    message("No cross-references found or not a list structure")
+  }
+
+  return(result)
+}
+
+#' Create an empty annotation structure
+#'
+#' @param accession The accession number
+#' @return A list with empty annotation structures
+create_empty_annotation <- function(accession) {
+  list(
+    accession = accession,
+    entry_name = NA_character_,
+    gene_names = "",
+    go_terms = data.frame(
+      go_id = character(0),
+      go_term = character(0),
+      go_category = character(0),
+      go_evidence = character(0),
+      stringsAsFactors = FALSE
+    ),
+    kegg_refs = data.frame(
+      kegg_id = character(0),
+      pathway_name = character(0),
+      stringsAsFactors = FALSE
+    )
+  )
+}
+
+#' Store annotation in the database
+#'
+#' This function stores UniProt annotation in the database or adds GO terms and KEGG references
+#' to existing annotations if they're missing.
+#'
+#' @param con A database connection object.
+#' @param blast_result_id The ID of the BLAST result to annotate.
+#' @param uniprot_info A list containing UniProt information as returned by extract_uniprot_info.
+#' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
+#' @param update_existing Logical. If TRUE, add GO terms and KEGG references to existing annotations. Default is TRUE.
+#'
+#' @return The ID of the annotation.
+#'
+store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE, update_existing = TRUE) {
+  if (is.null(uniprot_info)) {
+    if (verbose) message("Cannot store NULL annotation")
+    return(NULL)
+  }
+
+  # Check for required fields
+  accession <- uniprot_info$accession
+  if (is.null(accession) || is.na(accession) || nchar(accession) == 0) {
+    if (verbose) message("Missing accession in annotation data")
+    return(NULL)
+  }
+
+  # Debugging
+  if (verbose) {
+    message("Storing annotation for blast_result_id: ", blast_result_id)
+    message("UniProt info: accession=", accession,
+            ", entry_name=", ifelse(is.null(uniprot_info$entry_name) || is.na(uniprot_info$entry_name), "NA", uniprot_info$entry_name),
+            ", gene_names=", ifelse(is.null(uniprot_info$gene_names) || is.na(uniprot_info$gene_names), "", uniprot_info$gene_names))
+
+    # Log what we have for GO terms and KEGG refs
+    if (!is.null(uniprot_info$go_terms) && is.data.frame(uniprot_info$go_terms)) {
+      message("GO terms: ", nrow(uniprot_info$go_terms), " entries")
+    } else {
+      message("GO terms: NULL or not a data frame")
+    }
+
+    if (!is.null(uniprot_info$kegg_refs) && is.data.frame(uniprot_info$kegg_refs)) {
+      message("KEGG refs: ", nrow(uniprot_info$kegg_refs), " entries")
+    } else {
+      message("KEGG refs: NULL or not a data frame")
+    }
+  }
+
+  # Check if annotation already exists
+  existing <- DBI::dbGetQuery(
+    con,
+    "SELECT annotation_id FROM annotations WHERE blast_result_id = ? AND uniprot_accession = ?",
+    params = list(blast_result_id, accession)
+  )
+
+  annotation_id <- NULL
+
+  if (nrow(existing) > 0) {
+    annotation_id <- existing$annotation_id[1]
+    if (verbose) message("Annotation already exists with ID ", annotation_id)
+
+    # Check for GO terms and KEGG refs if updating existing annotations
+    if (update_existing) {
+      go_count <- DBI::dbGetQuery(
+        con,
+        "SELECT COUNT(*) AS count FROM go_terms WHERE annotation_id = ?",
+        params = list(annotation_id)
+      )$count
+
+      kegg_count <- DBI::dbGetQuery(
+        con,
+        "SELECT COUNT(*) AS count FROM kegg_references WHERE annotation_id = ?",
+        params = list(annotation_id)
+      )$count
+
+      if (verbose) {
+        message("Existing annotation has ", go_count, " GO terms and ", kegg_count, " KEGG references")
+      }
+
+      if (go_count == 0 && kegg_count == 0) {
+        if (verbose) message("Adding missing GO terms and KEGG references to existing annotation")
+      } else {
+        if (verbose) message("Skipping - annotation already has GO terms or KEGG references")
+        return(annotation_id)
+      }
+    } else {
+      return(annotation_id)
+    }
+  } else {
+    # Create new annotation
+    tryCatch({
+      # Add annotation
+      current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+
+      # Handle entry_name properly - if it's NULL, NA, or not length 1, use NULL in the query
+      entry_name <- NULL
+      if (!is.null(uniprot_info$entry_name) &&
+          length(uniprot_info$entry_name) == 1 &&
+          !is.na(uniprot_info$entry_name)) {
+        entry_name <- uniprot_info$entry_name
+      }
+
+      # Handle gene_names
+      gene_names <- ""
+      if (!is.null(uniprot_info$gene_names) &&
+          length(uniprot_info$gene_names) == 1 &&
+          !is.na(uniprot_info$gene_names)) {
+        gene_names <- uniprot_info$gene_names
+      }
+
+      # Use a query that only includes entry_name if it's not NULL
+      if (is.null(entry_name)) {
+        query <- "INSERT INTO annotations (blast_result_id, uniprot_accession, gene_names, retrieval_date) VALUES (?, ?, ?, ?)"
+        params <- list(blast_result_id, accession, gene_names, current_time)
+      } else {
+        query <- "INSERT INTO annotations (blast_result_id, uniprot_accession, entry_name, gene_names, retrieval_date) VALUES (?, ?, ?, ?, ?)"
+        params <- list(blast_result_id, accession, entry_name, gene_names, current_time)
+      }
+
+      # Execute the query
+      DBI::dbExecute(con, query, params = params)
+
+      # Get the ID of the newly created annotation
+      annotation_id <- DBI::dbGetQuery(
+        con,
+        "SELECT annotation_id FROM annotations WHERE blast_result_id = ? AND uniprot_accession = ? ORDER BY annotation_id DESC LIMIT 1",
+        params = list(blast_result_id, accession)
+      )$annotation_id[1]
+
+      if (verbose) message("Created new annotation with ID ", annotation_id)
+    }, error = function(e) {
+      warning("Error creating annotation: ", e$message)
+      return(NULL)
+    })
+  }
+
+  # Add GO terms
+  go_count <- 0
+  if (!is.null(annotation_id) && !is.null(uniprot_info$go_terms) &&
+      is.data.frame(uniprot_info$go_terms) && nrow(uniprot_info$go_terms) > 0) {
+    if (verbose) message("Adding ", nrow(uniprot_info$go_terms), " GO terms")
+
+    tryCatch({
+      for (i in 1:nrow(uniprot_info$go_terms)) {
+        # Get values with proper NULL handling
+        go_id <- uniprot_info$go_terms$go_id[i]
+        if (is.na(go_id)) next
+
+        # Check if GO term already exists
+        go_exists <- DBI::dbGetQuery(
+          con,
+          "SELECT COUNT(*) AS count FROM go_terms WHERE annotation_id = ? AND go_id = ?",
+          params = list(annotation_id, go_id)
+        )$count > 0
+
+        if (go_exists) {
+          if (verbose) message("GO term ", go_id, " already exists, skipping")
+          next
+        }
+
+        # Prepare parameters for insertion
+        go_term <- uniprot_info$go_terms$go_term[i]
+        go_category <- uniprot_info$go_terms$go_category[i]
+        go_evidence <- uniprot_info$go_terms$go_evidence[i]
+
+        # Handle NULL/NA values
+        if (is.na(go_term)) go_term <- NULL
+        if (is.na(go_category)) go_category <- NULL
+        if (is.na(go_evidence)) go_evidence <- NULL
+
+        # Build query based on what's available
+        fields <- c("annotation_id", "go_id")
+        values <- c("?", "?")
+        insert_params <- list(annotation_id, go_id)
+
+        if (!is.null(go_term)) {
+          fields <- c(fields, "go_term")
+          values <- c(values, "?")
+          insert_params <- c(insert_params, list(go_term))
+        }
+
+        if (!is.null(go_category)) {
+          fields <- c(fields, "go_category")
+          values <- c(values, "?")
+          insert_params <- c(insert_params, list(go_category))
+        }
+
+        if (!is.null(go_evidence)) {
+          fields <- c(fields, "go_evidence")
+          values <- c(values, "?")
+          insert_params <- c(insert_params, list(go_evidence))
+        }
+
+        # Create and execute the insertion query
+        insert_query <- paste0(
+          "INSERT INTO go_terms (", paste(fields, collapse = ", "), ") ",
+          "VALUES (", paste(values, collapse = ", "), ")"
+        )
+
+        DBI::dbExecute(con, insert_query, params = insert_params)
+        go_count <- go_count + 1
+      }
+
+      if (verbose) message("Added ", go_count, " GO terms")
+    }, error = function(e) {
+      warning("Error inserting GO terms: ", e$message)
+    })
+  } else if (verbose) {
+    message("No GO terms to add")
+  }
+
+  # Add KEGG references
+  kegg_count <- 0
+  if (!is.null(annotation_id) && !is.null(uniprot_info$kegg_refs) &&
+      is.data.frame(uniprot_info$kegg_refs) && nrow(uniprot_info$kegg_refs) > 0) {
+    if (verbose) message("Adding ", nrow(uniprot_info$kegg_refs), " KEGG references")
+
+    tryCatch({
+      for (i in 1:nrow(uniprot_info$kegg_refs)) {
+        # Get values with proper NULL handling
+        kegg_id <- uniprot_info$kegg_refs$kegg_id[i]
+        if (is.na(kegg_id)) next
+
+        # Check if KEGG reference already exists
+        kegg_exists <- DBI::dbGetQuery(
+          con,
+          "SELECT COUNT(*) AS count FROM kegg_references WHERE annotation_id = ? AND kegg_id = ?",
+          params = list(annotation_id, kegg_id)
+        )$count > 0
+
+        if (kegg_exists) {
+          if (verbose) message("KEGG reference ", kegg_id, " already exists, skipping")
+          next
+        }
+
+        # Prepare parameters for insertion
+        pathway_name <- uniprot_info$kegg_refs$pathway_name[i]
+        if (is.na(pathway_name)) pathway_name <- NULL
+
+        # Build query based on what's available
+        if (is.null(pathway_name)) {
+          insert_query <- "INSERT INTO kegg_references (annotation_id, kegg_id) VALUES (?, ?)"
+          insert_params <- list(annotation_id, kegg_id)
+        } else {
+          insert_query <- "INSERT INTO kegg_references (annotation_id, kegg_id, pathway_name) VALUES (?, ?, ?)"
+          insert_params <- list(annotation_id, kegg_id, pathway_name)
+        }
+
+        DBI::dbExecute(con, insert_query, params = insert_params)
+        kegg_count <- kegg_count + 1
+      }
+
+      if (verbose) message("Added ", kegg_count, " KEGG references")
+    }, error = function(e) {
+      warning("Error inserting KEGG references: ", e$message)
+    })
+  } else if (verbose) {
+    message("No KEGG references to add")
+  }
+
+  return(annotation_id)
+}
+
+#' Query the UniProt API for a protein accession
+#'
+#' @param accession The UniProt accession number
+#' @param fields The fields to retrieve from UniProt (for search endpoint)
+#' @param debug If TRUE, save the API response to a file for debugging
+#'
+#' @return A list containing API response with consistent structure
+query_uniprot_api <- function(accession,
+                              fields = "accession,id,gene_names,go,xref_kegg,organism_name,protein_name",
+                              debug = FALSE) {
+  # Create result structure
+  result <- list(
+    accession = accession,
+    url = NA_character_,
+    status_code = NA_integer_,
+    content = NA_character_,
+    data = NULL,
+    error = NA_character_
+  )
+
+  # Try direct URL first (more reliable and complete)
+  url <- paste0("https://rest.uniprot.org/uniprotkb/", accession, ".json")
+  result$url <- url
+
+  if (debug) message("Querying direct URL: ", url)
+
+  # Make HTTP request with proper headers
+  headers <- c(
+    "User-Agent" = "R/funseqR UniProt Client",
+    "Accept" = "application/json"
+  )
+
+  # Try direct URL
+  response <- httr::GET(
+    url,
+    httr::add_headers(.headers = headers),
+    httr::timeout(30)
+  )
+
+  # Get status code
+  status <- httr::status_code(response)
+  result$status_code <- status
+
+  # If direct URL fails, try search endpoint
+  if (status != 200) {
+    if (debug) message("Direct URL failed with status ", status, ", trying search endpoint...")
+
+    search_url <- paste0("https://rest.uniprot.org/uniprotkb/search?query=accession:",
+                         accession, "&fields=", URLencode(fields), "&format=json")
+
+    response <- httr::GET(
+      search_url,
+      httr::add_headers(.headers = headers),
+      httr::timeout(30)
+    )
+
+    status <- httr::status_code(response)
+    result$status_code <- status
+    result$url <- search_url
+
+    if (debug) message("Search URL status code: ", status)
+  }
+
+  # Process response if successful
+  if (status == 200) {
+    # Get the raw content
+    raw_content <- httr::content(response, "raw")
+
+    if (length(raw_content) > 0) {
+      if (debug) message("Raw content length: ", length(raw_content), " bytes")
+
+      # Check for gzip compression (magic bytes 0x1f 0x8b)
+      is_gzipped <- length(raw_content) > 2 && raw_content[1] == 0x1f && raw_content[2] == 0x8b
+
+      if (is_gzipped) {
+        if (debug) message("Content is gzip compressed, decompressing...")
+
+        # Decompress gzipped content
+        tryCatch({
+          # Save to a temporary file and use gzfile
+          temp_gz <- tempfile(fileext = ".gz")
+          writeBin(raw_content, temp_gz)
+
+          con <- gzfile(temp_gz, "rb")
+          text_lines <- readLines(con, warn = FALSE)
+          close(con)
+          text_content <- paste(text_lines, collapse = "\n")
+
+          if (debug) {
+            message("Decompressed content length: ", nchar(text_content), " chars")
+            if (nchar(text_content) > 0) {
+              message("First 100 chars: ", substr(text_content, 1, 100))
+            }
+          }
+
+          # Store decompressed content
+          result$content <- text_content
+
+          # Save to debug file if requested
+          if (debug) {
+            debug_dir <- "uniprot_debug"
+            if (!dir.exists(debug_dir)) dir.create(debug_dir)
+            json_file <- file.path(debug_dir, paste0("uniprot_", accession, ".json"))
+            writeLines(text_content, json_file)
+            message("Saved decompressed JSON to ", json_file)
+          }
+
+          # Parse the JSON
+          if (nchar(text_content) > 0) {
+            parsed_data <- jsonlite::fromJSON(text_content, flatten = TRUE)
+            result$data <- parsed_data
+
+            if (debug) {
+              message("Successfully parsed JSON")
+            }
+          }
+        }, error = function(e) {
+          if (debug) message("Error decompressing or parsing content: ", e$message)
+          result$error <- paste("Error processing content:", e$message)
+        })
+      } else {
+        # Not compressed, process normally
+        tryCatch({
+          text_content <- rawToChar(raw_content)
+          result$content <- text_content
+
+          if (debug) {
+            message("Content length: ", nchar(text_content), " chars")
+            if (nchar(text_content) > 0) {
+              message("First 100 chars: ", substr(text_content, 1, 100))
+            }
+          }
+
+          # Parse the JSON if we have content
+          if (nchar(text_content) > 0) {
+            parsed_data <- jsonlite::fromJSON(text_content, flatten = TRUE)
+            result$data <- parsed_data
+          }
+        }, error = function(e) {
+          if (debug) message("Error processing content: ", e$message)
+          result$error <- paste("Error processing content:", e$message)
+        })
+      }
+    } else {
+      if (debug) message("Empty response content (0 bytes)")
+      result$error <- "Empty response content"
+    }
+  } else {
+    if (debug) message("Request failed with status code: ", status)
+    result$error <- paste("HTTP request failed with status code:", status)
+  }
+
+  return(result)
+}
+
 #' Process UniProt JSON data into annotations
 #'
 #' Helper function to extract annotation information from parsed UniProt JSON
@@ -2169,3 +2168,4 @@ verify_annotations <- function(con, annotation_ids, verbose = FALSE) {
     missing_kegg_list = missing_kegg
   ))
 }
+

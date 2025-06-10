@@ -1,3 +1,5 @@
+# EXPORTED
+
 #' Project management functions for funseqR
 #'
 #' These functions manage projects within the funseqR database.
@@ -68,17 +70,6 @@ create_project <- function(con, project_name, description = NULL,
   return(project_id)
 }
 
-#' Get a list of projects in the database
-#'
-#' @param con A database connection object.
-#'
-#' @return A data frame containing information about all projects in the database.
-#'
-#' @importFrom DBI dbGetQuery
-#' @export
-list_projects <- function(con) {
-  DBI::dbGetQuery(con, "SELECT * FROM projects ORDER BY project_id")
-}
 
 #' Get information about a specific project
 #'
@@ -137,7 +128,6 @@ get_project_id <- function(con, project_name) {
 #' @return Logical. TRUE if the update was successful.
 #'
 #' @importFrom DBI dbExecute dbGetQuery
-#' @export
 update_project <- function(con, project_id, project_name = NULL, description = NULL, verbose = TRUE) {
   # Check if project exists
   project <- DBI::dbGetQuery(
@@ -498,6 +488,9 @@ list_input_files <- function(con, project_id) {
   )
 }
 
+
+# INTERNAL
+
 #' Get information about a specific file
 #'
 #' @param con A database connection object.
@@ -520,3 +513,4 @@ get_input_file <- function(con, file_id) {
 
   return(file_info)
 }
+

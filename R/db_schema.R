@@ -13,7 +13,6 @@
 #' @return Invisible NULL.
 #'
 #' @importFrom DBI dbExecute
-#' @export
 create_funseq_schema <- function(con, verbose = TRUE) {
   # Create tables
   if (verbose) message("Creating metadata table...")
@@ -308,75 +307,3 @@ create_funseq_schema <- function(con, verbose = TRUE) {
   return(invisible(NULL))
 }
 
-#' Upgrade the funseqR database schema
-#'
-#' This function upgrades the schema of an existing funseqR database to the current version.
-#'
-#' @param con A database connection object.
-#' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
-#'
-#' @return Invisible NULL.
-#'
-#' @importFrom DBI dbGetQuery dbExecute
-#' @export
-upgrade_funseq_schema <- function(con, verbose = TRUE) {
-  # Get current schema version
-  if ("metadata" %in% DBI::dbListTables(con)) {
-    metadata <- DBI::dbGetQuery(con, "SELECT key, value FROM metadata WHERE key = 'schema_version'")
-
-    if (nrow(metadata) > 0) {
-      current_version <- as.numeric(metadata$value)
-    } else {
-      current_version <- 1.0  # Assume version 1.0 if not specified
-    }
-  } else {
-    stop("This does not appear to be a valid funseqR database.")
-  }
-
-  # Define the current schema version
-  latest_version <- 1.0
-
-  if (current_version >= latest_version) {
-    if (verbose) message("Database schema is already at the latest version.")
-    return(invisible(NULL))
-  }
-
-  # Upgrade path for each version
-  if (current_version < 1.0) {
-    # Upgrade to version 1.0
-    if (verbose) message("Upgrading schema to version 1.0...")
-
-    # Add version tracking to metadata
-    if (DBI::dbGetQuery(con, "SELECT COUNT(*) FROM metadata WHERE key = 'schema_version'")[[1]] == 0) {
-      DBI::dbExecute(con, "INSERT INTO metadata (key, value) VALUES ('schema_version', '1.0')")
-    } else {
-      DBI::dbExecute(con, "UPDATE metadata SET value = '1.0' WHERE key = 'schema_version'")
-    }
-  }
-
-  if (verbose) message("Schema upgrade complete.")
-
-  return(invisible(NULL))
-}
-
-#' Check the schema version of a funseqR database
-#'
-#' @param con A database connection object.
-#'
-#' @return A numeric value representing the schema version.
-#'
-#' @importFrom DBI dbGetQuery
-#' @export
-get_schema_version <- function(con) {
-  if ("metadata" %in% DBI::dbListTables(con)) {
-    metadata <- DBI::dbGetQuery(con, "SELECT value FROM metadata WHERE key = 'schema_version'")
-
-    if (nrow(metadata) > 0) {
-      return(as.numeric(metadata$value))
-    } else {
-      return(1.0)  # Assume version 1.0 if not specified
-    }
-  } else {
-    stop("This does not appear to be a valid funseqR database.")
-  }
-}

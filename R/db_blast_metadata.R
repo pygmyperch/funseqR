@@ -1,3 +1,5 @@
+# EXPORTED
+
 #' Extract BLAST database metadata using blastdbcmd
 #'
 #' This function uses the blastdbcmd utility to extract metadata about a BLAST database
@@ -140,6 +142,48 @@ extract_blast_db_metadata <- function(db_path, db_name, verbose = TRUE) {
   })
 }
 
+#' Get BLAST database metadata from the database
+#'
+#' @param con A database connection object
+#' @param blast_param_id Optional. The ID of the BLAST parameters. If NULL, returns all metadata
+#' @param verbose Logical. If TRUE, print progress information. Default is TRUE
+#'
+#' @return A data frame containing database metadata
+#'
+#' @export
+get_blast_db_metadata <- function(con, blast_param_id = NULL, verbose = TRUE) {
+  # Check if table exists
+  tables <- DBI::dbListTables(con)
+  if (!"blast_database_metadata" %in% tables) {
+    if (verbose) message("blast_database_metadata table does not exist")
+    return(data.frame())
+  }
+
+  # Build query
+  if (is.null(blast_param_id)) {
+    query <- "SELECT * FROM blast_database_metadata ORDER BY extraction_date DESC"
+    params <- list()
+  } else {
+    query <- "SELECT * FROM blast_database_metadata WHERE blast_param_id = ?"
+    params <- list(blast_param_id)
+  }
+
+  # Execute query
+  tryCatch({
+    result <- DBI::dbGetQuery(con, query, params = params)
+    if (verbose && nrow(result) > 0) {
+      message("Retrieved ", nrow(result), " database metadata record(s)")
+    }
+    return(result)
+  }, error = function(e) {
+    if (verbose) message("Error retrieving database metadata: ", e$message)
+    return(data.frame())
+  })
+}
+
+
+# INTERNAL
+
 #' Store BLAST database metadata in the database
 #'
 #' @param con A database connection object
@@ -149,7 +193,6 @@ extract_blast_db_metadata <- function(db_path, db_name, verbose = TRUE) {
 #'
 #' @return The ID of the stored metadata record, or NULL if storage fails
 #'
-#' @export
 store_blast_db_metadata <- function(con, blast_param_id, metadata, verbose = FALSE) {
   if (is.null(metadata) || !is.list(metadata)) {
     if (verbose) message("No metadata to store")
@@ -271,7 +314,6 @@ store_blast_db_metadata <- function(con, blast_param_id, metadata, verbose = FAL
 #'
 #' @return Invisible NULL
 #'
-#' @export
 ensure_blast_db_metadata_table <- function(con, verbose = FALSE) {
   # Check if table exists
   tables <- DBI::dbListTables(con)
@@ -307,44 +349,5 @@ ensure_blast_db_metadata_table <- function(con, verbose = FALSE) {
 
   if (verbose) message("blast_database_metadata table created successfully")
   return(invisible(NULL))
-}
-
-#' Get BLAST database metadata from the database
-#'
-#' @param con A database connection object
-#' @param blast_param_id Optional. The ID of the BLAST parameters. If NULL, returns all metadata
-#' @param verbose Logical. If TRUE, print progress information. Default is TRUE
-#'
-#' @return A data frame containing database metadata
-#'
-#' @export
-get_blast_db_metadata <- function(con, blast_param_id = NULL, verbose = TRUE) {
-  # Check if table exists
-  tables <- DBI::dbListTables(con)
-  if (!"blast_database_metadata" %in% tables) {
-    if (verbose) message("blast_database_metadata table does not exist")
-    return(data.frame())
-  }
-
-  # Build query
-  if (is.null(blast_param_id)) {
-    query <- "SELECT * FROM blast_database_metadata ORDER BY extraction_date DESC"
-    params <- list()
-  } else {
-    query <- "SELECT * FROM blast_database_metadata WHERE blast_param_id = ?"
-    params <- list(blast_param_id)
-  }
-
-  # Execute query
-  tryCatch({
-    result <- DBI::dbGetQuery(con, query, params = params)
-    if (verbose && nrow(result) > 0) {
-      message("Retrieved ", nrow(result), " database metadata record(s)")
-    }
-    return(result)
-  }, error = function(e) {
-    if (verbose) message("Error retrieving database metadata: ", e$message)
-    return(data.frame())
-  })
 }
 
