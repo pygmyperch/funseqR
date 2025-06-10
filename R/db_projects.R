@@ -128,6 +128,7 @@ get_project_id <- function(con, project_name) {
 #' @return Logical. TRUE if the update was successful.
 #'
 #' @importFrom DBI dbExecute dbGetQuery
+#' @export
 update_project <- function(con, project_id, project_name = NULL, description = NULL, verbose = TRUE) {
   # Check if project exists
   project <- DBI::dbGetQuery(
