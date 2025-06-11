@@ -2,18 +2,16 @@
 % Please edit documentation in R/db_blast.R
 \name{list_blast_params}
 \alias{list_blast_params}
-\title{List BLAST parameters for a project}
+\title{List all BLAST parameters in the database}
 \usage{
-list_blast_params(con, project_id)
+list_blast_params(con)
 }
 \arguments{
 \item{con}{A database connection object.}
-
-\item{project_id}{The ID of the project.}
 }
 \value{
-A data frame containing all BLAST parameters for the project.
+A data frame containing all BLAST parameters in the database.
 }
 \description{
-List BLAST parameters for a project
+List all BLAST parameters in the database
 }

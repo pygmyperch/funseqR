@@ -9,7 +9,6 @@
 #' It can be used as an alternative to the original read_vcf function.
 #'
 #' @param con A database connection object.
-#' @param project_id The ID of the project to associate with the VCF data.
 #' @param vcf_file A character string specifying the path to the VCF file.
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #'
@@ -21,10 +20,10 @@
 #' @importFrom DBI dbExecute dbGetQuery
 #' @importFrom progress progress_bar
 #' @export
-import_vcf_to_db <- function(con, project_id, vcf_file, verbose = TRUE) {
+import_vcf_to_db <- function(con, vcf_file, verbose = TRUE) {
   # Register input file
   if (verbose) message("Registering VCF file...")
-  file_id <- register_input_file(con, project_id, vcf_file, "vcf", verbose = verbose)
+  file_id <- register_input_file(con, vcf_file, "vcf", verbose = verbose)
 
   # Check if VCF data for this file already exists
   existing <- DBI::dbGetQuery(

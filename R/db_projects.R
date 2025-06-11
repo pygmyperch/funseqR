@@ -387,7 +387,6 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
 #' This function adds information about an input file to the database.
 #'
 #' @param con A database connection object.
-#' @param project_id The ID of the project to associate with the file.
 #' @param file_path Character string specifying the path to the file.
 #' @param file_type Character string specifying the type of the file (e.g., "vcf", "fasta").
 #' @param calculate_hash Logical. If TRUE, calculate and store a hash of the file. Default is TRUE.
@@ -397,17 +396,7 @@ delete_project <- function(con, project_id, confirm = TRUE, verbose = TRUE) {
 #'
 #' @importFrom DBI dbExecute dbGetQuery
 #' @export
-register_input_file <- function(con, project_id, file_path, file_type, calculate_hash = TRUE, verbose = TRUE) {
-  # Check if project exists
-  project <- DBI::dbGetQuery(
-    con,
-    "SELECT project_id FROM projects WHERE project_id = ?",
-    params = list(project_id)
-  )
-
-  if (nrow(project) == 0) {
-    stop("Project with ID ", project_id, " not found.")
-  }
+register_input_file <- function(con, file_path, file_type, calculate_hash = TRUE, verbose = TRUE) {
 
   # Check if file exists
   if (!file.exists(file_path)) {
@@ -424,12 +413,12 @@ register_input_file <- function(con, project_id, file_path, file_type, calculate
     file_hash <- digest::digest(file_path, algo = "sha256", file = TRUE)
   }
 
-  # Check if this file has already been registered for this project
+  # Check if this file has already been registered
   existing <- DBI::dbGetQuery(
     con,
     "SELECT file_id FROM input_files
-     WHERE project_id = ? AND file_name = ? AND file_path = ?",
-    params = list(project_id, file_name, file_path)
+     WHERE file_name = ? AND file_path = ?",
+    params = list(file_name, file_path)
   )
 
   if (nrow(existing) > 0) {
@@ -442,17 +431,17 @@ register_input_file <- function(con, project_id, file_path, file_type, calculate
 
   DBI::dbExecute(
     con,
-    "INSERT INTO input_files (project_id, file_type, file_name, file_path, file_hash, import_date)
-     VALUES (?, ?, ?, ?, ?, ?)",
-    params = list(project_id, file_type, file_name, file_path, file_hash, current_time)
+    "INSERT INTO input_files (file_type, file_name, file_path, file_hash, import_date)
+     VALUES (?, ?, ?, ?, ?)",
+    params = list(file_type, file_name, file_path, file_hash, current_time)
   )
 
   # Get the ID of the newly registered file
   file_id <- DBI::dbGetQuery(
     con,
     "SELECT file_id FROM input_files
-     WHERE project_id = ? AND file_name = ? AND file_path = ?",
-    params = list(project_id, file_name, file_path)
+     WHERE file_name = ? AND file_path = ?",
+    params = list(file_name, file_path)
   )$file_id[1]
 
   if (verbose) message("Registered file '", file_name, "' with ID ", file_id)
@@ -460,32 +449,19 @@ register_input_file <- function(con, project_id, file_path, file_type, calculate
   return(file_id)
 }
 
-#' List all input files for a project
+#' List all input files in the database
 #'
 #' @param con A database connection object.
-#' @param project_id The ID of the project.
 #'
-#' @return A data frame containing information about all input files for the project.
+#' @return A data frame containing information about all input files in the database.
 #'
 #' @importFrom DBI dbGetQuery
 #' @export
-list_input_files <- function(con, project_id) {
-  # Check if project exists
-  project <- DBI::dbGetQuery(
-    con,
-    "SELECT project_id FROM projects WHERE project_id = ?",
-    params = list(project_id)
-  )
-
-  if (nrow(project) == 0) {
-    stop("Project with ID ", project_id, " not found.")
-  }
-
-  # Get files
+list_input_files <- function(con) {
+  # Get all files
   DBI::dbGetQuery(
     con,
-    "SELECT * FROM input_files WHERE project_id = ? ORDER BY file_id",
-    params = list(project_id)
+    "SELECT * FROM input_files ORDER BY file_id"
   )
 }
 

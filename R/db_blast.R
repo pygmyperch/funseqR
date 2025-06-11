@@ -10,7 +10,6 @@
 #' This function stores BLAST search parameters in the database.
 #'
 #' @param con A database connection object.
-#' @param project_id The ID of the project to associate with the BLAST search.
 #' @param blast_type Character string specifying the type of BLAST search.
 #'   Must be either "blastn" or "blastx".
 #' @param db_name Character string specifying the name of the BLAST database.
@@ -23,18 +22,8 @@
 #'
 #' @importFrom DBI dbExecute dbGetQuery
 #' @export
-register_blast_params <- function(con, project_id, blast_type, db_name, db_path,
+register_blast_params <- function(con, blast_type, db_name, db_path,
                            e_value, max_hits, verbose = TRUE) {
-  # Check if project exists
-  project <- DBI::dbGetQuery(
-    con,
-    "SELECT project_id FROM projects WHERE project_id = ?",
-    params = list(project_id)
-  )
-
-  if (nrow(project) == 0) {
-    stop("Project with ID ", project_id, " not found.")
-  }
 
   # Validate blast_type
   blast_type <- match.arg(blast_type, c("blastn", "blastx"))
@@ -44,18 +33,18 @@ register_blast_params <- function(con, project_id, blast_type, db_name, db_path,
 
   DBI::dbExecute(
     con,
-    "INSERT INTO blast_parameters (project_id, blast_type, db_name, db_path, e_value, max_hits, execution_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?)",
-    params = list(project_id, blast_type, db_name, db_path, e_value, max_hits, current_time)
+    "INSERT INTO blast_parameters (blast_type, db_name, db_path, e_value, max_hits, execution_date)
+     VALUES (?, ?, ?, ?, ?, ?)",
+    params = list(blast_type, db_name, db_path, e_value, max_hits, current_time)
   )
 
   # Get the ID of the newly registered parameters
   param_id <- DBI::dbGetQuery(
     con,
     "SELECT blast_param_id FROM blast_parameters
-     WHERE project_id = ? AND execution_date = ?
+     WHERE execution_date = ?
      ORDER BY blast_param_id DESC LIMIT 1",
-    params = list(project_id, current_time)
+    params = list(current_time)
   )$blast_param_id[1]
 
   if (verbose) message("Registered BLAST parameters with ID ", param_id)
@@ -63,32 +52,19 @@ register_blast_params <- function(con, project_id, blast_type, db_name, db_path,
   return(param_id)
 }
 
-#' List BLAST parameters for a project
+#' List all BLAST parameters in the database
 #'
 #' @param con A database connection object.
-#' @param project_id The ID of the project.
 #'
-#' @return A data frame containing all BLAST parameters for the project.
+#' @return A data frame containing all BLAST parameters in the database.
 #'
 #' @importFrom DBI dbGetQuery
 #' @export
-list_blast_params <- function(con, project_id) {
-  # Check if project exists
-  project <- DBI::dbGetQuery(
-    con,
-    "SELECT project_id FROM projects WHERE project_id = ?",
-    params = list(project_id)
-  )
-
-  if (nrow(project) == 0) {
-    stop("Project with ID ", project_id, " not found.")
-  }
-
-  # Get parameters
+list_blast_params <- function(con) {
+  # Get all parameters
   DBI::dbGetQuery(
     con,
-    "SELECT * FROM blast_parameters WHERE project_id = ? ORDER BY blast_param_id",
-    params = list(project_id)
+    "SELECT * FROM blast_parameters ORDER BY blast_param_id"
   )
 }
 
@@ -358,7 +334,6 @@ import_blast_results <- function(con, blast_param_id, results_file, vcf_file_id,
 #' stores the results back in the database, and captures database metadata for reproducibility.
 #'
 #' @param con A database connection object.
-#' @param project_id The ID of the project to associate with the BLAST search.
 #' @param vcf_file_id The ID of the input file containing the VCF data.
 #' @param db_path Character string specifying the path to the BLAST database.
 #' @param db_name Character string specifying the name of the BLAST database.
@@ -388,7 +363,7 @@ import_blast_results <- function(con, blast_param_id, results_file, vcf_file_id,
 #' @importFrom DBI dbExecute dbGetQuery
 #' @importFrom Biostrings writeXStringSet
 #' @export
-perform_blast_db <- function(con, project_id, vcf_file_id, db_path, db_name,
+perform_blast_db <- function(con, vcf_file_id, db_path, db_name,
                              blast_type = c("blastn", "blastx"),
                              e_value = 1e-5, max_hits = 5, threads = 1,
                              output_dir = getwd(), taxids = NULL,
@@ -398,14 +373,14 @@ perform_blast_db <- function(con, project_id, vcf_file_id, db_path, db_name,
 
   # Generate output base name
   output_base <- file.path(output_dir, paste0(
-    "project_", project_id, "_vcf_", vcf_file_id, "_",
+    "vcf_", vcf_file_id, "_",
     db_name, "_", blast_type, "_", format(Sys.time(), "%Y%m%d_%H%M%S")
   ))
 
   # Register BLAST parameters
   if (verbose) message("Registering BLAST parameters...")
   blast_param_id <- register_blast_params(
-    con, project_id, blast_type, db_name, db_path, e_value, max_hits, verbose = verbose
+    con, blast_type, db_name, db_path, e_value, max_hits, verbose = verbose
   )
 
   # Extract database metadata before running BLAST
@@ -564,12 +539,13 @@ perform_blast_db <- function(con, project_id, vcf_file_id, db_path, db_name,
       "- **Threads used:** ", threads
     )
 
-    update_analysis_report(
-      con, project_id,
-      section = "blast_search",
-      message = blast_message,
-      verbose = FALSE
-    )
+    # TODO: Update this when report functions are fixed
+    # update_analysis_report(
+    #   con,
+    #   section = "blast_search", 
+    #   message = blast_message,
+    #   verbose = FALSE
+    # )
   }, error = function(e) {
     # Silently ignore if no report exists
   })

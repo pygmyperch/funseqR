@@ -6,7 +6,6 @@
 \usage{
 import_reference_to_db(
   con,
-  project_id,
   genome_file,
   genome_name = NULL,
   genome_build = NULL,
@@ -16,8 +15,6 @@ import_reference_to_db(
 }
 \arguments{
 \item{con}{A database connection object.}
-
-\item{project_id}{The ID of the project to associate with the reference genome.}
 
 \item{genome_file}{A character string specifying the path to the FASTA file.}
 

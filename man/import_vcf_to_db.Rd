@@ -4,12 +4,10 @@
 \alias{import_vcf_to_db}
 \title{VCF data storage and retrieval functions for funseqR}
 \usage{
-import_vcf_to_db(con, project_id, vcf_file, verbose = TRUE)
+import_vcf_to_db(con, vcf_file, verbose = TRUE)
 }
 \arguments{
 \item{con}{A database connection object.}
-
-\item{project_id}{The ID of the project to associate with the VCF data.}
 
 \item{vcf_file}{A character string specifying the path to the VCF file.}
 

@@ -6,7 +6,6 @@
 \usage{
 register_input_file(
   con,
-  project_id,
   file_path,
   file_type,
   calculate_hash = TRUE,
@@ -15,8 +14,6 @@ register_input_file(
 }
 \arguments{
 \item{con}{A database connection object.}
-
-\item{project_id}{The ID of the project to associate with the file.}
 
 \item{file_path}{Character string specifying the path to the file.}
 

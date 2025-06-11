@@ -6,7 +6,6 @@
 \usage{
 register_blast_params(
   con,
-  project_id,
   blast_type,
   db_name,
   db_path,
@@ -17,8 +16,6 @@ register_blast_params(
 }
 \arguments{
 \item{con}{A database connection object.}
-
-\item{project_id}{The ID of the project to associate with the BLAST search.}
 
 \item{blast_type}{Character string specifying the type of BLAST search.
 Must be either "blastn" or "blastx".}

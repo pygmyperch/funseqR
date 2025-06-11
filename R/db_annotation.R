@@ -434,19 +434,13 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
       "- **Max hits per query:** ", max_hits
     )
 
-    # Get project_id from blast_param_id
-    project_info <- DBI::dbGetQuery(con,
-                                    "SELECT project_id FROM blast_parameters WHERE blast_param_id = ?",
-                                    params = list(blast_param_id))
-
-    if (nrow(project_info) > 0) {
-      update_analysis_report(
-        con, project_info$project_id[1],
-        section = "annotation",
-        message = annotation_message,
-        verbose = FALSE
-      )
-    }
+    # TODO: Update this when report functions are fixed
+    # update_analysis_report(
+    #   con,
+    #   section = "annotation",
+    #   message = annotation_message,
+    #   verbose = FALSE
+    # )
   }, error = function(e) {
     # Silently ignore if no report exists
   })

@@ -8,7 +8,6 @@
 #' This function reads a reference genome file (FASTA) and stores its contents in the database.
 #'
 #' @param con A database connection object.
-#' @param project_id The ID of the project to associate with the reference genome.
 #' @param genome_file A character string specifying the path to the FASTA file.
 #' @param genome_name A character string specifying a name for the genome. Default is NULL (derived from file name).
 #' @param genome_build A character string specifying the build version of the genome. Default is NULL.
@@ -25,11 +24,11 @@
 #' @importFrom DBI dbExecute dbGetQuery
 #' @importFrom progress progress_bar
 #' @export
-import_reference_to_db <- function(con, project_id, genome_file, genome_name = NULL, genome_build = NULL, 
+import_reference_to_db <- function(con, genome_file, genome_name = NULL, genome_build = NULL, 
                                 store_sequences = TRUE, verbose = TRUE) {
   # Register input file
   if (verbose) message("Registering genome file...")
-  file_id <- register_input_file(con, project_id, genome_file, "fasta", verbose = verbose)
+  file_id <- register_input_file(con, genome_file, "fasta", verbose = verbose)
   
   # Derive genome name from file if not provided
   if (is.null(genome_name)) {

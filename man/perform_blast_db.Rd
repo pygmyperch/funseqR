@@ -6,7 +6,6 @@
 \usage{
 perform_blast_db(
   con,
-  project_id,
   vcf_file_id,
   db_path,
   db_name,
@@ -22,8 +21,6 @@ perform_blast_db(
 }
 \arguments{
 \item{con}{A database connection object.}
-
-\item{project_id}{The ID of the project to associate with the BLAST search.}
 
 \item{vcf_file_id}{The ID of the input file containing the VCF data.}
 

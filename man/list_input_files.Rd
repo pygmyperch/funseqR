@@ -2,18 +2,16 @@
 % Please edit documentation in R/db_projects.R
 \name{list_input_files}
 \alias{list_input_files}
-\title{List all input files for a project}
+\title{List all input files in the database}
 \usage{
-list_input_files(con, project_id)
+list_input_files(con)
 }
 \arguments{
 \item{con}{A database connection object.}
-
-\item{project_id}{The ID of the project.}
 }
 \value{
-A data frame containing information about all input files for the project.
+A data frame containing information about all input files in the database.
 }
 \description{
-List all input files for a project
+List all input files in the database
 }
