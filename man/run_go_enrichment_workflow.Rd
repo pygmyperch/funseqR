@@ -6,7 +6,6 @@
 \usage{
 run_go_enrichment_workflow(
   con,
-  project_id,
   candidate_vcf_file,
   background_file_id = NULL,
   ontologies = c("BP", "MF"),
@@ -19,8 +18,6 @@ run_go_enrichment_workflow(
 }
 \arguments{
 \item{con}{Database connection object}
-
-\item{project_id}{Integer. Project ID}
 
 \item{candidate_vcf_file}{Character. Path to candidate VCF file}
 
@@ -60,7 +57,7 @@ This function performs a complete GO enrichment workflow:
 \examples{
 \dontrun{
 con <- connect_funseq_db("analysis.db")
-results <- run_go_enrichment_workflow(con, 1, "candidates.vcf")
+results <- run_go_enrichment_workflow(con, "candidates.vcf")
 print(results$summary)
 print(results$plots$BP_bubble)
 }

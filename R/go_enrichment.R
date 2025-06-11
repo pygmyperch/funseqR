@@ -9,7 +9,6 @@
 #' Import candidate adaptive loci and link to existing annotations
 #'
 #' @param con Database connection object
-#' @param project_id Integer. Project ID in the database
 #' @param candidate_vcf_file Character. Path to candidate VCF file
 #' @param background_file_id Integer. File ID of the background/reference dataset
 #' @param verbose Logical. Print progress information. Default is TRUE
@@ -24,16 +23,16 @@
 #' @examples
 #' \dontrun{
 #' con <- connect_funseq_db("analysis.db")
-#' candidate_import <- import_candidate_loci(con, 1, "candidates.vcf", 1)
+#' candidate_import <- import_candidate_loci(con, "candidates.vcf", 1)
 #' }
 #'
 #' @export
-import_candidate_loci <- function(con, project_id, candidate_vcf_file, background_file_id, verbose = TRUE) {
+import_candidate_loci <- function(con, candidate_vcf_file, background_file_id, verbose = TRUE) {
 
   if (verbose) message("Importing candidate loci from: ", candidate_vcf_file)
 
   # Import candidate VCF using existing function
-  candidate_import <- import_vcf_to_db(con, project_id, candidate_vcf_file)
+  candidate_import <- import_vcf_to_db(con, candidate_vcf_file)
 
   if (verbose) message("Creating BED file for candidate loci...")
 
@@ -419,7 +418,6 @@ get_go_enrichment_results <- function(con, enrichment_id, significance_filter = 
 #' Store GO enrichment analysis results in the database
 #'
 #' @param con Database connection object
-#' @param project_id Integer. Project ID
 #' @param foreground_file_id Integer. File ID of foreground dataset
 #' @param background_file_id Integer. File ID of background dataset
 #' @param enrichment_results Data frame. Results from perform_go_enrichment()
@@ -429,7 +427,7 @@ get_go_enrichment_results <- function(con, enrichment_id, significance_filter = 
 #'
 #' @return Integer. The enrichment_id of the stored analysis
 #'
-store_go_enrichment_results <- function(con, project_id, foreground_file_id, background_file_id,
+store_go_enrichment_results <- function(con, foreground_file_id, background_file_id,
                                         enrichment_results, ontology, parameters = NULL, verbose = TRUE) {
 
   if (verbose) message("Storing GO enrichment results in database...")
@@ -449,13 +447,12 @@ store_go_enrichment_results <- function(con, project_id, foreground_file_id, bac
   # Insert analysis record
   analysis_query <- "
     INSERT INTO go_enrichment_analyses
-    (project_id, foreground_file_id, background_file_id, ontology, analysis_date,
+    (foreground_file_id, background_file_id, ontology, analysis_date,
      total_foreground_genes, total_background_genes, analysis_parameters)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   "
 
   DBI::dbExecute(con, analysis_query, list(
-    project_id,
     foreground_file_id,
     background_file_id,
     ontology,

@@ -6,7 +6,6 @@
 #' Complete GO enrichment analysis workflow
 #'
 #' @param con Database connection object
-#' @param project_id Integer. Project ID
 #' @param candidate_vcf_file Character. Path to candidate VCF file
 #' @param background_file_id Integer. File ID of background dataset (or NULL to auto-detect)
 #' @param ontologies Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF")
@@ -30,13 +29,13 @@
 #' @examples
 #' \dontrun{
 #' con <- connect_funseq_db("analysis.db")
-#' results <- run_go_enrichment_workflow(con, 1, "candidates.vcf")
+#' results <- run_go_enrichment_workflow(con, "candidates.vcf")
 #' print(results$summary)
 #' print(results$plots$BP_bubble)
 #' }
 #'
 #' @export
-run_go_enrichment_workflow <- function(con, project_id, candidate_vcf_file, background_file_id = NULL,
+run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_id = NULL,
                                       ontologies = c("BP", "MF"), min_genes = 5, max_genes = 500,
                                       store_results = TRUE, create_plots = TRUE, verbose = TRUE) {
   
@@ -46,10 +45,9 @@ run_go_enrichment_workflow <- function(con, project_id, candidate_vcf_file, back
   if (is.null(background_file_id)) {
     if (verbose) message("Auto-detecting background dataset...")
     
-    # Get all VCF files for this project, excluding the candidate file
+    # Get all VCF files excluding the candidate file
     input_files <- DBI::dbGetQuery(con, 
-      "SELECT file_id, file_name FROM input_files WHERE project_id = ? AND file_type = 'vcf'",
-      list(project_id))
+      "SELECT file_id, file_name FROM input_files WHERE file_type = 'vcf'")
     
     # Exclude files with "candidate" or similar in the name
     candidate_patterns <- c("candidate", "adaptive", "outlier", "fst", "selection")
@@ -66,7 +64,7 @@ run_go_enrichment_workflow <- function(con, project_id, candidate_vcf_file, back
   
   # Step 1: Import candidate loci
   if (verbose) message("\n=== Step 1: Importing Candidate Loci ===")
-  candidate_import <- import_candidate_loci(con, project_id, candidate_vcf_file, background_file_id, verbose = verbose)
+  candidate_import <- import_candidate_loci(con, candidate_vcf_file, background_file_id, verbose = verbose)
   
   # Step 2: Extract GO terms
   if (verbose) message("\n=== Step 2: Extracting GO Terms ===")
@@ -97,7 +95,7 @@ run_go_enrichment_workflow <- function(con, project_id, candidate_vcf_file, back
     # Store results in database if requested
     if (store_results && nrow(results) > 0) {
       enrichment_id <- store_go_enrichment_results(
-        con, project_id, candidate_import$file_id, background_file_id,
+        con, candidate_import$file_id, background_file_id,
         results, ontology, 
         parameters = list(min_genes = min_genes, max_genes = max_genes),
         verbose = verbose

@@ -6,7 +6,6 @@
 \usage{
 import_candidate_loci(
   con,
-  project_id,
   candidate_vcf_file,
   background_file_id,
   verbose = TRUE
@@ -14,8 +13,6 @@ import_candidate_loci(
 }
 \arguments{
 \item{con}{Database connection object}
-
-\item{project_id}{Integer. Project ID in the database}
 
 \item{candidate_vcf_file}{Character. Path to candidate VCF file}
 
@@ -40,7 +37,7 @@ comparative analysis between candidate adaptive loci and a larger background dat
 \examples{
 \dontrun{
 con <- connect_funseq_db("analysis.db")
-candidate_import <- import_candidate_loci(con, 1, "candidates.vcf", 1)
+candidate_import <- import_candidate_loci(con, "candidates.vcf", 1)
 }
 
 }

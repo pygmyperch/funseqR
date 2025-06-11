@@ -23,28 +23,15 @@ create_funseq_schema <- function(con, verbose = TRUE) {
     )
   ")
 
-  if (verbose) message("Creating projects table...")
-  DBI::dbExecute(con, "
-    CREATE TABLE projects (
-      project_id INTEGER PRIMARY KEY,
-      project_name TEXT NOT NULL,
-      description TEXT,
-      creation_date TEXT NOT NULL,
-      last_modified TEXT NOT NULL
-    )
-  ")
-
   if (verbose) message("Creating input_files table...")
   DBI::dbExecute(con, "
     CREATE TABLE input_files (
       file_id INTEGER PRIMARY KEY,
-      project_id INTEGER NOT NULL,
       file_type TEXT NOT NULL,
       file_name TEXT NOT NULL,
       file_path TEXT NOT NULL,
       file_hash TEXT,
-      import_date TEXT NOT NULL,
-      FOREIGN KEY (project_id) REFERENCES projects (project_id)
+      import_date TEXT NOT NULL
     )
   ")
 
@@ -109,14 +96,12 @@ create_funseq_schema <- function(con, verbose = TRUE) {
   DBI::dbExecute(con, "
     CREATE TABLE blast_parameters (
       blast_param_id INTEGER PRIMARY KEY,
-      project_id INTEGER NOT NULL,
       blast_type TEXT NOT NULL,
       db_name TEXT NOT NULL,
       db_path TEXT NOT NULL,
       e_value REAL NOT NULL,
       max_hits INTEGER NOT NULL,
-      execution_date TEXT NOT NULL,
-      FOREIGN KEY (project_id) REFERENCES projects (project_id)
+      execution_date TEXT NOT NULL
     )
   ")
 
@@ -204,13 +189,11 @@ create_funseq_schema <- function(con, verbose = TRUE) {
   DBI::dbExecute(con, "
     CREATE TABLE analysis_reports (
       report_id INTEGER PRIMARY KEY,
-      project_id INTEGER NOT NULL,
       report_path TEXT NOT NULL,
       format TEXT NOT NULL,
       template TEXT NOT NULL,
       created_date TEXT NOT NULL,
-      last_updated TEXT NOT NULL,
-      FOREIGN KEY (project_id) REFERENCES projects (project_id)
+      last_updated TEXT NOT NULL
     )
   ")
 
@@ -218,7 +201,6 @@ create_funseq_schema <- function(con, verbose = TRUE) {
   DBI::dbExecute(con, "
     CREATE TABLE go_enrichment_analyses (
       enrichment_id INTEGER PRIMARY KEY,
-      project_id INTEGER NOT NULL,
       foreground_file_id INTEGER NOT NULL,
       background_file_id INTEGER NOT NULL,
       ontology TEXT NOT NULL,
@@ -226,7 +208,6 @@ create_funseq_schema <- function(con, verbose = TRUE) {
       total_foreground_genes INTEGER,
       total_background_genes INTEGER,
       analysis_parameters TEXT,
-      FOREIGN KEY (project_id) REFERENCES projects (project_id),
       FOREIGN KEY (foreground_file_id) REFERENCES input_files (file_id),
       FOREIGN KEY (background_file_id) REFERENCES input_files (file_id)
     )
@@ -250,6 +231,16 @@ create_funseq_schema <- function(con, verbose = TRUE) {
       p_adjusted REAL,
       significance_level TEXT,
       FOREIGN KEY (enrichment_id) REFERENCES go_enrichment_analyses (enrichment_id)
+    )
+  ")
+
+  if (verbose) message("Creating uniprot_cache table...")
+  DBI::dbExecute(con, "
+    CREATE TABLE uniprot_cache (
+      cache_id INTEGER PRIMARY KEY,
+      accession TEXT NOT NULL UNIQUE,
+      response_json TEXT NOT NULL,
+      retrieval_date TEXT NOT NULL
     )
   ")
 
@@ -289,11 +280,7 @@ create_funseq_schema <- function(con, verbose = TRUE) {
   DBI::dbExecute(con, "CREATE INDEX idx_blast_db_meta_name ON blast_database_metadata (db_name)")
   DBI::dbExecute(con, "CREATE INDEX idx_blast_db_meta_date ON blast_database_metadata (extraction_date)")
 
-  # Report indexes
-  DBI::dbExecute(con, "CREATE INDEX idx_reports_project ON analysis_reports (project_id)")
-
   # GO enrichment indexes
-  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_project ON go_enrichment_analyses (project_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_fg_file ON go_enrichment_analyses (foreground_file_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_bg_file ON go_enrichment_analyses (background_file_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_ontology ON go_enrichment_analyses (ontology)")
@@ -301,6 +288,9 @@ create_funseq_schema <- function(con, verbose = TRUE) {
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_go ON go_enrichment_results (go_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_category ON go_enrichment_results (go_category)")
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_significance ON go_enrichment_results (significance_level)")
+
+  # UniProt cache indexes
+  DBI::dbExecute(con, "CREATE INDEX idx_uniprot_cache_accession ON uniprot_cache (accession)")
 
   if (verbose) message("Schema creation complete.")
 

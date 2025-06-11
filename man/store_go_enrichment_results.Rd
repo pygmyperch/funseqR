@@ -6,7 +6,6 @@
 \usage{
 store_go_enrichment_results(
   con,
-  project_id,
   foreground_file_id,
   background_file_id,
   enrichment_results,
@@ -17,8 +16,6 @@ store_go_enrichment_results(
 }
 \arguments{
 \item{con}{Database connection object}
-
-\item{project_id}{Integer. Project ID}
 
 \item{foreground_file_id}{Integer. File ID of foreground dataset}
 
