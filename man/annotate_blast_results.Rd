@@ -15,6 +15,7 @@ annotate_blast_results(
   use_cache = TRUE,
   store_cache = TRUE,
   verify_storage = TRUE,
+  evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC"),
   verbose = TRUE,
   debug_accessions = NULL
 )
@@ -39,6 +40,10 @@ annotate_blast_results(
 \item{store_cache}{If TRUE, stores API responses in the database. Default is TRUE.}
 
 \item{verify_storage}{If TRUE, verifies annotation storage after processing. Default is TRUE.}
+
+\item{evidence_keep}{Character vector of evidence codes to keep for GO annotations.
+Default is c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC") which includes
+high-confidence experimental and curated evidence. Set to NULL to keep all evidence codes.}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 

@@ -46,6 +46,7 @@ cat("Imported reference genome with ID:", genome_import$genome_id, "\n")
 cat("Imported", genome_import$sequence_count, "reference sequences\n")
 
 # Step 5: Extract flanking sequences
+# Option A: Raw sequences only (default)
 flanking_import <- import_flanking_seqs_to_db(
   con,
   vcf_import$file_id,
@@ -54,20 +55,48 @@ flanking_import <- import_flanking_seqs_to_db(
 )
 cat("Extracted", flanking_import$flanking_count, "flanking sequences\n")
 
+# Option B: ORF extraction (uncomment to use)
+# flanking_import <- import_flanking_seqs_to_db(
+#   con,
+#   vcf_import$file_id,
+#   genome_import$genome_id,
+#   flank_size = 500,
+#   translate_flanks = TRUE,
+#   orf_min_aa = 30,
+#   keep_raw_sequence = TRUE
+# )
+# cat("Extracted", flanking_import$flanking_count, "raw and", flanking_import$orf_count, "ORF sequences\n")
+
 # Step 6: Perform BLAST search
+# Option A: Traditional BLAST
 blast_result <- perform_blast_db(
   con,
-  project_id,
   vcf_import$file_id,
   db_path = blast_db_path,
   db_name = blast_db_name,
   blast_type = "blastx",
   e_value = 1e-10,
   max_hits = 5,
-  threads = 4
+  threads = 4,
+  seq_type = "raw"
 )
 cat("BLAST search completed with parameter ID:", blast_result$blast_param_id, "\n")
 cat("Imported", blast_result$result_count, "BLAST results\n")
+
+# Option B: DIAMOND search (faster, uncomment to use)
+# blast_result <- perform_blast_db(
+#   con,
+#   vcf_import$file_id,
+#   db_path = blast_db_path,
+#   db_name = blast_db_name,
+#   blast_type = "diamond_blastx",
+#   e_value = 1e-10,
+#   max_hits = 5,
+#   threads = 4,
+#   seq_type = "raw"
+# )
+# cat("DIAMOND search completed with parameter ID:", blast_result$blast_param_id, "\n")
+# cat("Imported", blast_result$result_count, "DIAMOND results\n")
 
 # Step 7: Process BLAST results and annotate
 annotation_result <- annotate_blast_results(

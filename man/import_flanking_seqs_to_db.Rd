@@ -8,7 +8,11 @@ import_flanking_seqs_to_db(
   con,
   vcf_file_id,
   genome_id,
-  flank_size = 10000,
+  flank_size = 500,
+  translate_flanks = FALSE,
+  orf_min_aa = 30,
+  orf_return = "nuc",
+  keep_raw_sequence = TRUE,
   chromosome = NULL,
   verbose = TRUE
 )
@@ -20,7 +24,15 @@ import_flanking_seqs_to_db(
 
 \item{genome_id}{The ID of the reference genome to use.}
 
-\item{flank_size}{The size of the flanking region to extract on each side of the SNP. Default is 10000.}
+\item{flank_size}{The size of the flanking region to extract on each side of the SNP. Default is 500.}
+
+\item{translate_flanks}{Logical. If TRUE, extract ORFs from flanking sequences. Default is FALSE.}
+
+\item{orf_min_aa}{Minimum ORF length in amino acids. Default is 30.}
+
+\item{orf_return}{Type of ORF to return: "nuc" for nucleotide, "aa" for amino acid. Default is "nuc".}
+
+\item{keep_raw_sequence}{Logical. If TRUE, store both raw and ORF sequences. Default is TRUE.}
 
 \item{chromosome}{Optional. Limit extraction to a specific chromosome. Default is NULL (all chromosomes).}
 
@@ -30,8 +42,9 @@ import_flanking_seqs_to_db(
 A list containing:
 \item{vcf_count}{The number of VCF entries processed.}
 \item{flanking_count}{The number of flanking sequences extracted.}
+\item{orf_count}{The number of ORF sequences extracted (if translate_flanks = TRUE).}
 }
 \description{
 This function extracts flanking sequences for VCF data in the database and stores them.
-It can be used as an alternative to the original extract_flanking_sequences function.
+It can optionally extract ORFs from the flanking sequences for more targeted searches.
 }

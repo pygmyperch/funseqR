@@ -261,24 +261,31 @@ get_reference_genome <- function(con, genome_id, as_dna_string_set = TRUE, inclu
 #' Import flanking sequences into the database
 #'
 #' This function extracts flanking sequences for VCF data in the database and stores them.
-#' It can be used as an alternative to the original extract_flanking_sequences function.
+#' It can optionally extract ORFs from the flanking sequences for more targeted searches.
 #'
 #' @param con A database connection object.
 #' @param vcf_file_id The ID of the input file containing the VCF data.
 #' @param genome_id The ID of the reference genome to use.
-#' @param flank_size The size of the flanking region to extract on each side of the SNP. Default is 10000.
+#' @param flank_size The size of the flanking region to extract on each side of the SNP. Default is 500.
+#' @param translate_flanks Logical. If TRUE, extract ORFs from flanking sequences. Default is FALSE.
+#' @param orf_min_aa Minimum ORF length in amino acids. Default is 30.
+#' @param orf_return Type of ORF to return: "nuc" for nucleotide, "aa" for amino acid. Default is "nuc".
+#' @param keep_raw_sequence Logical. If TRUE, store both raw and ORF sequences. Default is TRUE.
 #' @param chromosome Optional. Limit extraction to a specific chromosome. Default is NULL (all chromosomes).
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #'
 #' @return A list containing:
 #'   \item{vcf_count}{The number of VCF entries processed.}
 #'   \item{flanking_count}{The number of flanking sequences extracted.}
+#'   \item{orf_count}{The number of ORF sequences extracted (if translate_flanks = TRUE).}
 #'
 #' @importFrom DBI dbExecute dbGetQuery
 #' @importFrom progress progress_bar
 #' @importFrom Biostrings subseq
 #' @export
-import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size = 10000, 
+import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size = 500, 
+                                 translate_flanks = FALSE, orf_min_aa = 30, 
+                                 orf_return = "nuc", keep_raw_sequence = TRUE,
                                  chromosome = NULL, verbose = TRUE) {
   # Check if VCF file exists
   vcf_file_info <- DBI::dbGetQuery(
@@ -380,6 +387,7 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
   
   # Process VCF entries
   flanking_count <- 0
+  orf_count <- 0
   
   tryCatch({
     for (i in 1:nrow(vcf_data)) {
@@ -387,14 +395,21 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
       chrom <- vcf_data$chromosome[i]
       pos <- vcf_data$position[i]
       
-      # Check if flanking sequence already exists
+      # Check what sequence types already exist for this VCF entry
       existing <- DBI::dbGetQuery(
         con,
-        "SELECT flanking_id FROM flanking_sequences WHERE vcf_id = ?",
+        "SELECT seq_type FROM flanking_sequences WHERE vcf_id = ?",
         params = list(vcf_id)
       )
       
-      if (nrow(existing) > 0) {
+      existing_types <- if (nrow(existing) > 0) existing$seq_type else character(0)
+      
+      # Determine what we need to create
+      need_raw <- (!translate_flanks || keep_raw_sequence) && !"raw" %in% existing_types
+      need_orf <- translate_flanks && !paste0("orf_", orf_return) %in% existing_types
+      
+      # Skip if we don't need to create anything
+      if (!need_raw && !need_orf) {
         if (verbose) {
           pb$update(i / nrow(vcf_data))
         }
@@ -423,15 +438,42 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
       
       flanking_seq <- substr(ref_seq, start_pos, end_pos)
       
-      # Store flanking sequence in database
-      DBI::dbExecute(
-        con,
-        "INSERT INTO flanking_sequences (vcf_id, sequence_id, flank_size, start_position, end_position, sequence)
-         VALUES (?, ?, ?, ?, ?, ?)",
-        params = list(vcf_id, seq_id, flank_size, start_pos, end_pos, flanking_seq)
-      )
+      # Store raw flanking sequence if needed
+      if (need_raw) {
+        DBI::dbExecute(
+          con,
+          "INSERT INTO flanking_sequences (vcf_id, sequence_id, flank_size, start_position, end_position, sequence, seq_type, seq_length)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          params = list(vcf_id, seq_id, flank_size, start_pos, end_pos, flanking_seq, "raw", nchar(flanking_seq))
+        )
+        flanking_count <- flanking_count + 1
+      }
       
-      flanking_count <- flanking_count + 1
+      # Extract and store ORF if needed
+      if (need_orf) {
+        orf_seq <- extract_longest_orf(flanking_seq, min_aa_length = orf_min_aa, 
+                                       return_type = orf_return, verbose = FALSE)
+        
+        if (!is.null(orf_seq) && nchar(orf_seq) > 0) {
+          DBI::dbExecute(
+            con,
+            "INSERT INTO flanking_sequences (vcf_id, sequence_id, flank_size, start_position, end_position, sequence, seq_type, seq_length)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params = list(vcf_id, seq_id, flank_size, start_pos, end_pos, orf_seq, 
+                         paste0("orf_", orf_return), nchar(orf_seq))
+          )
+          orf_count <- orf_count + 1
+        } else if (!keep_raw_sequence && !"raw" %in% existing_types) {
+          # Fallback to raw sequence if no ORF found and raw not already stored
+          DBI::dbExecute(
+            con,
+            "INSERT INTO flanking_sequences (vcf_id, sequence_id, flank_size, start_position, end_position, sequence, seq_type, seq_length)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params = list(vcf_id, seq_id, flank_size, start_pos, end_pos, flanking_seq, "raw", nchar(flanking_seq))
+          )
+          flanking_count <- flanking_count + 1
+        }
+      }
       
       # Update progress bar
       if (verbose) {
@@ -486,7 +528,7 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
       # Silently ignore if no report exists
     })
     
-    return(list(vcf_count = nrow(vcf_data), flanking_count = flanking_count))
+    return(list(vcf_count = nrow(vcf_data), flanking_count = flanking_count, orf_count = orf_count))
   }, error = function(e) {
     # Rollback transaction on error
     DBI::dbExecute(con, "ROLLBACK")
@@ -498,6 +540,7 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
 #'
 #' @param con A database connection object.
 #' @param vcf_file_id The ID of the input file containing the VCF data.
+#' @param seq_type Type of sequence to retrieve: "raw", "orf_nuc", or "orf_aa". Default is "raw".
 #' @param as_dna_string_set Logical. If TRUE, return a DNAStringSet object. Default is TRUE.
 #'   If FALSE, return a data frame with sequence data.
 #' @param chromosome Optional. Limit retrieval to a specific chromosome. Default is NULL (all chromosomes).
@@ -507,26 +550,26 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
 #' @importFrom DBI dbGetQuery
 #' @importFrom Biostrings DNAStringSet
 #' @export
-get_flanking_sequences <- function(con, vcf_file_id, as_dna_string_set = TRUE, chromosome = NULL) {
+get_flanking_sequences <- function(con, vcf_file_id, seq_type = "raw", as_dna_string_set = TRUE, chromosome = NULL) {
   # Build query
   if (is.null(chromosome)) {
     query <- "
-      SELECT f.flanking_id, v.chromosome, v.position, f.flank_size, f.start_position, f.end_position, f.sequence
+      SELECT f.flanking_id, v.chromosome, v.position, f.flank_size, f.start_position, f.end_position, f.sequence, f.seq_type, f.seq_length
       FROM flanking_sequences f
       JOIN vcf_data v ON f.vcf_id = v.vcf_id
-      WHERE v.file_id = ?
+      WHERE v.file_id = ? AND f.seq_type = ?
       ORDER BY v.chromosome, v.position
     "
-    params <- list(vcf_file_id)
+    params <- list(vcf_file_id, seq_type)
   } else {
     query <- "
-      SELECT f.flanking_id, v.chromosome, v.position, f.flank_size, f.start_position, f.end_position, f.sequence
+      SELECT f.flanking_id, v.chromosome, v.position, f.flank_size, f.start_position, f.end_position, f.sequence, f.seq_type, f.seq_length
       FROM flanking_sequences f
       JOIN vcf_data v ON f.vcf_id = v.vcf_id
-      WHERE v.file_id = ? AND v.chromosome = ?
+      WHERE v.file_id = ? AND v.chromosome = ? AND f.seq_type = ?
       ORDER BY v.position
     "
-    params <- list(vcf_file_id, chromosome)
+    params <- list(vcf_file_id, chromosome, seq_type)
   }
   
   # Execute query

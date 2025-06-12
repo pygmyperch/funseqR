@@ -4,10 +4,14 @@
 \alias{extract_uniprot_info}
 \title{Extract UniProt information from API response}
 \usage{
-extract_uniprot_info(uniprot_data, debug = FALSE)
+extract_uniprot_info(uniprot_data, evidence_keep = NULL, debug = FALSE)
 }
 \arguments{
 \item{uniprot_data}{The response from query_uniprot_api}
+
+\item{evidence_keep}{Character vector of evidence codes to keep for GO annotations.
+If NULL, all evidence codes are kept. Default high-confidence codes include
+experimental ("EXP", "IDA", "IPI", "IMP", "IGI", "IEP") and curated ("TAS", "IC").}
 
 \item{debug}{If TRUE, print debugging information}
 }

@@ -67,6 +67,9 @@ test_uniprot_connection <- function(verbose = FALSE) {
 #' @param use_cache If TRUE, uses cached API responses if available. Default is TRUE.
 #' @param store_cache If TRUE, stores API responses in the database. Default is TRUE.
 #' @param verify_storage If TRUE, verifies annotation storage after processing. Default is TRUE.
+#' @param evidence_keep Character vector of evidence codes to keep for GO annotations. 
+#'   Default is c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC") which includes
+#'   high-confidence experimental and curated evidence. Set to NULL to keep all evidence codes.
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #' @param debug_accessions Vector of accessions to debug. Default is NULL.
 #'
@@ -76,6 +79,7 @@ test_uniprot_connection <- function(verbose = FALSE) {
 annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_threshold = 1e-10,
                                    batch_size = 500, delay = 1, offline_mode = FALSE,
                                    use_cache = TRUE, store_cache = TRUE, verify_storage = TRUE,
+                                   evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC"),
                                    verbose = TRUE, debug_accessions = NULL) {
   # Check connection validity
   if (!DBI::dbIsValid(con)) {
@@ -149,7 +153,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
       cache_data <- get_cached_uniprot_data(con, acc)
       if (!is.null(cache_data)) {
         if (verbose && enable_debug) message("Retrieved ", acc, " from database cache")
-        uniprot_data[[acc]] <- extract_uniprot_info(cache_data, debug = enable_debug)
+        uniprot_data[[acc]] <- extract_uniprot_info(cache_data, evidence_keep = evidence_keep, debug = enable_debug)
         cache_hits <- cache_hits + 1
         next  # Skip to next accession
       }
@@ -189,7 +193,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_th
       # Extract information, even if minimal
       info <- NULL
       tryCatch({
-        info <- extract_uniprot_info(api_result, debug = enable_debug)
+        info <- extract_uniprot_info(api_result, evidence_keep = evidence_keep, debug = enable_debug)
       }, error = function(e) {
         if (verbose) message("Error extracting info for ", acc, ": ", e$message)
         info <- create_empty_annotation(acc)
@@ -954,10 +958,13 @@ require_uniprot_connection <- function(verbose = TRUE) {
 #' Extract UniProt information from API response
 #'
 #' @param uniprot_data The response from query_uniprot_api
+#' @param evidence_keep Character vector of evidence codes to keep for GO annotations.
+#'   If NULL, all evidence codes are kept. Default high-confidence codes include
+#'   experimental ("EXP", "IDA", "IPI", "IMP", "IGI", "IEP") and curated ("TAS", "IC").
 #' @param debug If TRUE, print debugging information
 #'
 #' @return A list containing extracted information
-extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
+extract_uniprot_info <- function(uniprot_data, evidence_keep = NULL, debug = FALSE) {
   # Initialize standard result structure
   result <- list(
     accession = if (!is.null(uniprot_data$accession)) uniprot_data$accession else "Unknown",
@@ -1104,8 +1111,14 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
           }
         }
 
-        # Add GO term if we have one
+        # Add GO term if we have one and it passes evidence filter
         if (!is.na(go_term)) {
+          # Apply evidence filter if specified
+          if (!is.null(evidence_keep) && !is.na(go_evidence) && !go_evidence %in% evidence_keep) {
+            if (debug) message("Filtered out GO term with evidence: ", go_evidence)
+            next
+          }
+          
           # Extract category (C, F, P) from the term
           go_category <- substr(go_term, 1, 1)
 
@@ -1118,7 +1131,7 @@ extract_uniprot_info <- function(uniprot_data, debug = FALSE) {
           )
           go_terms <- rbind(go_terms, new_row)
 
-          if (debug) message("Added GO term: ", go_id, " - ", go_term)
+          if (debug) message("Added GO term: ", go_id, " - ", go_term, " (evidence: ", go_evidence, ")")
         }
       }
 
@@ -1616,10 +1629,11 @@ query_uniprot_api <- function(accession,
 #'
 #' @param parsed Parsed JSON data from UniProt API
 #' @param accession The accession number
+#' @param evidence_keep Character vector of evidence codes to keep for GO annotations
 #' @param debug Enable debug output
 #'
 #' @return A structured annotation object
-process_uniprot_json <- function(parsed, accession, debug = FALSE) {
+process_uniprot_json <- function(parsed, accession, evidence_keep = NULL, debug = FALSE) {
   # Create empty annotation structure
   info <- create_empty_annotation(accession)
 
@@ -1682,6 +1696,12 @@ process_uniprot_json <- function(parsed, accession, debug = FALSE) {
           }
 
           if (!is.na(go_term)) {
+            # Apply evidence filter if specified
+            if (!is.null(evidence_keep) && !is.na(go_evidence) && !go_evidence %in% evidence_keep) {
+              if (debug) message("Filtered out GO term with evidence: ", go_evidence)
+              next
+            }
+            
             new_row <- data.frame(
               go_id = go_id,
               go_term = go_term,

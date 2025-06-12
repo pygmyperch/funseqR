@@ -87,9 +87,17 @@ create_funseq_schema <- function(con, verbose = TRUE) {
       start_position INTEGER NOT NULL,
       end_position INTEGER NOT NULL,
       sequence TEXT NOT NULL,
+      seq_type TEXT NOT NULL DEFAULT 'raw',
+      seq_length INTEGER,
       FOREIGN KEY (vcf_id) REFERENCES vcf_data (vcf_id),
       FOREIGN KEY (sequence_id) REFERENCES reference_sequences (sequence_id)
     )
+  ")
+  
+  # Create unique index for vcf_id and seq_type combination
+  if (verbose) message("Creating flanking_sequences index...")
+  DBI::dbExecute(con, "
+    CREATE UNIQUE INDEX idx_flanking_vcf_seqtype ON flanking_sequences (vcf_id, seq_type)
   ")
 
   if (verbose) message("Creating blast_parameters table...")

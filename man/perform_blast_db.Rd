@@ -9,13 +9,14 @@ perform_blast_db(
   vcf_file_id,
   db_path,
   db_name,
-  blast_type = c("blastn", "blastx"),
+  blast_type = c("blastn", "blastx", "diamond_blastn", "diamond_blastx"),
   e_value = 1e-05,
   max_hits = 5,
   threads = 1,
   output_dir = getwd(),
   taxids = NULL,
   extract_db_metadata = TRUE,
+  seq_type = "raw",
   verbose = TRUE
 )
 }
@@ -29,7 +30,7 @@ perform_blast_db(
 \item{db_name}{Character string specifying the name of the BLAST database.}
 
 \item{blast_type}{Character string specifying the type of BLAST search.
-Must be either "blastn" or "blastx".}
+Must be either "blastn", "blastx", "diamond_blastn", or "diamond_blastx".}
 
 \item{e_value}{Numeric value specifying the E-value threshold for hits.
 Default is 1e-5.}
@@ -48,6 +49,8 @@ Default is NULL.}
 
 \item{extract_db_metadata}{Logical. If TRUE, extract and store database metadata.
 Default is TRUE.}
+
+\item{seq_type}{Type of sequence to search: "raw", "orf_nuc", or "orf_aa". Default is "raw".}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 }

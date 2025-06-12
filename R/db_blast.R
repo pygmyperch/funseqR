@@ -338,7 +338,7 @@ import_blast_results <- function(con, blast_param_id, results_file, vcf_file_id,
 #' @param db_path Character string specifying the path to the BLAST database.
 #' @param db_name Character string specifying the name of the BLAST database.
 #' @param blast_type Character string specifying the type of BLAST search.
-#'   Must be either "blastn" or "blastx".
+#'   Must be either "blastn", "blastx", "diamond_blastn", or "diamond_blastx".
 #' @param e_value Numeric value specifying the E-value threshold for hits.
 #'   Default is 1e-5.
 #' @param max_hits Integer specifying the maximum number of hits to return
@@ -351,6 +351,7 @@ import_blast_results <- function(con, blast_param_id, results_file, vcf_file_id,
 #'   Default is NULL.
 #' @param extract_db_metadata Logical. If TRUE, extract and store database metadata.
 #'   Default is TRUE.
+#' @param seq_type Type of sequence to search: "raw", "orf_nuc", or "orf_aa". Default is "raw".
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #'
 #' @return A list containing:
@@ -364,12 +365,16 @@ import_blast_results <- function(con, blast_param_id, results_file, vcf_file_id,
 #' @importFrom Biostrings writeXStringSet
 #' @export
 perform_blast_db <- function(con, vcf_file_id, db_path, db_name,
-                             blast_type = c("blastn", "blastx"),
+                             blast_type = c("blastn", "blastx", "diamond_blastn", "diamond_blastx"),
                              e_value = 1e-5, max_hits = 5, threads = 1,
                              output_dir = getwd(), taxids = NULL,
-                             extract_db_metadata = TRUE, verbose = TRUE) {
+                             extract_db_metadata = TRUE, seq_type = "raw", verbose = TRUE) {
   # Match arguments
   blast_type <- match.arg(blast_type)
+  
+  # Determine engine and search type
+  is_diamond <- grepl("^diamond_", blast_type)
+  search_type <- if (is_diamond) gsub("^diamond_", "", blast_type) else blast_type
 
   # Generate output base name
   output_base <- file.path(output_dir, paste0(
@@ -397,8 +402,8 @@ perform_blast_db <- function(con, vcf_file_id, db_path, db_name,
   }
 
   # Get flanking sequences
-  if (verbose) message("Retrieving flanking sequences...")
-  flanking_seqs <- get_flanking_sequences(con, vcf_file_id, as_dna_string_set = TRUE)
+  if (verbose) message("Retrieving flanking sequences (", seq_type, ")...")
+  flanking_seqs <- get_flanking_sequences(con, vcf_file_id, seq_type = seq_type, as_dna_string_set = TRUE)
 
   if (length(flanking_seqs) == 0) {
     stop("No flanking sequences found for VCF file ID ", vcf_file_id)
@@ -408,19 +413,30 @@ perform_blast_db <- function(con, vcf_file_id, db_path, db_name,
   # Construct full database path
   db_file <- file.path(db_path, db_name)
 
-  # Check for .nal file (indicator of a multi-volume database)
-  is_multi_volume <- file.exists(paste0(db_file, ".nal"))
-
-  if (is_multi_volume) {
-    if (verbose) cat("Multi-volume database detected.\n")
+  # Check database files based on search engine
+  if (is_diamond) {
+    # For DIAMOND, check for .dmnd file
+    dmnd_file <- paste0(db_file, ".dmnd")
+    if (!file.exists(dmnd_file)) {
+      stop("DIAMOND database file not found: ", dmnd_file, 
+           "\nPlease create a DIAMOND database or use BLAST instead.")
+    }
+    if (verbose) cat("DIAMOND database found:", dmnd_file, "\n")
   } else {
-    # For single-volume databases, check files
-    required_extensions <- if(blast_type == "blastn") c(".nhr", ".nin", ".nsq") else c(".phr", ".pin", ".psq")
-    missing_files <- sapply(required_extensions, function(ext) !file.exists(paste0(db_file, ext)))
-    if (any(missing_files)) {
-      stop(paste("Missing required database files:",
-                 paste(required_extensions[missing_files], collapse = ", "),
-                 "\nPlease check the path and database name."))
+    # Check for .nal file (indicator of a multi-volume database)
+    is_multi_volume <- file.exists(paste0(db_file, ".nal"))
+
+    if (is_multi_volume) {
+      if (verbose) cat("Multi-volume database detected.\n")
+    } else {
+      # For single-volume databases, check files
+      required_extensions <- if(search_type == "blastn") c(".nhr", ".nin", ".nsq") else c(".phr", ".pin", ".psq")
+      missing_files <- sapply(required_extensions, function(ext) !file.exists(paste0(db_file, ext)))
+      if (any(missing_files)) {
+        stop(paste("Missing required database files:",
+                   paste(required_extensions[missing_files], collapse = ", "),
+                   "\nPlease check the path and database name."))
+      }
     }
   }
 
@@ -435,26 +451,52 @@ perform_blast_db <- function(con, vcf_file_id, db_path, db_name,
   # Define output_blast
   output_blast <- paste0(output_base, "_", blast_type, ".txt")
 
-  # Construct blast command
-  blast_command <- paste(
-    blast_type,
-    "-db", shQuote(db_file),
-    "-query", shQuote(output_fasta),
-    "-out", shQuote(output_blast),
-    "-outfmt", shQuote(outfmt),
-    "-evalue", e_value,
-    "-max_target_seqs", max_hits,
-    "-num_threads", threads
-  )
+  # Construct command based on search engine
+  if (is_diamond) {
+    # Construct DIAMOND command
+    db_param <- paste0(db_file, ".dmnd")
+    blast_command <- paste(
+      "diamond", search_type,
+      "--db", shQuote(db_param),
+      "--query", shQuote(output_fasta),
+      "--out", shQuote(output_blast),
+      "--outfmt", "6", "qseqid", "sseqid", "pident", "length", "mismatch", "gapopen", 
+      "qstart", "qend", "sstart", "send", "evalue", "bitscore",
+      "--evalue", e_value,
+      "--max-target-seqs", max_hits,
+      "--threads", threads
+    )
+    
+    # Add taxids if provided (DIAMOND uses different syntax)
+    if (!is.null(taxids)) {
+      blast_command <- paste(blast_command, "--taxonlist", taxids)
+    }
+  } else {
+    # Construct BLAST command
+    blast_command <- paste(
+      search_type,
+      "-db", shQuote(db_file),
+      "-query", shQuote(output_fasta),
+      "-out", shQuote(output_blast),
+      "-outfmt", shQuote(outfmt),
+      "-evalue", e_value,
+      "-max_target_seqs", max_hits,
+      "-num_threads", threads
+    )
 
-  # Add taxids if provided
-  if (!is.null(taxids)) {
-    blast_command <- paste(blast_command, "-taxids", taxids)
+    # Add taxids if provided
+    if (!is.null(taxids)) {
+      blast_command <- paste(blast_command, "-taxids", taxids)
+    }
   }
 
-  # Run blast
+  # Run search
   if (verbose) {
-    cat("Executing BLAST command...\n")
+    if (is_diamond) {
+      cat("Executing DIAMOND command...\n")
+    } else {
+      cat("Executing BLAST command...\n")
+    }
     cat("Command:", blast_command, "\n")
 
     # Display database info if we have it
@@ -474,17 +516,19 @@ perform_blast_db <- function(con, vcf_file_id, db_path, db_name,
   system_result <- system(blast_command)
 
   if (system_result != 0) {
-    stop(paste("BLAST command failed with exit status:", system_result))
+    engine_name <- if (is_diamond) "DIAMOND" else "BLAST"
+    stop(paste(engine_name, "command failed with exit status:", system_result))
   }
 
-  if (verbose) cat("BLAST results written to:", output_blast, "\n")
+  engine_name <- if (is_diamond) "DIAMOND" else "BLAST"
+  if (verbose) cat(engine_name, "results written to:", output_blast, "\n")
 
   # Import results into database
-  if (verbose) message("Importing BLAST results into database...")
+  if (verbose) message("Importing ", engine_name, " results into database...")
 
   # Check if results file exists and has content
   if (!file.exists(output_blast) || file.size(output_blast) == 0) {
-    if (verbose) message("No BLAST hits found.")
+    if (verbose) message("No ", engine_name, " hits found.")
     result_count <- 0
   } else {
     result_count <- import_blast_results(

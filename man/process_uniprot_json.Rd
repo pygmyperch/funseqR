@@ -4,12 +4,14 @@
 \alias{process_uniprot_json}
 \title{Process UniProt JSON data into annotations}
 \usage{
-process_uniprot_json(parsed, accession, debug = FALSE)
+process_uniprot_json(parsed, accession, evidence_keep = NULL, debug = FALSE)
 }
 \arguments{
 \item{parsed}{Parsed JSON data from UniProt API}
 
 \item{accession}{The accession number}
+
+\item{evidence_keep}{Character vector of evidence codes to keep for GO annotations}
 
 \item{debug}{Enable debug output}
 }

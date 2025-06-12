@@ -7,6 +7,7 @@
 get_flanking_sequences(
   con,
   vcf_file_id,
+  seq_type = "raw",
   as_dna_string_set = TRUE,
   chromosome = NULL
 )
@@ -15,6 +16,8 @@ get_flanking_sequences(
 \item{con}{A database connection object.}
 
 \item{vcf_file_id}{The ID of the input file containing the VCF data.}
+
+\item{seq_type}{Type of sequence to retrieve: "raw", "orf_nuc", or "orf_aa". Default is "raw".}
 
 \item{as_dna_string_set}{Logical. If TRUE, return a DNAStringSet object. Default is TRUE.
 If FALSE, return a data frame with sequence data.}
