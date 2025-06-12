@@ -1114,9 +1114,13 @@ extract_uniprot_info <- function(uniprot_data, evidence_keep = NULL, debug = FAL
         # Add GO term if we have one and it passes evidence filter
         if (!is.na(go_term)) {
           # Apply evidence filter if specified
-          if (!is.null(evidence_keep) && !is.na(go_evidence) && !go_evidence %in% evidence_keep) {
-            if (debug) message("Filtered out GO term with evidence: ", go_evidence)
-            next
+          if (!is.null(evidence_keep) && !is.na(go_evidence)) {
+            # Extract the primary evidence code (before any colon)
+            primary_evidence <- strsplit(go_evidence, ":")[[1]][1]
+            if (!primary_evidence %in% evidence_keep) {
+              if (debug) message("Filtered out GO term with evidence: ", go_evidence, " (primary: ", primary_evidence, ")")
+              next
+            }
           }
           
           # Extract category (C, F, P) from the term
@@ -1697,9 +1701,13 @@ process_uniprot_json <- function(parsed, accession, evidence_keep = NULL, debug 
 
           if (!is.na(go_term)) {
             # Apply evidence filter if specified
-            if (!is.null(evidence_keep) && !is.na(go_evidence) && !go_evidence %in% evidence_keep) {
-              if (debug) message("Filtered out GO term with evidence: ", go_evidence)
-              next
+            if (!is.null(evidence_keep) && !is.na(go_evidence)) {
+              # Extract the primary evidence code (before any colon)
+              primary_evidence <- strsplit(go_evidence, ":")[[1]][1]
+              if (!primary_evidence %in% evidence_keep) {
+                if (debug) message("Filtered out GO term with evidence: ", go_evidence, " (primary: ", primary_evidence, ")")
+                next
+              }
             }
             
             new_row <- data.frame(
