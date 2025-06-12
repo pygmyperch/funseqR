@@ -338,6 +338,281 @@ count_vcf_entries <- function(con, file_id = NULL, project_id = NULL) {
   }
 }
 
+#' Define or discover main chromosomes for visualization consolidation
+#'
+#' This function serves two purposes: discovering available chromosomes in the database
+#' or defining which chromosomes should be kept separate in visualizations. All other
+#' chromosomes/scaffolds will be grouped into a pseudo-chromosome "US" (unmapped scaffolds).
+#'
+#' @param con A database connection object
+#' @param main_chromosomes Character vector. Chromosome names to keep separate. 
+#'   If NULL (default), function returns all available chromosome names for discovery
+#' @param verbose Logical. If TRUE, print informational messages. Default is TRUE
+#'
+#' @return Character vector. If main_chromosomes is NULL, returns all available 
+#'   chromosome names. If main_chromosomes is provided, returns them invisibly after storing
+#'
+#' @details
+#' **Discovery mode (no parameters):** Returns all unique chromosome names found in VCF data,
+#' useful for users to see what's available before choosing main chromosomes.
+#' 
+#' **Configuration mode (with main_chromosomes):** Stores the specified chromosome names
+#' as the "main chromosomes" for this database. These will be kept separate in visualizations
+#' while all others are grouped as "US".
+#'
+#' @examples
+#' \dontrun{
+#' # Discovery - see all available chromosomes
+#' con <- connect_funseq_db("my_analysis.db")
+#' all_chroms <- define_chromosomes(con)
+#' print(all_chroms)
+#' # [1] "LG1" "LG2" "LG3" "scaffold_001" "scaffold_002" ...
+#' 
+#' # Configuration - define main chromosomes
+#' define_chromosomes(con, c("LG1", "LG2", "LG3", "LG4", "LG5"))
+#' 
+#' # Now visualizations will show: LG1, LG2, LG3, LG4, LG5, US
+#' get_database_summary(con)  # Uses consolidated view by default
+#' }
+#'
+#' @importFrom DBI dbGetQuery dbExecute
+#' @export
+define_chromosomes <- function(con, main_chromosomes = NULL, verbose = TRUE) {
+  
+  if (!DBI::dbIsValid(con)) {
+    stop("Invalid database connection")
+  }
+  
+  if (is.null(main_chromosomes)) {
+    # Discovery mode: return all unique chromosome names
+    tryCatch({
+      chromosomes <- DBI::dbGetQuery(con, 
+        "SELECT DISTINCT chromosome FROM vcf_data ORDER BY chromosome")$chromosome
+      
+      if (length(chromosomes) == 0) {
+        if (verbose) message("No VCF data found in database. Import VCF files first.")
+        return(character(0))
+      }
+      
+      if (verbose) {
+        cat("=== Available Chromosomes/Scaffolds ===", "\n")
+        cat("Found", length(chromosomes), "chromosomes/scaffolds:\n\n")
+        
+        # Show in columns for better readability
+        if (length(chromosomes) <= 20) {
+          cat(paste(chromosomes, collapse = ", "), "\n")
+        } else {
+          # Show first 15, then summary
+          cat(paste(chromosomes[1:15], collapse = ", "), "\n")
+          cat("... and", length(chromosomes) - 15, "more\n")
+        }
+        
+        cat("\nUsage:\n")
+        cat("  define_chromosomes(con, c('LG1', 'LG2', 'LG3')) to set main chromosomes\n")
+        cat("  Other scaffolds will be grouped as 'US' in visualizations\n")
+      }
+      
+      return(chromosomes)
+      
+    }, error = function(e) {
+      stop("Error retrieving chromosome names: ", e$message)
+    })
+    
+  } else {
+    # Configuration mode: store main chromosomes
+    if (!is.character(main_chromosomes) || length(main_chromosomes) == 0) {
+      stop("main_chromosomes must be a non-empty character vector")
+    }
+    
+    # Verify these chromosomes exist
+    existing_chroms <- DBI::dbGetQuery(con, 
+      "SELECT DISTINCT chromosome FROM vcf_data")$chromosome
+    
+    missing_chroms <- setdiff(main_chromosomes, existing_chroms)
+    if (length(missing_chroms) > 0) {
+      warning("Some specified chromosomes not found in database: ", 
+              paste(missing_chroms, collapse = ", "))
+    }
+    
+    # Store in database metadata
+    store_main_chromosomes(con, main_chromosomes)
+    
+    if (verbose) {
+      cat("=== Main Chromosomes Defined ===", "\n")
+      cat("Main chromosomes:", paste(main_chromosomes, collapse = ", "), "\n")
+      cat("All other scaffolds will be grouped as 'US' in visualizations\n")
+      
+      valid_chroms <- intersect(main_chromosomes, existing_chroms)
+      if (length(valid_chroms) > 0) {
+        cat("Confirmed in database:", paste(valid_chroms, collapse = ", "), "\n")
+      }
+    }
+    
+    return(invisible(main_chromosomes))
+  }
+}
+
+#' Store main chromosomes in database metadata
+#' @param con Database connection
+#' @param chromosomes Character vector of chromosome names
+store_main_chromosomes <- function(con, chromosomes) {
+  
+  # Ensure metadata table exists
+  tables <- DBI::dbListTables(con)
+  if (!"metadata" %in% tables) {
+    DBI::dbExecute(con, "
+      CREATE TABLE metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    ")
+  }
+  
+  # Store as JSON string
+  chrom_json <- jsonlite::toJSON(chromosomes)
+  
+  # Insert or update
+  existing <- DBI::dbGetQuery(con, 
+    "SELECT value FROM metadata WHERE key = 'main_chromosomes'")
+  
+  if (nrow(existing) > 0) {
+    DBI::dbExecute(con, 
+      "UPDATE metadata SET value = ? WHERE key = 'main_chromosomes'",
+      params = list(chrom_json))
+  } else {
+    DBI::dbExecute(con, 
+      "INSERT INTO metadata (key, value) VALUES ('main_chromosomes', ?)",
+      params = list(chrom_json))
+  }
+}
+
+#' Retrieve main chromosomes from database metadata
+#' @param con Database connection
+#' @return Character vector of main chromosome names, or NULL if not defined
+get_main_chromosomes <- function(con) {
+  
+  tables <- DBI::dbListTables(con)
+  if (!"metadata" %in% tables) {
+    return(NULL)
+  }
+  
+  tryCatch({
+    result <- DBI::dbGetQuery(con, 
+      "SELECT value FROM metadata WHERE key = 'main_chromosomes'")
+    
+    if (nrow(result) == 0) {
+      return(NULL)
+    }
+    
+    # Parse JSON
+    chromosomes <- jsonlite::fromJSON(result$value[1])
+    
+    # Ensure it's a character vector
+    if (is.character(chromosomes)) {
+      return(chromosomes)
+    } else {
+      return(NULL)
+    }
+    
+  }, error = function(e) {
+    return(NULL)
+  })
+}
+
+#' Consolidate scaffolds into a pseudo-chromosome for visualization
+#'
+#' This function takes VCF data and consolidates small scaffolds into a single
+#' pseudo-chromosome called "US" (unmapped scaffolds) while retaining specified
+#' main chromosomes. This is useful for visualization and analysis when you have
+#' many small scaffolds that clutter plots.
+#'
+#' @param vcf_data Data frame. VCF data with at least a 'chromosome' column
+#' @param keep_chromosomes Character vector. Chromosome names to keep separate
+#' @param pseudo_name Character. Name for the consolidated pseudo-chromosome. Default is "US"
+#' @param verbose Logical. If TRUE, print consolidation information. Default is TRUE
+#'
+#' @return Data frame. VCF data with consolidated chromosome names
+#'
+#' @details
+#' All chromosomes not specified in `keep_chromosomes` will be renamed to the
+#' `pseudo_name` value. The original data is not modified - a new data frame
+#' is returned with updated chromosome names.
+#'
+#' @examples
+#' \dontrun{
+#' # Get VCF data from database
+#' vcf_data <- get_vcf_data(con, file_id = 1)
+#' 
+#' # Consolidate all except main linkage groups
+#' main_chroms <- c("LG1", "LG2", "LG3", "LG4", "LG5")
+#' consolidated <- consolidate_scaffolds(vcf_data, main_chroms)
+#' 
+#' # Check the result
+#' table(consolidated$chromosome)
+#' }
+#'
+#' @export
+consolidate_scaffolds <- function(vcf_data, keep_chromosomes, pseudo_name = "US", verbose = FALSE) {
+  
+  if (!is.data.frame(vcf_data)) {
+    stop("vcf_data must be a data frame")
+  }
+  
+  if (!"chromosome" %in% names(vcf_data)) {
+    stop("vcf_data must contain a 'chromosome' column")
+  }
+  
+  if (!is.character(keep_chromosomes) || length(keep_chromosomes) == 0) {
+    stop("keep_chromosomes must be a non-empty character vector")
+  }
+  
+  if (nrow(vcf_data) == 0) {
+    if (verbose) message("No VCF data to consolidate")
+    return(vcf_data)
+  }
+  
+  # Get original chromosome counts
+  original_chroms <- table(vcf_data$chromosome)
+  
+  # Create copy of data
+  consolidated_data <- vcf_data
+  
+  # Identify chromosomes to consolidate
+  all_chroms <- unique(vcf_data$chromosome)
+  consolidate_chroms <- setdiff(all_chroms, keep_chromosomes)
+  
+  if (length(consolidate_chroms) == 0) {
+    if (verbose) message("No chromosomes to consolidate - all are in keep_chromosomes list")
+    return(vcf_data)
+  }
+  
+  # Replace chromosome names
+  consolidated_data$chromosome[consolidated_data$chromosome %in% consolidate_chroms] <- pseudo_name
+  
+  if (verbose) {
+    cat("=== Scaffold Consolidation Summary ===", "\n")
+    cat("Kept separate:", length(keep_chromosomes), "chromosomes\n")
+    cat("Consolidated:", length(consolidate_chroms), "scaffolds into", pseudo_name, "\n")
+    
+    # Count variants before and after
+    kept_variants <- sum(original_chroms[names(original_chroms) %in% keep_chromosomes])
+    consolidated_variants <- sum(original_chroms[names(original_chroms) %in% consolidate_chroms])
+    
+    cat("\nVariant distribution:\n")
+    cat("  Kept chromosomes:", format(kept_variants, big.mark = ","), "variants\n")
+    cat("  Consolidated (", pseudo_name, "):", format(consolidated_variants, big.mark = ","), "variants\n")
+    
+    # Show final chromosome distribution
+    final_chroms <- table(consolidated_data$chromosome)
+    cat("\nFinal chromosome counts:\n")
+    for (i in seq_along(final_chroms)) {
+      cat(sprintf("  %-10s: %s variants\n", names(final_chroms)[i], format(final_chroms[i], big.mark = ",")))
+    }
+  }
+  
+  return(consolidated_data)
+}
+
 #' Delete VCF data from the database
 #'
 #' @param con A database connection object.

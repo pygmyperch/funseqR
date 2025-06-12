@@ -4,12 +4,19 @@
 \alias{get_project_summary}
 \title{Get project-specific summary}
 \usage{
-get_project_summary(con, project_id, verbose = TRUE)
+get_project_summary(
+  con,
+  project_id,
+  use_consolidated_chrom = TRUE,
+  verbose = TRUE
+)
 }
 \arguments{
 \item{con}{A database connection object}
 
 \item{project_id}{Integer. Specific project ID to analyze}
+
+\item{use_consolidated_chrom}{Logical. If TRUE, group minor scaffolds as "US" in chromosome distribution. Default is TRUE}
 
 \item{verbose}{Logical. Print detailed output. Default is TRUE}
 }

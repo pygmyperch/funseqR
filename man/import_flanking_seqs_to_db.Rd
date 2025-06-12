@@ -34,7 +34,7 @@ import_flanking_seqs_to_db(
 
 \item{keep_raw_sequence}{Logical. If TRUE, store both raw and ORF sequences. Default is TRUE.}
 
-\item{chromosome}{Optional. Limit extraction to a specific chromosome. Default is NULL (all chromosomes).}
+\item{chromosome}{Optional. Limit extraction to specific chromosome(s). Can be a single chromosome name or a vector of chromosome names. Default is NULL (all chromosomes).}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 }

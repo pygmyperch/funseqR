@@ -271,7 +271,7 @@ get_reference_genome <- function(con, genome_id, as_dna_string_set = TRUE, inclu
 #' @param orf_min_aa Minimum ORF length in amino acids. Default is 30.
 #' @param orf_return Type of ORF to return: "nuc" for nucleotide, "aa" for amino acid. Default is "nuc".
 #' @param keep_raw_sequence Logical. If TRUE, store both raw and ORF sequences. Default is TRUE.
-#' @param chromosome Optional. Limit extraction to a specific chromosome. Default is NULL (all chromosomes).
+#' @param chromosome Optional. Limit extraction to specific chromosome(s). Can be a single chromosome name or a vector of chromosome names. Default is NULL (all chromosomes).
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #'
 #' @return A list containing:
@@ -310,20 +310,36 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
   }
   
   # Get VCF data
-  if (verbose) message("Retrieving VCF data...")
+  if (verbose) {
+    if (is.null(chromosome)) {
+      message("Retrieving VCF data for all chromosomes...")
+    } else {
+      message("Retrieving VCF data for chromosome(s): ", paste(chromosome, collapse = ", "))
+    }
+  }
   
   if (is.null(chromosome)) {
     vcf_query <- "SELECT vcf_id, chromosome, position FROM vcf_data WHERE file_id = ? ORDER BY chromosome, position"
     vcf_params <- list(vcf_file_id)
-  } else {
+  } else if (length(chromosome) == 1) {
     vcf_query <- "SELECT vcf_id, chromosome, position FROM vcf_data WHERE file_id = ? AND chromosome = ? ORDER BY position"
     vcf_params <- list(vcf_file_id, chromosome)
+  } else {
+    # Handle multiple chromosomes
+    chrom_placeholders <- paste(rep("?", length(chromosome)), collapse = ", ")
+    vcf_query <- paste0("SELECT vcf_id, chromosome, position FROM vcf_data WHERE file_id = ? AND chromosome IN (", 
+                       chrom_placeholders, ") ORDER BY chromosome, position")
+    vcf_params <- c(list(vcf_file_id), as.list(chromosome))
   }
   
   vcf_data <- DBI::dbGetQuery(con, vcf_query, params = vcf_params)
   
   if (nrow(vcf_data) == 0) {
-    stop("No VCF data found for file ID ", vcf_file_id)
+    if (is.null(chromosome)) {
+      stop("No VCF data found for file ID ", vcf_file_id)
+    } else {
+      stop("No VCF data found for file ID ", vcf_file_id, " on chromosome(s): ", paste(chromosome, collapse = ", "))
+    }
   }
   
   # Get reference sequences
@@ -543,7 +559,7 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
 #' @param seq_type Type of sequence to retrieve: "raw", "orf_nuc", or "orf_aa". Default is "raw".
 #' @param as_dna_string_set Logical. If TRUE, return a DNAStringSet object. Default is TRUE.
 #'   If FALSE, return a data frame with sequence data.
-#' @param chromosome Optional. Limit retrieval to a specific chromosome. Default is NULL (all chromosomes).
+#' @param chromosome Optional. Limit retrieval to specific chromosome(s). Can be a single chromosome name or a vector of chromosome names. Default is NULL (all chromosomes).
 #'
 #' @return A DNAStringSet object or a data frame, depending on as_dna_string_set.
 #'
@@ -561,7 +577,7 @@ get_flanking_sequences <- function(con, vcf_file_id, seq_type = "raw", as_dna_st
       ORDER BY v.chromosome, v.position
     "
     params <- list(vcf_file_id, seq_type)
-  } else {
+  } else if (length(chromosome) == 1) {
     query <- "
       SELECT f.flanking_id, v.chromosome, v.position, f.flank_size, f.start_position, f.end_position, f.sequence, f.seq_type, f.seq_length
       FROM flanking_sequences f
@@ -570,13 +586,29 @@ get_flanking_sequences <- function(con, vcf_file_id, seq_type = "raw", as_dna_st
       ORDER BY v.position
     "
     params <- list(vcf_file_id, chromosome, seq_type)
+  } else {
+    # Handle multiple chromosomes
+    chrom_placeholders <- paste(rep("?", length(chromosome)), collapse = ", ")
+    query <- paste0("
+      SELECT f.flanking_id, v.chromosome, v.position, f.flank_size, f.start_position, f.end_position, f.sequence, f.seq_type, f.seq_length
+      FROM flanking_sequences f
+      JOIN vcf_data v ON f.vcf_id = v.vcf_id
+      WHERE v.file_id = ? AND v.chromosome IN (", chrom_placeholders, ") AND f.seq_type = ?
+      ORDER BY v.chromosome, v.position
+    ")
+    params <- c(list(vcf_file_id), as.list(chromosome), list(seq_type))
   }
   
   # Execute query
   flanking_data <- DBI::dbGetQuery(con, query, params = params)
   
   if (nrow(flanking_data) == 0) {
-    stop("No flanking sequences found for VCF file ID ", vcf_file_id)
+    if (is.null(chromosome)) {
+      stop("No flanking sequences found for VCF file ID ", vcf_file_id, " with seq_type '", seq_type, "'")
+    } else {
+      stop("No flanking sequences found for VCF file ID ", vcf_file_id, " on chromosome(s): ", 
+           paste(chromosome, collapse = ", "), " with seq_type '", seq_type, "'")
+    }
   }
   
   # Return as requested format

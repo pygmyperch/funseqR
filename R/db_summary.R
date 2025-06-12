@@ -5,11 +5,12 @@
 #' @param con A database connection object
 #' @param detail_level Character. Level of detail: "basic", "detailed", or "full". Default is "detailed"
 #' @param include_samples Logical. Include sample data from tables. Default is FALSE
+#' @param use_consolidated_chrom Logical. If TRUE, group minor scaffolds as "US" in chromosome distribution. Default is TRUE
 #' @param verbose Logical. Print detailed output. Default is TRUE
 #'
 #' @return A list containing database summary information
 #' @export
-get_database_summary <- function(con, detail_level = "detailed", include_samples = FALSE, verbose = TRUE) {
+get_database_summary <- function(con, detail_level = "detailed", include_samples = FALSE, use_consolidated_chrom = TRUE, verbose = TRUE) {
   if (!DBI::dbIsValid(con)) {
     stop("Invalid database connection")
   }
@@ -213,7 +214,7 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
       })
     }
 
-    # Chromosome distribution (FIXED for SQLite)
+    # Chromosome distribution with optional consolidation
     if (table_counts$vcf_data > 0) {
       tryCatch({
         # SQLite-compatible query (no REGEXP, simpler sorting)
@@ -231,18 +232,51 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
             chromosome
         "
         chrom_summary <- DBI::dbGetQuery(con, chrom_query)
-        detailed_info$chromosome_distribution <- chrom_summary
-
-        if (verbose && nrow(chrom_summary) > 0) {
-          cat("\n=== Variants by Chromosome ===\n")
-          total_variants <- sum(chrom_summary$variant_count)
-          for (i in 1:min(nrow(chrom_summary), 10)) {  # Show top 10
-            cs <- chrom_summary[i, ]
-            pct <- round(100 * cs$variant_count / total_variants, 1)
-            cat(sprintf("%-10s: %d variants (%s%%)\n", cs$chromosome, cs$variant_count, pct))
+        
+        # Apply consolidation if requested and main chromosomes are defined
+        display_summary <- chrom_summary
+        if (use_consolidated_chrom) {
+          main_chroms <- get_main_chromosomes(con)
+          if (!is.null(main_chroms) && length(main_chroms) > 0) {
+            # Create consolidated data for display
+            vcf_data_temp <- data.frame(chromosome = rep(chrom_summary$chromosome, chrom_summary$variant_count))
+            consolidated_temp <- consolidate_scaffolds(vcf_data_temp, main_chroms, verbose = FALSE)
+            display_summary <- aggregate(variant_count ~ chromosome, 
+                                       data = data.frame(chromosome = consolidated_temp$chromosome, 
+                                                        variant_count = 1), 
+                                       FUN = sum)
+            display_summary <- display_summary[order(display_summary$variant_count, decreasing = TRUE), ]
           }
-          if (nrow(chrom_summary) > 10) {
-            cat(sprintf("... and %d more chromosomes\n", nrow(chrom_summary) - 10))
+        }
+        
+        detailed_info$chromosome_distribution <- chrom_summary  # Store original
+        detailed_info$chromosome_distribution_display <- display_summary  # Store display version
+
+        if (verbose && nrow(display_summary) > 0) {
+          cat("\n=== Variants by Chromosome ===\n")
+          if (use_consolidated_chrom) {
+            main_chroms <- get_main_chromosomes(con)
+            if (!is.null(main_chroms) && length(main_chroms) > 0) {
+              cat("(Using consolidated view - minor scaffolds grouped as 'US')\n")
+            }
+          }
+          
+          total_variants <- sum(display_summary$variant_count)
+          display_limit <- min(nrow(display_summary), 15)  # Show more for consolidated view
+          
+          for (i in 1:display_limit) {
+            cs <- display_summary[i, ]
+            pct <- round(100 * cs$variant_count / total_variants, 1)
+            cat(sprintf("%-10s: %s variants (%s%%)\n", cs$chromosome, 
+                       format(cs$variant_count, big.mark = ","), pct))
+          }
+          if (nrow(display_summary) > display_limit) {
+            cat(sprintf("... and %d more chromosomes\n", nrow(display_summary) - display_limit))
+          }
+          
+          if (use_consolidated_chrom && !is.null(get_main_chromosomes(con))) {
+            cat(sprintf("\nOriginal chromosome count: %d, Consolidated view: %d\n", 
+                       nrow(chrom_summary), nrow(display_summary)))
           }
         }
       }, error = function(e) {
@@ -295,11 +329,12 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
 #'
 #' @param con A database connection object
 #' @param project_id Integer. Specific project ID to analyze
+#' @param use_consolidated_chrom Logical. If TRUE, group minor scaffolds as "US" in chromosome distribution. Default is TRUE
 #' @param verbose Logical. Print detailed output. Default is TRUE
 #'
 #' @return A list containing project-specific information
 #' @export
-get_project_summary <- function(con, project_id, verbose = TRUE) {
+get_project_summary <- function(con, project_id, use_consolidated_chrom = TRUE, verbose = TRUE) {
   if (!DBI::dbIsValid(con)) {
     stop("Invalid database connection")
   }

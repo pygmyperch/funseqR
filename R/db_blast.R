@@ -26,7 +26,7 @@ register_blast_params <- function(con, blast_type, db_name, db_path,
                            e_value, max_hits, verbose = TRUE) {
 
   # Validate blast_type
-  blast_type <- match.arg(blast_type, c("blastn", "blastx"))
+  blast_type <- match.arg(blast_type, c("blastn", "blastx", "diamond_blastn", "diamond_blastx"))
 
   # Register BLAST parameters
   current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
@@ -371,7 +371,7 @@ perform_blast_db <- function(con, vcf_file_id, db_path, db_name,
                              extract_db_metadata = TRUE, seq_type = "raw", verbose = TRUE) {
   # Match arguments
   blast_type <- match.arg(blast_type)
-  
+
   # Determine engine and search type
   is_diamond <- grepl("^diamond_", blast_type)
   search_type <- if (is_diamond) gsub("^diamond_", "", blast_type) else blast_type
@@ -418,7 +418,7 @@ perform_blast_db <- function(con, vcf_file_id, db_path, db_name,
     # For DIAMOND, check for .dmnd file
     dmnd_file <- paste0(db_file, ".dmnd")
     if (!file.exists(dmnd_file)) {
-      stop("DIAMOND database file not found: ", dmnd_file, 
+      stop("DIAMOND database file not found: ", dmnd_file,
            "\nPlease create a DIAMOND database or use BLAST instead.")
     }
     if (verbose) cat("DIAMOND database found:", dmnd_file, "\n")
@@ -460,13 +460,13 @@ perform_blast_db <- function(con, vcf_file_id, db_path, db_name,
       "--db", shQuote(db_param),
       "--query", shQuote(output_fasta),
       "--out", shQuote(output_blast),
-      "--outfmt", "6", "qseqid", "sseqid", "pident", "length", "mismatch", "gapopen", 
+      "--outfmt", "6", "qseqid", "sseqid", "pident", "length", "mismatch", "gapopen",
       "qstart", "qend", "sstart", "send", "evalue", "bitscore",
       "--evalue", e_value,
       "--max-target-seqs", max_hits,
       "--threads", threads
     )
-    
+
     # Add taxids if provided (DIAMOND uses different syntax)
     if (!is.null(taxids)) {
       blast_command <- paste(blast_command, "--taxonlist", taxids)
@@ -586,7 +586,7 @@ perform_blast_db <- function(con, vcf_file_id, db_path, db_name,
     # TODO: Update this when report functions are fixed
     # update_analysis_report(
     #   con,
-    #   section = "blast_search", 
+    #   section = "blast_search",
     #   message = blast_message,
     #   verbose = FALSE
     # )

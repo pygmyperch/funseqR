@@ -46,7 +46,7 @@ cat("Imported reference genome with ID:", genome_import$genome_id, "\n")
 cat("Imported", genome_import$sequence_count, "reference sequences\n")
 
 # Step 5: Extract flanking sequences
-# Option A: Raw sequences only (default)
+# Option A: Raw sequences only (default, all chromosomes)
 flanking_import <- import_flanking_seqs_to_db(
   con,
   vcf_import$file_id,
@@ -55,7 +55,17 @@ flanking_import <- import_flanking_seqs_to_db(
 )
 cat("Extracted", flanking_import$flanking_count, "flanking sequences\n")
 
-# Option B: ORF extraction (uncomment to use)
+# Option B: Extract from specific chromosomes only
+# flanking_import <- import_flanking_seqs_to_db(
+#   con,
+#   vcf_import$file_id,
+#   genome_import$genome_id,
+#   flank_size = 500,
+#   chromosome = c("LG1", "LG2", "LG15")
+# )
+# cat("Extracted", flanking_import$flanking_count, "flanking sequences from selected chromosomes\n")
+
+# Option C: ORF extraction (uncomment to use)
 # flanking_import <- import_flanking_seqs_to_db(
 #   con,
 #   vcf_import$file_id,

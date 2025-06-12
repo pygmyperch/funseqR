@@ -8,6 +8,7 @@ get_database_summary(
   con,
   detail_level = "detailed",
   include_samples = FALSE,
+  use_consolidated_chrom = TRUE,
   verbose = TRUE
 )
 }
@@ -17,6 +18,8 @@ get_database_summary(
 \item{detail_level}{Character. Level of detail: "basic", "detailed", or "full". Default is "detailed"}
 
 \item{include_samples}{Logical. Include sample data from tables. Default is FALSE}
+
+\item{use_consolidated_chrom}{Logical. If TRUE, group minor scaffolds as "US" in chromosome distribution. Default is TRUE}
 
 \item{verbose}{Logical. Print detailed output. Default is TRUE}
 }

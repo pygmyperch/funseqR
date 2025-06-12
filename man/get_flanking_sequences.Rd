@@ -22,7 +22,7 @@ get_flanking_sequences(
 \item{as_dna_string_set}{Logical. If TRUE, return a DNAStringSet object. Default is TRUE.
 If FALSE, return a data frame with sequence data.}
 
-\item{chromosome}{Optional. Limit retrieval to a specific chromosome. Default is NULL (all chromosomes).}
+\item{chromosome}{Optional. Limit retrieval to specific chromosome(s). Can be a single chromosome name or a vector of chromosome names. Default is NULL (all chromosomes).}
 }
 \value{
 A DNAStringSet object or a data frame, depending on as_dna_string_set.
