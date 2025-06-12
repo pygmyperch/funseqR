@@ -55,8 +55,11 @@ extract_longest_orf <- function(dna_seq, min_aa_length = 30, return_type = "nuc"
     if (length(sequences[[frame]]) < 3) next  # Skip if too short to translate
     
     tryCatch({
-      # Translate to amino acids
-      aa_seq <- Biostrings::translate(sequences[[frame]], if.fuzzy.codon = "X")
+      # Translate to amino acids - suppress warnings for incomplete codons and fuzzy bases
+      # These warnings are expected when translating raw genomic sequences
+      aa_seq <- suppressWarnings(
+        Biostrings::translate(sequences[[frame]], if.fuzzy.codon = "X")
+      )
       aa_string <- as.character(aa_seq)
       
       # Find ORFs (sequences between start and stop codons)
