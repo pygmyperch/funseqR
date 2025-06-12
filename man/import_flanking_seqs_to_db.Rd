@@ -14,6 +14,8 @@ import_flanking_seqs_to_db(
   orf_return = "nuc",
   keep_raw_sequence = TRUE,
   chromosome = NULL,
+  threads = 1,
+  batch_size = 1000,
   verbose = TRUE
 )
 }
@@ -36,6 +38,11 @@ import_flanking_seqs_to_db(
 
 \item{chromosome}{Optional. Limit extraction to specific chromosome(s). Can be a single chromosome name or a vector of chromosome names. Default is NULL (all chromosomes).}
 
+\item{threads}{Integer specifying the number of CPU threads to use for ORF extraction.
+When threads > 1 and translate_flanks = TRUE, parallel processing will be used. Default is 1.}
+
+\item{batch_size}{Integer specifying the number of sequences to process per batch. Default is 1000.}
+
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 }
 \value{
@@ -47,4 +54,6 @@ A list containing:
 \description{
 This function extracts flanking sequences for VCF data in the database and stores them.
 It can optionally extract ORFs from the flanking sequences for more targeted searches.
+When translate_flanks = TRUE and threads > 1, parallel processing will be used with a
+two-phase approach: parallel ORF extraction followed by sequential database writes.
 }
