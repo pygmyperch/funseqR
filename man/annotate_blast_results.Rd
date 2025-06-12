@@ -43,7 +43,8 @@ annotate_blast_results(
 
 \item{evidence_keep}{Character vector of evidence codes to keep for GO annotations.
 Default is c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC") which includes
-high-confidence experimental and curated evidence. Set to NULL to keep all evidence codes.}
+high-confidence experimental and curated evidence. Set to NULL to keep all evidence codes.
+See Details section for complete evidence code definitions and recommendations.}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 
@@ -54,5 +55,106 @@ A list containing annotation statistics.
 }
 \description{
 This function processes BLAST results from the database and retrieves
-UniProt annotations for the hit accessions.
+UniProt annotations for the hit accessions, including GO terms and KEGG pathways.
+It supports evidence-based filtering of GO terms to control annotation quality.
+}
+\details{
+\strong{GO Evidence Code Filtering}
+
+Gene Ontology annotations are supported by evidence codes that indicate the type and
+reliability of the evidence. This function supports filtering GO terms based on these
+evidence codes to control annotation quality.
+
+\strong{Evidence Code Definitions:}
+\itemize{
+\item \strong{EXP} - Inferred from Experiment: Direct experimental evidence
+\item \strong{IDA} - Inferred from Direct Assay: Direct molecular interaction/localization
+\item \strong{IPI} - Inferred from Physical Interaction: Protein-protein interactions
+\item \strong{IMP} - Inferred from Mutant Phenotype: Loss/gain of function studies
+\item \strong{IGI} - Inferred from Genetic Interaction: Epistasis or suppression
+\item \strong{IEP} - Inferred from Expression Pattern: Temporal/spatial expression
+\item \strong{TAS} - Traceable Author Statement: Curator judgment from literature
+\item \strong{IC} - Inferred by Curator: Expert biocuration
+\item \strong{IEA} - Inferred from Electronic Annotation: Computational prediction
+\item \strong{ISS} - Inferred from Sequence Similarity: Homology-based transfer
+\item \strong{ISO} - Inferred from Sequence Orthology: Ortholog-based transfer
+\item \strong{ISA} - Inferred from Sequence Alignment: Alignment-based transfer
+\item \strong{ISM} - Inferred from Sequence Model: Domain/motif-based prediction
+\item \strong{IGC} - Inferred from Genomic Context: Synteny or gene neighborhood
+\item \strong{IBA} - Inferred from Biological Aspect of Ancestor: Phylogenetic inference
+\item \strong{IBD} - Inferred from Biological Aspect of Descendant: Phylogenetic inference
+\item \strong{IKR} - Inferred from Key Residues: Critical amino acid analysis
+\item \strong{IRD} - Inferred from Rapid Divergence: Evolutionary rate analysis
+\item \strong{RCA} - Inferred from Reviewed Computational Analysis: Manual review of computational prediction
+}
+
+\strong{Evidence Quality Hierarchy:}
+\enumerate{
+\item \strong{Experimental Evidence} (Highest confidence): EXP, IDA, IPI, IMP, IGI, IEP
+\item \strong{Curated Evidence} (High confidence): TAS, IC
+\item \strong{Computational Evidence} (Medium confidence): ISS, ISO, ISA, ISM, IGC, IBA, IBD, IKR, IRD, RCA
+\item \strong{Electronic Evidence} (Lower confidence): IEA
+}
+
+\strong{Compound Evidence Codes:}
+
+UniProt often provides compound evidence codes (e.g., "IEA:UniProtKB-SubCell", "IMP:ZFIN")
+that include the primary evidence code followed by additional source information. This
+function automatically extracts the primary evidence code for filtering.
+
+\strong{Recommendations for Non-Model Organisms:}
+
+For non-model organisms like teleost fish, computational annotations are often the
+primary source of functional information:
+
+\itemize{
+\item \strong{Conservative (High confidence only):}
+\code{evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC")}
+Use when you need high-confidence annotations only. May result in fewer GO terms.
+
+\item \strong{Balanced (Recommended for most analyses):}
+\code{evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC", "IEA", "ISS")}
+Includes computational predictions and homology transfers. Good balance of coverage and quality.
+
+\item \strong{Comprehensive (Maximum coverage):}
+\code{evidence_keep = NULL}
+Accepts all evidence types. Use when functional coverage is more important than evidence quality.
+
+\item \strong{Custom filtering:}
+You can specify any combination of evidence codes based on your specific requirements.
+}
+
+\strong{Performance Notes:}
+
+The function uses local caching to minimize API calls. First run will be slower as it
+retrieves and caches UniProt data. Subsequent runs will be much faster using cached data.
+}
+\examples{
+\dontrun{
+# Connect to database and get BLAST results
+con <- connect_funseq_db("analysis.db")
+blast_results <- perform_blast_db(con, vcf_file_id, db_path, db_name, "blastx")
+
+# Conservative annotation (high-confidence evidence only)
+annotation_results <- annotate_blast_results(con, blast_results$blast_param_id,
+  evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC"))
+
+# Balanced annotation (recommended for non-model organisms)
+annotation_results <- annotate_blast_results(con, blast_results$blast_param_id,
+  evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC", "IEA", "ISS"))
+
+# Comprehensive annotation (all evidence types)
+annotation_results <- annotate_blast_results(con, blast_results$blast_param_id,
+  evidence_keep = NULL)
+
+# Debug specific problematic accessions
+annotation_results <- annotate_blast_results(con, blast_results$blast_param_id,
+  debug_accessions = c("P12345", "Q67890"),
+  verbose = TRUE)
+
+# Check results
+str(annotation_results)
+print(paste("GO terms extracted:", annotation_results$go_terms))
+}
+
 }
