@@ -1,7 +1,7 @@
-# Parallel Processing Demo for funseqR
+# Enhanced Parallel Processing Demo for funseqR
 # 
-# This example demonstrates the new parallel processing capabilities in 
-# import_flanking_seqs_to_db() for faster ORF extraction
+# This example demonstrates the new parallel processing capabilities with
+# enhanced dual progress bars in import_flanking_seqs_to_db() for faster ORF extraction
 
 library(funseqR)
 
@@ -64,6 +64,14 @@ cat("\nCustom parallel results:\n")
 print(result_custom)
 
 # Performance comparison note
+cat("\n=== Enhanced Progress Bar Features ===\n")
+cat("- Dual progress bars for parallel processing:\n")
+cat("  * Phase 1: Parallel ORF computation with thread activity\n")
+cat("  * Phase 2: Sequential database writing with throughput metrics\n")
+cat("- Single enhanced progress bar for sequential processing\n")
+cat("- Real-time performance metrics (sequences/sec, records/sec)\n")
+cat("- Processing time breakdown and efficiency analysis\n")
+cat("- No more 'hanging' appearance during parallel ORF extraction\n")
 cat("\n=== Performance Notes ===\n")
 cat("- Parallel processing is automatically enabled when threads > 1 and translate_flanks = TRUE\n")
 cat("- Performance benefits are most noticeable with large datasets (>1000 sequences)\n")

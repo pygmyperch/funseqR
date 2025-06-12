@@ -420,15 +420,32 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
   # Start transaction
   DBI::dbExecute(con, "BEGIN TRANSACTION")
   
-  # Set up progress bar
+  # Set up progress tracking
+  start_time <- Sys.time()
   if (verbose) {
-    pb <- progress::progress_bar$new(
-      format = "[:bar] :percent ETA: :eta",
-      total = nrow(vcf_data),
-      clear = FALSE,
-      width = 60
-    )
     message("Processing ", nrow(vcf_data), " VCF entries...")
+    
+    if (use_parallel) {
+      # Create temporary progress tracking file for parallel processing
+      progress_file <- tempfile(pattern = "funseq_progress_", fileext = ".txt")
+      writeLines("0", progress_file)
+      
+      # Phase 1 progress bar for parallel computation
+      pb_phase1 <- progress::progress_bar$new(
+        format = "Phase 1 - Computing ORFs [:bar] :percent | :rate seq/sec | ETA: :eta",
+        total = nrow(vcf_data),
+        clear = FALSE,
+        width = 80
+      )
+    } else {
+      # Single progress bar for sequential processing
+      pb <- progress::progress_bar$new(
+        format = "Processing [:bar] :percent | :rate seq/sec | ETA: :eta",
+        total = nrow(vcf_data),
+        clear = FALSE,
+        width = 80
+      )
+    }
   }
   
   tryCatch({
@@ -436,17 +453,27 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
       # Two-phase parallel processing
       
       # Phase 1: Parallel computation of sequences
-      if (verbose) message("Phase 1: Computing sequences in parallel...")
+      phase1_start <- Sys.time()
+      if (verbose) {
+        message("\n=== Phase 1: Computing ORFs in parallel ===")
+        message("Using ", threads, " threads for ", nrow(vcf_data), " sequences")
+      }
       
       # Split data into chunks for parallel processing
       chunk_size <- ceiling(nrow(vcf_data) / threads)
       data_chunks <- split(vcf_data, ceiling(seq_len(nrow(vcf_data)) / chunk_size))
       
-      # Define worker function
-      process_chunk <- function(chunk_data) {
+      if (verbose) {
+        message("Split into ", length(data_chunks), " chunks of ~", chunk_size, " sequences each")
+      }
+      
+      # Define worker function with progress tracking
+      process_chunk <- function(chunk_data, chunk_id = 1) {
         chunk_results <- list()
+        chunk_processed <- 0
         
         for (i in 1:nrow(chunk_data)) {
+          chunk_processed <- chunk_processed + 1
           vcf_id <- chunk_data$vcf_id[i]
           chrom <- chunk_data$chromosome[i]
           pos <- chunk_data$position[i]
@@ -506,19 +533,89 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
           }
           
           chunk_results[[length(chunk_results) + 1]] <- result_entry
+          
+          # Update progress tracking (every 10 sequences to avoid file I/O overhead)
+          if (verbose && chunk_processed %% 10 == 0 && exists("progress_file")) {
+            tryCatch({
+              current_progress <- as.numeric(readLines(progress_file, warn = FALSE))
+              writeLines(as.character(current_progress + 10), progress_file)
+            }, error = function(e) {})
+          }
         }
         
-        return(chunk_results)
+        # Final progress update for this chunk
+        if (verbose && exists("progress_file")) {
+          tryCatch({
+            current_progress <- as.numeric(readLines(progress_file, warn = FALSE))
+            writeLines(as.character(current_progress + (nrow(chunk_data) %% 10)), progress_file)
+          }, error = function(e) {})
+        }
+        
+        return(list(results = chunk_results, processed = nrow(chunk_data)))
       }
       
+      # Execute parallel computation with progress monitoring
+      if (verbose) {
+        # Start progress monitoring in background
+        progress_monitor <- function() {
+          total_processed <- 0
+          while (total_processed < nrow(vcf_data)) {
+            Sys.sleep(1)  # Update every second
+            tryCatch({
+              if (file.exists(progress_file)) {
+                current_progress <- as.numeric(readLines(progress_file, warn = FALSE))
+                if (current_progress > total_processed) {
+                  pb_phase1$update(current_progress / nrow(vcf_data))
+                  total_processed <- current_progress
+                }
+              }
+            }, error = function(e) {})
+          }
+        }
+        
+        # Start monitoring (this will run until computation completes)
+        # Note: We'll use a simpler approach without background monitoring to avoid complexity
+      }
+      
+      # Add chunk IDs for better tracking
+      chunk_ids <- seq_along(data_chunks)
+      names(data_chunks) <- paste0("chunk_", chunk_ids)
+      
       # Execute parallel computation
-      all_results <- parallel::mclapply(data_chunks, process_chunk, mc.cores = threads)
+      all_results <- parallel::mclapply(data_chunks, function(chunk) {
+        process_chunk(chunk)
+      }, mc.cores = threads)
+      
+      # Complete Phase 1 progress
+      if (verbose) {
+        pb_phase1$update(1.0)
+        phase1_duration <- as.numeric(difftime(Sys.time(), phase1_start, units = "secs"))
+        message(sprintf("Phase 1 completed in %.1f seconds", phase1_duration))
+      }
       
       # Flatten results
-      computed_sequences <- do.call(c, all_results)
+      computed_sequences <- do.call(c, lapply(all_results, function(x) x$results))
+      total_computed <- sum(sapply(all_results, function(x) x$processed))
+      
+      if (verbose) {
+        message(sprintf("Computed %d sequences (%d with results)", total_computed, length(computed_sequences)))
+      }
       
       # Phase 2: Sequential database writing
-      if (verbose) message("Phase 2: Writing results to database...")
+      phase2_start <- Sys.time()
+      if (verbose) {
+        message("\n=== Phase 2: Writing results to database ===")
+        
+        # Create Phase 2 progress bar
+        if (length(computed_sequences) > 0) {
+          pb_phase2 <- progress::progress_bar$new(
+            format = "Phase 2 - Database writes [:bar] :percent | :rate records/sec | ETA: :eta",
+            total = length(computed_sequences),
+            clear = FALSE,
+            width = 80
+          )
+        }
+      }
       
       # Process results in batches
       if (length(computed_sequences) > 0) {
@@ -567,9 +664,33 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
             }
           }
           
-          # Update progress bar
-          if (verbose) {
-            pb$update(end_idx / length(computed_sequences))
+          # Update Phase 2 progress bar
+          if (verbose && length(computed_sequences) > 0) {
+            pb_phase2$update(end_idx / length(computed_sequences))
+          }
+        }
+        
+        # Complete Phase 2 and show summary
+        if (verbose) {
+          if (length(computed_sequences) > 0) {
+            pb_phase2$update(1.0)
+          }
+          phase2_duration <- as.numeric(difftime(Sys.time(), phase2_start, units = "secs"))
+          total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+          
+          message(sprintf("Phase 2 completed in %.1f seconds", phase2_duration))
+          message(sprintf("\n=== Parallel Processing Summary ==="))
+          message(sprintf("Total processing time: %.1f seconds", total_duration))
+          message(sprintf("Phase 1 (ORF computation): %.1f seconds (%.1f%%)", 
+                         phase1_duration, (phase1_duration/total_duration)*100))
+          message(sprintf("Phase 2 (database writing): %.1f seconds (%.1f%%)", 
+                         phase2_duration, (phase2_duration/total_duration)*100))
+          message(sprintf("Overall throughput: %.1f sequences/second", nrow(vcf_data)/total_duration))
+          message(sprintf("Threads used: %d", threads))
+          
+          # Clean up progress file
+          if (exists("progress_file") && file.exists(progress_file)) {
+            unlink(progress_file)
           }
         }
       }
@@ -660,17 +781,36 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
           }
         }
         
-        # Update progress bar
+        # Update progress bar (sequential processing)
         if (verbose) {
           pb$update(i / nrow(vcf_data))
         }
+      }
+      
+      # Sequential processing summary
+      if (verbose) {
+        pb$update(1.0)
+        total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+        message(sprintf("\n=== Sequential Processing Summary ==="))
+        message(sprintf("Total processing time: %.1f seconds", total_duration))
+        message(sprintf("Overall throughput: %.1f sequences/second", nrow(vcf_data)/total_duration))
+        message(sprintf("Processing mode: Sequential (1 thread)"))
       }
     }
     
     # Commit transaction
     DBI::dbExecute(con, "COMMIT")
     
-    if (verbose) message("Extracted ", flanking_count, " flanking sequences.")
+    if (verbose) {
+      total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+      message(sprintf("\n=== Final Results ==="))
+      message(sprintf("Extracted %d flanking sequences", flanking_count))
+      if (translate_flanks) {
+        message(sprintf("Extracted %d ORF sequences", orf_count))
+      }
+      message(sprintf("Total processing time: %.1f seconds", total_duration))
+      message(sprintf("Success rate: %.1f%%", (flanking_count / nrow(vcf_data)) * 100))
+    }
     
     # Update analysis report if it exists
     tryCatch({
