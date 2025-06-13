@@ -208,6 +208,21 @@ create_go_treemap <- function(enrichment_results, min_fold_enrichment = 2, title
 #' Creates a formatted summary table of the most significant GO enrichment results,
 #' suitable for inclusion in reports or manuscripts.
 #'
+#' @examples
+#' \dontrun{
+#' # Run GO enrichment workflow
+#' enrich_res <- run_go_enrichment_workflow(con, candidate_vcf_file, 
+#'                                          ontologies = c("BP", "MF", "CC"))
+#' 
+#' # Create table for specific ontology
+#' bp_table <- create_go_summary_table(enrich_res$enrichment_results$BP)
+#' mf_table <- create_go_summary_table(enrich_res$enrichment_results$MF)
+#' 
+#' # Combine all results into one table
+#' all_results <- do.call(rbind, enrich_res$enrichment_results)
+#' combined_table <- create_go_summary_table(all_results, max_terms = 20)
+#' }
+#'
 #' @export
 create_go_summary_table <- function(enrichment_results, max_terms = 15, 
                                    significance_filter = c("significant", "highly_significant")) {
