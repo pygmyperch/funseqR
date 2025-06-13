@@ -4,14 +4,12 @@
 \alias{count_blast_results}
 \title{Count BLAST results in the database}
 \usage{
-count_blast_results(con, blast_param_id = NULL, project_id = NULL)
+count_blast_results(con, blast_param_id = NULL)
 }
 \arguments{
 \item{con}{A database connection object.}
 
 \item{blast_param_id}{Optional. The ID of the BLAST parameters. Default is NULL.}
-
-\item{project_id}{Optional. The ID of the project. Default is NULL.}
 }
 \value{
 The number of BLAST results.
