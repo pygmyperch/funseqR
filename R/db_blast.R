@@ -677,28 +677,18 @@ get_blast_results <- function(con, blast_param_id, e_value_threshold = NULL,
 #'
 #' @param con A database connection object.
 #' @param blast_param_id Optional. The ID of the BLAST parameters. Default is NULL.
-#' @param project_id Optional. The ID of the project. Default is NULL.
 #'
 #' @return The number of BLAST results.
 #'
 #' @importFrom DBI dbGetQuery
 #' @export
-count_blast_results <- function(con, blast_param_id = NULL, project_id = NULL) {
+count_blast_results <- function(con, blast_param_id = NULL) {
   if (!is.null(blast_param_id)) {
     # Count results for specific BLAST parameters
     DBI::dbGetQuery(
       con,
       "SELECT COUNT(*) AS count FROM blast_results WHERE blast_param_id = ?",
       params = list(blast_param_id)
-    )$count
-  } else if (!is.null(project_id)) {
-    # Count results for a specific project
-    DBI::dbGetQuery(
-      con,
-      "SELECT COUNT(*) AS count FROM blast_results r
-       JOIN blast_parameters p ON r.blast_param_id = p.blast_param_id
-       WHERE p.project_id = ?",
-      params = list(project_id)
     )$count
   } else {
     # Count all results

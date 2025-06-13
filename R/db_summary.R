@@ -31,7 +31,7 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
   table_counts <- list()
 
   # Core tables with counts
-  core_tables <- c("projects", "input_files", "vcf_data", "reference_genomes",
+  core_tables <- c("input_files", "vcf_data", "reference_genomes",
                    "reference_sequences", "flanking_sequences", "blast_parameters",
                    "blast_results", "annotations", "go_terms", "kegg_references",
                    "uniprot_cache", "blast_database_metadata")
@@ -72,44 +72,33 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
     })
   }
 
-  # Get project-level summary
-  project_summary <- list()
-  if (table_counts$projects > 0) {
-    if (verbose) cat("\n=== Project Summary ===\n")
-
-    tryCatch({
-      project_query <- "
-        SELECT p.project_id, p.project_name, p.creation_date,
-               COUNT(DISTINCT f.file_id) as input_files,
-               COUNT(DISTINCT v.vcf_id) as vcf_entries,
-               COUNT(DISTINCT bp.blast_param_id) as blast_runs,
-               COUNT(DISTINCT a.annotation_id) as annotations
-        FROM projects p
-        LEFT JOIN input_files f ON p.project_id = f.project_id
-        LEFT JOIN vcf_data v ON f.file_id = v.file_id
-        LEFT JOIN blast_parameters bp ON p.project_id = bp.project_id
-        LEFT JOIN blast_results br ON bp.blast_param_id = br.blast_param_id
-        LEFT JOIN annotations a ON br.blast_result_id = a.blast_result_id
-        GROUP BY p.project_id, p.project_name, p.creation_date
-        ORDER BY p.project_id
-      "
-
-      project_summary <- DBI::dbGetQuery(con, project_query)
-
-      if (verbose && nrow(project_summary) > 0) {
-        for (i in 1:nrow(project_summary)) {
-          proj <- project_summary[i, ]
-          cat(sprintf("Project %d: %s\n", proj$project_id, proj$project_name))
-          cat(sprintf("  Created: %s\n", proj$creation_date))
-          cat(sprintf("  Input files: %d, VCF entries: %d\n", proj$input_files, proj$vcf_entries))
-          cat(sprintf("  BLAST runs: %d, Annotations: %d\n", proj$blast_runs, proj$annotations))
-        }
-      }
-
-    }, error = function(e) {
-      if (verbose) cat("Could not generate project summary\n")
-    })
-  }
+  # Get database-level summary (single project per database)
+  database_overview <- list()
+  if (verbose) cat("\n=== Database Overview ===\n")
+  
+  tryCatch({
+    # Get file counts and analysis summary
+    input_files_count <- table_counts[["input_files"]] %||% 0
+    vcf_entries_count <- table_counts[["vcf_data"]] %||% 0
+    blast_runs_count <- table_counts[["blast_parameters"]] %||% 0
+    annotations_count <- table_counts[["annotations"]] %||% 0
+    
+    database_overview <- list(
+      input_files = input_files_count,
+      vcf_entries = vcf_entries_count,
+      blast_runs = blast_runs_count,
+      annotations = annotations_count
+    )
+    
+    if (verbose) {
+      cat(sprintf("Input files: %d\n", input_files_count))
+      cat(sprintf("VCF entries: %d\n", vcf_entries_count))
+      cat(sprintf("BLAST runs: %d\n", blast_runs_count))
+      cat(sprintf("Annotations: %d\n", annotations_count))
+    }
+  }, error = function(e) {
+    if (verbose) cat("Could not generate database overview\n")
+  })
 
   # Detailed analysis if requested
   detailed_info <- list()
@@ -292,7 +281,7 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
     if (verbose) cat("\n=== Sample Data ===\n")
 
     # Sample from each major table
-    sample_tables <- c("projects", "vcf_data", "annotations", "go_terms")
+    sample_tables <- c("input_files", "vcf_data", "annotations", "go_terms")
 
     for (table in sample_tables) {
       if (table %in% all_tables && table_counts[[table]] > 0) {
@@ -318,204 +307,13 @@ get_database_summary <- function(con, detail_level = "detailed", include_samples
       metadata = metadata
     ),
     table_counts = table_counts,
-    project_summary = project_summary,
+    database_overview = database_overview,
     detailed_info = detailed_info,
     sample_data = sample_data,
     summary_date = Sys.time()
   )
 }
 
-#' Get project-specific summary
-#'
-#' @param con A database connection object
-#' @param project_id Integer. Specific project ID to analyze
-#' @param use_consolidated_chrom Logical. If TRUE, group minor scaffolds as "US" in chromosome distribution. Default is TRUE
-#' @param verbose Logical. Print detailed output. Default is TRUE
-#'
-#' @return A list containing project-specific information
-#' @export
-get_project_summary <- function(con, project_id, use_consolidated_chrom = TRUE, verbose = TRUE) {
-  if (!DBI::dbIsValid(con)) {
-    stop("Invalid database connection")
-  }
-
-  # Helper function for null coalescing
-  `%||%` <- function(x, y) if (is.null(x) || is.na(x)) y else x
-
-  # Check if project exists
-  project_check <- DBI::dbGetQuery(con,
-                                   "SELECT * FROM projects WHERE project_id = ?",
-                                   params = list(project_id))
-
-  if (nrow(project_check) == 0) {
-    stop("Project with ID ", project_id, " not found")
-  }
-
-  project_info <- project_check[1, ]
-
-  if (verbose) {
-    cat("=== Project Summary ===\n")
-    cat("Project ID:", project_info$project_id, "\n")
-    cat("Name:", project_info$project_name, "\n")
-    cat("Description:", ifelse(is.na(project_info$description), "None", project_info$description), "\n")
-    cat("Created:", project_info$creation_date, "\n")
-    cat("Last modified:", project_info$last_modified, "\n\n")
-  }
-
-  # Get input files
-  files_query <- "SELECT * FROM input_files WHERE project_id = ? ORDER BY file_id"
-  input_files <- DBI::dbGetQuery(con, files_query, params = list(project_id))
-
-  if (verbose && nrow(input_files) > 0) {
-    cat("=== Input Files ===\n")
-    for (i in 1:nrow(input_files)) {
-      file <- input_files[i, ]
-      cat(sprintf("File %d: %s (%s)\n", file$file_id, file$file_name, file$file_type))
-      cat(sprintf("  Path: %s\n", file$file_path))
-      cat(sprintf("  Import date: %s\n", file$import_date))
-    }
-    cat("\n")
-  }
-
-  # Get VCF data summary
-  vcf_summary <- NULL
-  if (nrow(input_files) > 0) {
-    file_ids <- paste(input_files$file_id, collapse = ",")
-    vcf_query <- paste0("
-      SELECT f.file_name, COUNT(v.vcf_id) as variant_count,
-             COUNT(DISTINCT v.chromosome) as chromosome_count
-      FROM input_files f
-      LEFT JOIN vcf_data v ON f.file_id = v.file_id
-      WHERE f.project_id = ", project_id, "
-      GROUP BY f.file_id, f.file_name
-    ")
-    vcf_summary <- DBI::dbGetQuery(con, vcf_query)
-
-    if (verbose && nrow(vcf_summary) > 0) {
-      cat("=== VCF Data Summary ===\n")
-      total_variants <- sum(vcf_summary$variant_count)
-      for (i in 1:nrow(vcf_summary)) {
-        vs <- vcf_summary[i, ]
-        cat(sprintf("%s: %d variants across %d chromosomes\n",
-                    vs$file_name, vs$variant_count, vs$chromosome_count))
-      }
-      cat(sprintf("Total variants: %d\n\n", total_variants))
-    }
-  }
-
-  # Get BLAST summary (ENHANCED)
-  blast_query <- "
-    SELECT bp.blast_param_id, bp.blast_type, bp.db_name, bp.execution_date,
-           COUNT(br.blast_result_id) as result_count,
-           COUNT(DISTINCT a.annotation_id) as annotation_count,
-           bm.db_title, bm.num_sequences, bm.total_length, bm.db_date, bm.db_version
-    FROM blast_parameters bp
-    LEFT JOIN blast_results br ON bp.blast_param_id = br.blast_param_id
-    LEFT JOIN annotations a ON br.blast_result_id = a.blast_result_id
-    LEFT JOIN blast_database_metadata bm ON bp.blast_param_id = bm.blast_param_id
-    WHERE bp.project_id = ?
-    GROUP BY bp.blast_param_id
-    ORDER BY bp.execution_date DESC
-  "
-  blast_summary <- DBI::dbGetQuery(con, blast_query, params = list(project_id))
-
-  if (verbose && nrow(blast_summary) > 0) {
-    cat("=== BLAST Analysis Summary ===\n")
-    for (i in 1:nrow(blast_summary)) {
-      bs <- blast_summary[i, ]
-      cat(sprintf("BLAST Run %d (%s):\n", bs$blast_param_id, bs$execution_date))
-      cat(sprintf("  Database: %s, Type: %s\n", bs$db_name, bs$blast_type))
-
-      # Show database metadata if available
-      if (!is.na(bs$db_title) && !is.null(bs$db_title)) {
-        cat(sprintf("  DB Title: %s\n", bs$db_title))
-        cat(sprintf("  DB Sequences: %s\n",
-                    format(bs$num_sequences %||% 0, big.mark = ",")))
-        cat(sprintf("  DB Length: %s bp\n",
-                    format(bs$total_length %||% 0, big.mark = ",")))
-        cat(sprintf("  DB Date: %s\n", bs$db_date %||% "Unknown"))
-        if (!is.na(bs$db_version) && !is.null(bs$db_version)) {
-          cat(sprintf("  DB Version: %s\n", bs$db_version))
-        }
-      }
-
-      cat(sprintf("  Results: %d, Annotations: %d\n", bs$result_count, bs$annotation_count))
-    }
-    cat("\n")
-  }
-
-  # Get annotation summary
-  annotation_summary <- data.frame()
-  if (nrow(blast_summary) > 0) {
-    annotation_query <- paste0("
-      SELECT COUNT(DISTINCT a.annotation_id) as total_annotations,
-             COUNT(DISTINCT g.go_term_id) as go_terms,
-             COUNT(DISTINCT k.kegg_ref_id) as kegg_refs,
-             COUNT(DISTINCT a.uniprot_accession) as unique_proteins
-      FROM annotations a
-      JOIN blast_results br ON a.blast_result_id = br.blast_result_id
-      JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
-      LEFT JOIN go_terms g ON a.annotation_id = g.annotation_id
-      LEFT JOIN kegg_references k ON a.annotation_id = k.annotation_id
-      WHERE bp.project_id = ", project_id
-    )
-
-    annotation_summary <- DBI::dbGetQuery(con, annotation_query)
-
-    if (verbose && nrow(annotation_summary) > 0) {
-      cat("=== Annotation Summary ===\n")
-      as <- annotation_summary[1, ]
-      cat(sprintf("Total annotations: %d\n", as$total_annotations))
-      cat(sprintf("Unique proteins: %d\n", as$unique_proteins))
-      cat(sprintf("GO terms: %d\n", as$go_terms))
-      cat(sprintf("KEGG references: %d\n", as$kegg_refs))
-    }
-  }
-
-  # Get reference genome summary
-  genome_summary <- data.frame()
-  tryCatch({
-    genome_query <- "
-      SELECT rg.genome_id, rg.genome_name, rg.genome_build,
-             COUNT(DISTINCT rs.sequence_id) as sequence_count,
-             if.import_date
-      FROM reference_genomes rg
-      JOIN input_files if ON rg.file_id = if.file_id
-      LEFT JOIN reference_sequences rs ON rg.genome_id = rs.genome_id
-      WHERE if.project_id = ?
-      GROUP BY rg.genome_id, rg.genome_name, rg.genome_build, if.import_date
-      ORDER BY if.import_date DESC
-    "
-    
-    genome_summary <- DBI::dbGetQuery(con, genome_query, params = list(project_id))
-    
-    if (verbose && nrow(genome_summary) > 0) {
-      cat("\n=== Reference Genomes ===\n")
-      for (i in 1:nrow(genome_summary)) {
-        gs <- genome_summary[i, ]
-        cat(sprintf("Genome %d: %s\n", gs$genome_id, gs$genome_name))
-        if (!is.na(gs$genome_build) && !is.null(gs$genome_build)) {
-          cat(sprintf("  Build: %s\n", gs$genome_build))
-        }
-        cat(sprintf("  Sequences: %d\n", gs$sequence_count))
-        cat(sprintf("  Import date: %s\n", gs$import_date))
-      }
-    }
-  }, error = function(e) {
-    if (verbose) cat("Could not retrieve reference genome information\n")
-  })
-
-  # Return comprehensive project summary
-  list(
-    project_info = project_info,
-    input_files = input_files,
-    vcf_summary = vcf_summary,
-    blast_summary = blast_summary,
-    annotation_summary = annotation_summary,
-    genome_summary = genome_summary,
-    analysis_date = Sys.time()
-  )
-}
 
 #' Get detailed information about a specific table
 #'
@@ -698,9 +496,9 @@ get_blast_database_info <- function(con, db_name = NULL, verbose = TRUE) {
     return(list())
   }
 
-  # Build query
+  # Build query (simplified for single-project design)
   base_query <- "
-    SELECT bm.*, bp.project_id, p.project_name,
+    SELECT bm.*,
            COUNT(DISTINCT bp.blast_param_id) as usage_count,
            COUNT(DISTINCT br.blast_result_id) as total_results,
            COUNT(DISTINCT a.annotation_id) as total_annotations,
@@ -708,7 +506,6 @@ get_blast_database_info <- function(con, db_name = NULL, verbose = TRUE) {
            MAX(bp.execution_date) as last_used
     FROM blast_database_metadata bm
     JOIN blast_parameters bp ON bm.blast_param_id = bp.blast_param_id
-    JOIN projects p ON bp.project_id = p.project_id
     LEFT JOIN blast_results br ON bp.blast_param_id = br.blast_param_id
     LEFT JOIN annotations a ON br.blast_result_id = a.blast_result_id
   "

@@ -657,13 +657,12 @@ get_annotations <- function(con, blast_param_id, include_go = TRUE, include_kegg
 #'
 #' @param con A database connection object.
 #' @param blast_param_id Optional. The ID of the BLAST parameters. Default is NULL.
-#' @param project_id Optional. The ID of the project. Default is NULL.
 #'
 #' @return A list containing counts of annotations, GO terms, and KEGG references.
 #'
 #' @importFrom DBI dbGetQuery
 #' @export
-count_annotations <- function(con, blast_param_id = NULL, project_id = NULL) {
+count_annotations <- function(con, blast_param_id = NULL) {
   if (!is.null(blast_param_id)) {
     # Count annotations for specific BLAST parameters
     anno_count <- DBI::dbGetQuery(
@@ -690,36 +689,6 @@ count_annotations <- function(con, blast_param_id = NULL, project_id = NULL) {
        JOIN blast_results br ON a.blast_result_id = br.blast_result_id
        WHERE br.blast_param_id = ?",
       params = list(blast_param_id)
-    )$count
-  } else if (!is.null(project_id)) {
-    # Count annotations for a specific project
-    anno_count <- DBI::dbGetQuery(
-      con,
-      "SELECT COUNT(*) AS count FROM annotations a
-       JOIN blast_results br ON a.blast_result_id = br.blast_result_id
-       JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
-       WHERE bp.project_id = ?",
-      params = list(project_id)
-    )$count
-
-    go_count <- DBI::dbGetQuery(
-      con,
-      "SELECT COUNT(*) AS count FROM go_terms g
-       JOIN annotations a ON g.annotation_id = a.annotation_id
-       JOIN blast_results br ON a.blast_result_id = br.blast_result_id
-       JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
-       WHERE bp.project_id = ?",
-      params = list(project_id)
-    )$count
-
-    kegg_count <- DBI::dbGetQuery(
-      con,
-      "SELECT COUNT(*) AS count FROM kegg_references k
-       JOIN annotations a ON k.annotation_id = a.annotation_id
-       JOIN blast_results br ON a.blast_result_id = br.blast_result_id
-       JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
-       WHERE bp.project_id = ?",
-      params = list(project_id)
     )$count
   } else {
     # Count all annotations

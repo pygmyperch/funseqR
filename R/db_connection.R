@@ -91,7 +91,7 @@ connect_funseq_db <- function(db_path, verbose = TRUE) {
 
   # Check if it's a valid funseqR database
   tables <- DBI::dbListTables(con)
-  required_tables <- c("metadata", "projects", "input_files")
+  required_tables <- c("metadata", "input_files")
 
   if (!all(required_tables %in% tables)) {
     DBI::dbDisconnect(con)
@@ -106,10 +106,6 @@ connect_funseq_db <- function(db_path, verbose = TRUE) {
 
     message("Connected to funseqR database (version: ", version, ")")
     message("Creation date: ", creation_date)
-
-    # Get project count
-    project_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) FROM projects")[[1]]
-    message("Projects in database: ", project_count)
   }
 
   return(con)
