@@ -588,7 +588,11 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
       
       # Complete Phase 1 progress
       if (verbose) {
-        pb_phase1$update(1.0)
+        tryCatch({
+          pb_phase1$update(1.0)
+        }, error = function(e) {
+          # Progress bar might already be finished or corrupted, ignore
+        })
         phase1_duration <- as.numeric(difftime(Sys.time(), phase1_start, units = "secs"))
         message(sprintf("Phase 1 completed in %.1f seconds", phase1_duration))
       }
@@ -666,14 +670,22 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
           
           # Update Phase 2 progress bar
           if (verbose && length(computed_sequences) > 0) {
-            pb_phase2$update(end_idx / length(computed_sequences))
+            tryCatch({
+              pb_phase2$update(end_idx / length(computed_sequences))
+            }, error = function(e) {
+              # Progress bar might be corrupted, ignore update
+            })
           }
         }
         
         # Complete Phase 2 and show summary
         if (verbose) {
           if (length(computed_sequences) > 0) {
-            pb_phase2$update(1.0)
+            tryCatch({
+              pb_phase2$update(1.0)
+            }, error = function(e) {
+              # Progress bar might be corrupted, ignore final update
+            })
           }
           phase2_duration <- as.numeric(difftime(Sys.time(), phase2_start, units = "secs"))
           total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
@@ -717,7 +729,11 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
         # Skip if we don't need to create anything
         if (!need_raw && !need_orf) {
           if (verbose) {
-            pb$update(i / nrow(vcf_data))
+            tryCatch({
+              pb$update(i / nrow(vcf_data))
+            }, error = function(e) {
+              # Progress bar might be corrupted, ignore update
+            })
           }
           next
         }
@@ -726,7 +742,11 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
         if (!chrom %in% names(ref_seq_map)) {
           if (verbose) message("Chromosome ", chrom, " not found in reference genome. Skipping.")
           if (verbose) {
-            pb$update(i / nrow(vcf_data))
+            tryCatch({
+              pb$update(i / nrow(vcf_data))
+            }, error = function(e) {
+              # Progress bar might be corrupted, ignore update
+            })
           }
           next
         }
@@ -783,13 +803,21 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
         
         # Update progress bar (sequential processing)
         if (verbose) {
-          pb$update(i / nrow(vcf_data))
+          tryCatch({
+            pb$update(i / nrow(vcf_data))
+          }, error = function(e) {
+            # Progress bar might be corrupted, ignore update
+          })
         }
       }
       
       # Sequential processing summary
       if (verbose) {
-        pb$update(1.0)
+        tryCatch({
+          pb$update(1.0)
+        }, error = function(e) {
+          # Progress bar might be corrupted, ignore final update
+        })
         total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
         message(sprintf("\n=== Sequential Processing Summary ==="))
         message(sprintf("Total processing time: %.1f seconds", total_duration))
