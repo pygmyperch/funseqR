@@ -8,6 +8,10 @@
 #' @param con Database connection object
 #' @param candidate_vcf_file Character. Path to candidate VCF file
 #' @param background_file_id Integer. File ID of background dataset (or NULL to auto-detect)
+#' @param candidate_blast_param_id Integer. Optional. Specific BLAST run ID for candidate annotations.
+#'   If NULL, uses all available annotations. Default is NULL.
+#' @param background_blast_param_id Integer. Optional. Specific BLAST run ID for background annotations.
+#'   If NULL, uses all available annotations. Default is NULL.
 #' @param ontologies Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF")
 #' @param min_genes Integer. Minimum genes for GO term testing. Default is 5
 #' @param max_genes Integer. Maximum genes for GO term testing. Default is 500
@@ -21,25 +25,58 @@
 #' This function performs a complete GO enrichment workflow:
 #' 1. Import candidate loci file
 #' 2. Link to existing annotations
-#' 3. Extract GO terms for both datasets
+#' 3. Extract GO terms for both datasets (optionally filtered by BLAST run)
 #' 4. Perform enrichment testing for specified ontologies
 #' 5. Create visualizations
 #' 6. Store results in database (optional)
+#' 
+#' The blast_param_id parameters allow you to compare different annotation strategies
+#' (e.g., ORF sequences vs raw sequences) by using only annotations from specific
+#' BLAST runs. This enables comparative functional genomics analysis.
 #'
 #' @examples
 #' \dontrun{
 #' con <- connect_funseq_db("analysis.db")
+#' 
+#' # Use all available annotations (default behavior)
 #' results <- run_go_enrichment_workflow(con, "candidates.vcf")
-#' print(results$summary)
-#' print(results$plots$BP_bubble)
+#' 
+#' # Compare ORF-based vs raw sequence annotations
+#' results_orf <- run_go_enrichment_workflow(con, "candidates.vcf", 
+#'                                           candidate_blast_param_id = 1,
+#'                                           background_blast_param_id = 1)
+#' results_raw <- run_go_enrichment_workflow(con, "candidates.vcf",
+#'                                           candidate_blast_param_id = 2, 
+#'                                           background_blast_param_id = 2)
+#' 
+#' print(results_orf$summary)
+#' print(results_orf$plots$BP_bubble)
 #' }
 #'
 #' @export
 run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_id = NULL,
+                                      candidate_blast_param_id = NULL, background_blast_param_id = NULL,
                                       ontologies = c("BP", "MF"), min_genes = 5, max_genes = 500,
                                       store_results = TRUE, create_plots = TRUE, verbose = TRUE) {
   
   if (verbose) message("=== Starting GO Enrichment Workflow ===")
+  
+  # Report BLAST run configuration
+  if (!is.null(candidate_blast_param_id) || !is.null(background_blast_param_id)) {
+    if (verbose) {
+      message("BLAST run filtering:")
+      if (!is.null(candidate_blast_param_id)) {
+        message("  - Candidate annotations: BLAST run ID ", candidate_blast_param_id)
+      } else {
+        message("  - Candidate annotations: All available")
+      }
+      if (!is.null(background_blast_param_id)) {
+        message("  - Background annotations: BLAST run ID ", background_blast_param_id)
+      } else {
+        message("  - Background annotations: All available")
+      }
+    }
+  }
   
   # Auto-detect background file if not provided
   if (is.null(background_file_id)) {
@@ -68,7 +105,10 @@ run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_
   
   # Step 2: Extract GO terms
   if (verbose) message("\n=== Step 2: Extracting GO Terms ===")
-  go_data <- extract_go_terms_for_enrichment(con, candidate_import$file_id, background_file_id, verbose = verbose)
+  go_data <- extract_go_terms_for_enrichment(con, candidate_import$file_id, background_file_id, 
+                                           foreground_blast_param_id = candidate_blast_param_id,
+                                           background_blast_param_id = background_blast_param_id,
+                                           verbose = verbose)
   
   if (length(go_data$foreground$genes) == 0) {
     warning("No GO terms found for candidate genes. Cannot perform enrichment analysis.")

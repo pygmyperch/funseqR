@@ -9,6 +9,7 @@ export_enriched_loci(
   enrichment_results,
   candidate_file_id,
   output_file,
+  blast_param_id = NULL,
   format = "table",
   significance_threshold = 0.05,
   include_annotations = TRUE
@@ -22,6 +23,9 @@ export_enriched_loci(
 \item{candidate_file_id}{Integer. File ID of the candidate dataset}
 
 \item{output_file}{Character. Output file path (extension determines format)}
+
+\item{blast_param_id}{Integer. Optional. Specific BLAST run ID to export.
+If NULL, uses all available annotations. Default is NULL.}
 
 \item{format}{Character. Output format: "vcf", "bed", or "table". Default is "table"}
 

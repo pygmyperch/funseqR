@@ -27,9 +27,10 @@
 #' @param con Database connection
 #' @param go_ids Character vector of GO term IDs
 #' @param candidate_file_id Integer. File ID of candidate dataset
+#' @param blast_param_id Integer. Optional BLAST run ID for filtering
 #' @return Data frame with genomic coordinates and functional annotations
 #' @keywords internal
-.query_go_terms_to_loci <- function(con, go_ids, candidate_file_id) {
+.query_go_terms_to_loci <- function(con, go_ids, candidate_file_id, blast_param_id = NULL) {
   if (length(go_ids) == 0) {
     return(data.frame(
       chromosome = character(0),
@@ -50,31 +51,60 @@
   # Create placeholders for SQL IN clause
   go_placeholders <- paste(rep("?", length(go_ids)), collapse = ",")
   
-  query <- paste0("
-    SELECT DISTINCT
-      v.chromosome,
-      v.position,
-      v.ref,
-      v.alt,
-      gt.go_id,
-      gt.go_term,
-      gt.go_category,
-      a.gene_names,
-      a.uniprot_accession,
-      br.e_value as blast_evalue,
-      br.percent_identity as blast_identity
-    FROM vcf_data v
-    JOIN input_files if_cand ON v.file_id = if_cand.file_id
-    JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
-    JOIN blast_results br ON fs.flanking_id = br.flanking_id
-    JOIN annotations a ON br.blast_result_id = a.blast_result_id
-    JOIN go_terms gt ON a.annotation_id = gt.annotation_id
-    WHERE if_cand.file_id = ?
-      AND gt.go_id IN (", go_placeholders, ")
-    ORDER BY v.chromosome, v.position, gt.go_id
-  ")
+  # Build query with optional blast_param_id filtering
+  if (is.null(blast_param_id)) {
+    query <- paste0("
+      SELECT DISTINCT
+        v.chromosome,
+        v.position,
+        v.ref,
+        v.alt,
+        gt.go_id,
+        gt.go_term,
+        gt.go_category,
+        a.gene_names,
+        a.uniprot_accession,
+        br.e_value as blast_evalue,
+        br.percent_identity as blast_identity
+      FROM vcf_data v
+      JOIN input_files if_cand ON v.file_id = if_cand.file_id
+      JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+      WHERE if_cand.file_id = ?
+        AND gt.go_id IN (", go_placeholders, ")
+      ORDER BY v.chromosome, v.position, gt.go_id
+    ")
+    params <- c(candidate_file_id, go_ids)
+  } else {
+    query <- paste0("
+      SELECT DISTINCT
+        v.chromosome,
+        v.position,
+        v.ref,
+        v.alt,
+        gt.go_id,
+        gt.go_term,
+        gt.go_category,
+        a.gene_names,
+        a.uniprot_accession,
+        br.e_value as blast_evalue,
+        br.percent_identity as blast_identity
+      FROM vcf_data v
+      JOIN input_files if_cand ON v.file_id = if_cand.file_id
+      JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+      WHERE if_cand.file_id = ?
+        AND br.blast_param_id = ?
+        AND gt.go_id IN (", go_placeholders, ")
+      ORDER BY v.chromosome, v.position, gt.go_id
+    ")
+    params <- c(candidate_file_id, blast_param_id, go_ids)
+  }
   
-  params <- c(candidate_file_id, go_ids)
   result <- DBI::dbGetQuery(con, query, params = params)
   
   return(result)
@@ -154,6 +184,8 @@
 #' @param con Database connection object
 #' @param enrichment_results Data frame or list of enrichment results from GO analysis
 #' @param candidate_file_id Integer. File ID of the candidate dataset used in enrichment analysis
+#' @param blast_param_id Integer. Optional. Specific BLAST run ID to trace.
+#'   If NULL, uses all available annotations. Default is NULL.
 #' @param significance_threshold Numeric. FDR threshold for selecting significant terms. Default is 0.05
 #' @param include_blast_metrics Logical. Include BLAST quality metrics in output. Default is TRUE
 #'
@@ -204,7 +236,7 @@
 #'
 #' @export
 trace_enriched_terms_to_loci <- function(con, enrichment_results, candidate_file_id,
-                                         significance_threshold = 0.05, 
+                                         blast_param_id = NULL, significance_threshold = 0.05, 
                                          include_blast_metrics = TRUE) {
   
   # Validate inputs
@@ -242,7 +274,7 @@ trace_enriched_terms_to_loci <- function(con, enrichment_results, candidate_file
   }
   
   # Query database to trace GO terms to loci
-  loci_data <- .query_go_terms_to_loci(con, significant_go_ids, candidate_file_id)
+  loci_data <- .query_go_terms_to_loci(con, significant_go_ids, candidate_file_id, blast_param_id)
   
   if (nrow(loci_data) == 0) {
     warning("No genomic loci found for enriched GO terms")
@@ -274,6 +306,8 @@ trace_enriched_terms_to_loci <- function(con, enrichment_results, candidate_file
 #' @param enrichment_results Data frame or list of enrichment results
 #' @param candidate_file_id Integer. File ID of the candidate dataset
 #' @param output_file Character. Output file path (extension determines format)
+#' @param blast_param_id Integer. Optional. Specific BLAST run ID to export.
+#'   If NULL, uses all available annotations. Default is NULL.
 #' @param format Character. Output format: "vcf", "bed", or "table". Default is "table"
 #' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
 #' @param include_annotations Logical. Include functional annotations in output. Default is TRUE
@@ -301,12 +335,13 @@ trace_enriched_terms_to_loci <- function(con, enrichment_results, candidate_file
 #'
 #' @export
 export_enriched_loci <- function(con, enrichment_results, candidate_file_id, output_file,
-                                 format = "table", significance_threshold = 0.05,
+                                 blast_param_id = NULL, format = "table", significance_threshold = 0.05,
                                  include_annotations = TRUE) {
   
   # Trace enriched terms to loci
   loci_data <- trace_enriched_terms_to_loci(
     con, enrichment_results, candidate_file_id,
+    blast_param_id = blast_param_id,
     significance_threshold = significance_threshold,
     include_blast_metrics = include_annotations
   )
@@ -392,6 +427,8 @@ export_enriched_loci <- function(con, enrichment_results, candidate_file_id, out
 #' @param con Database connection object
 #' @param enrichment_results Data frame or list of enrichment results
 #' @param candidate_file_id Integer. File ID of the candidate dataset
+#' @param blast_param_id Integer. Optional. Specific BLAST run ID to summarize.
+#'   If NULL, uses all available annotations. Default is NULL.
 #' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
 #'
 #' @return List containing:
@@ -416,11 +453,12 @@ export_enriched_loci <- function(con, enrichment_results, candidate_file_id, out
 #'
 #' @export
 summarize_functional_loci <- function(con, enrichment_results, candidate_file_id,
-                                     significance_threshold = 0.05) {
+                                     blast_param_id = NULL, significance_threshold = 0.05) {
   
   # Trace enriched terms to loci
   loci_data <- trace_enriched_terms_to_loci(
     con, enrichment_results, candidate_file_id,
+    blast_param_id = blast_param_id,
     significance_threshold = significance_threshold,
     include_blast_metrics = TRUE
   )

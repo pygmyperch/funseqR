@@ -8,6 +8,8 @@ extract_go_terms_for_enrichment(
   con,
   foreground_file_id,
   background_file_id,
+  foreground_blast_param_id = NULL,
+  background_blast_param_id = NULL,
   verbose = TRUE
 )
 }
@@ -17,6 +19,12 @@ extract_go_terms_for_enrichment(
 \item{foreground_file_id}{Integer. File ID of candidate/foreground dataset}
 
 \item{background_file_id}{Integer. File ID of background dataset}
+
+\item{foreground_blast_param_id}{Integer. Optional. Specific BLAST run ID for foreground.
+If NULL, uses all available annotations for the foreground file. Default is NULL.}
+
+\item{background_blast_param_id}{Integer. Optional. Specific BLAST run ID for background.
+If NULL, uses all available annotations for the background file. Default is NULL.}
 
 \item{verbose}{Logical. Print progress information. Default is TRUE}
 }
@@ -29,11 +37,21 @@ Extract GO terms for foreground and background gene sets
 \details{
 Extracts GO terms associated with proteins from both foreground (candidate)
 and background datasets. Creates gene-to-GO mappings required for enrichment testing.
+
+When blast_param_id parameters are specified, only annotations from those specific
+BLAST runs are used. This allows comparison of different search strategies
+(e.g., ORF sequences vs raw sequences, or different databases).
 }
 \examples{
 \dontrun{
+# Use all available annotations
 go_data <- extract_go_terms_for_enrichment(con, foreground_file_id, background_file_id)
-str(go_data)
+
+# Use specific BLAST runs (e.g., ORF-based search)
+go_data_orf <- extract_go_terms_for_enrichment(con, foreground_file_id, background_file_id,
+                                               foreground_blast_param_id = 1,
+                                               background_blast_param_id = 1)
+str(go_data_orf)
 }
 
 }

@@ -118,6 +118,10 @@ link_candidates_to_annotations <- function(con, candidate_file_id, background_fi
 #' @param con Database connection object
 #' @param foreground_file_id Integer. File ID of candidate/foreground dataset
 #' @param background_file_id Integer. File ID of background dataset
+#' @param foreground_blast_param_id Integer. Optional. Specific BLAST run ID for foreground. 
+#'   If NULL, uses all available annotations for the foreground file. Default is NULL.
+#' @param background_blast_param_id Integer. Optional. Specific BLAST run ID for background.
+#'   If NULL, uses all available annotations for the background file. Default is NULL.
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
 #' @return List containing foreground and background GO term data
@@ -125,31 +129,135 @@ link_candidates_to_annotations <- function(con, candidate_file_id, background_fi
 #' @details
 #' Extracts GO terms associated with proteins from both foreground (candidate)
 #' and background datasets. Creates gene-to-GO mappings required for enrichment testing.
+#' 
+#' When blast_param_id parameters are specified, only annotations from those specific
+#' BLAST runs are used. This allows comparison of different search strategies
+#' (e.g., ORF sequences vs raw sequences, or different databases).
 #'
 #' @examples
 #' \dontrun{
+#' # Use all available annotations
 #' go_data <- extract_go_terms_for_enrichment(con, foreground_file_id, background_file_id)
-#' str(go_data)
+#' 
+#' # Use specific BLAST runs (e.g., ORF-based search)
+#' go_data_orf <- extract_go_terms_for_enrichment(con, foreground_file_id, background_file_id,
+#'                                                foreground_blast_param_id = 1,
+#'                                                background_blast_param_id = 1)
+#' str(go_data_orf)
 #' }
 #'
 #' @export
-extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_file_id, verbose = TRUE) {
+extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_file_id, 
+                                           foreground_blast_param_id = NULL, background_blast_param_id = NULL,
+                                           verbose = TRUE) {
 
   if (verbose) message("Extracting GO terms for enrichment analysis...")
 
   # First check if foreground file has direct annotations (complete analysis)
   # or if it's a candidate file that needs to use linkage data
-  foreground_direct_count <- DBI::dbGetQuery(con, "
-    SELECT COUNT(*) as count FROM vcf_data v
-    JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
-    JOIN blast_results br ON fs.flanking_id = br.flanking_id
-    JOIN annotations a ON br.blast_result_id = a.blast_result_id
-    WHERE v.file_id = ?
-  ", list(foreground_file_id))$count
+  if (is.null(foreground_blast_param_id)) {
+    foreground_direct_count <- DBI::dbGetQuery(con, "
+      SELECT COUNT(*) as count FROM vcf_data v
+      JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      WHERE v.file_id = ?
+    ", list(foreground_file_id))$count
+  } else {
+    foreground_direct_count <- DBI::dbGetQuery(con, "
+      SELECT COUNT(*) as count FROM vcf_data v
+      JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      WHERE v.file_id = ? AND br.blast_param_id = ?
+    ", list(foreground_file_id, foreground_blast_param_id))$count
+  }
 
   if (foreground_direct_count > 0) {
     # Standard query for datasets with their own annotations
-    go_query <- "
+    if (is.null(foreground_blast_param_id)) {
+      go_query <- "
+        SELECT DISTINCT
+          a.uniprot_accession,
+          gt.go_id,
+          gt.go_term,
+          gt.go_category,
+          gt.go_evidence
+        FROM vcf_data v
+        JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+        WHERE v.file_id = ?
+      "
+      if (verbose) message("  - Extracting foreground GO terms (all BLAST runs)...")
+      foreground_go <- DBI::dbGetQuery(con, go_query, list(foreground_file_id))
+    } else {
+      go_query <- "
+        SELECT DISTINCT
+          a.uniprot_accession,
+          gt.go_id,
+          gt.go_term,
+          gt.go_category,
+          gt.go_evidence
+        FROM vcf_data v
+        JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+        WHERE v.file_id = ? AND br.blast_param_id = ?
+      "
+      if (verbose) message("  - Extracting foreground GO terms (BLAST run ID: ", foreground_blast_param_id, ")...")
+      foreground_go <- DBI::dbGetQuery(con, go_query, list(foreground_file_id, foreground_blast_param_id))
+    }
+  } else {
+    # For candidate files, use the linked annotations
+    if (is.null(foreground_blast_param_id)) {
+      if (verbose) message("  - Extracting foreground GO terms via linkage (all BLAST runs)...")
+      foreground_go_query <- "
+        SELECT DISTINCT
+          a.uniprot_accession,
+          gt.go_id,
+          gt.go_term,
+          gt.go_category,
+          gt.go_evidence
+        FROM vcf_data c
+        JOIN vcf_data r ON (c.chromosome = r.chromosome
+                           AND c.position = r.position)
+        JOIN flanking_sequences fs ON r.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+        WHERE c.file_id = ? AND r.file_id = ?
+      "
+      foreground_go <- DBI::dbGetQuery(con, foreground_go_query,
+                                     list(foreground_file_id, background_file_id))
+    } else {
+      if (verbose) message("  - Extracting foreground GO terms via linkage (BLAST run ID: ", foreground_blast_param_id, ")...")
+      foreground_go_query <- "
+        SELECT DISTINCT
+          a.uniprot_accession,
+          gt.go_id,
+          gt.go_term,
+          gt.go_category,
+          gt.go_evidence
+        FROM vcf_data c
+        JOIN vcf_data r ON (c.chromosome = r.chromosome
+                           AND c.position = r.position)
+        JOIN flanking_sequences fs ON r.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+        WHERE c.file_id = ? AND r.file_id = ? AND br.blast_param_id = ?
+      "
+      foreground_go <- DBI::dbGetQuery(con, foreground_go_query,
+                                     list(foreground_file_id, background_file_id, foreground_blast_param_id))
+    }
+  }
+
+  # Background query with optional blast_param_id filtering
+  if (is.null(background_blast_param_id)) {
+    background_go_query <- "
       SELECT DISTINCT
         a.uniprot_accession,
         gt.go_id,
@@ -163,52 +271,26 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
       JOIN go_terms gt ON a.annotation_id = gt.annotation_id
       WHERE v.file_id = ?
     "
-
-    if (verbose) message("  - Extracting foreground GO terms...")
-    foreground_go <- DBI::dbGetQuery(con, go_query, list(foreground_file_id))
+    if (verbose) message("  - Extracting background GO terms (all BLAST runs)...")
+    background_go <- DBI::dbGetQuery(con, background_go_query, list(background_file_id))
   } else {
-    # For candidate files, use the linked annotations
-    if (verbose) message("  - Extracting foreground GO terms via linkage...")
-
-    foreground_go_query <- "
+    background_go_query <- "
       SELECT DISTINCT
         a.uniprot_accession,
         gt.go_id,
         gt.go_term,
         gt.go_category,
         gt.go_evidence
-      FROM vcf_data c
-      JOIN vcf_data r ON (c.chromosome = r.chromosome
-                         AND c.position = r.position)
-      JOIN flanking_sequences fs ON r.vcf_id = fs.vcf_id
+      FROM vcf_data v
+      JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
       JOIN blast_results br ON fs.flanking_id = br.flanking_id
       JOIN annotations a ON br.blast_result_id = a.blast_result_id
       JOIN go_terms gt ON a.annotation_id = gt.annotation_id
-      WHERE c.file_id = ? AND r.file_id = ?
+      WHERE v.file_id = ? AND br.blast_param_id = ?
     "
-
-    foreground_go <- DBI::dbGetQuery(con, foreground_go_query,
-                                   list(foreground_file_id, background_file_id))
+    if (verbose) message("  - Extracting background GO terms (BLAST run ID: ", background_blast_param_id, ")...")
+    background_go <- DBI::dbGetQuery(con, background_go_query, list(background_file_id, background_blast_param_id))
   }
-
-  # Background always uses standard query
-  background_go_query <- "
-    SELECT DISTINCT
-      a.uniprot_accession,
-      gt.go_id,
-      gt.go_term,
-      gt.go_category,
-      gt.go_evidence
-    FROM vcf_data v
-    JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
-    JOIN blast_results br ON fs.flanking_id = br.flanking_id
-    JOIN annotations a ON br.blast_result_id = a.blast_result_id
-    JOIN go_terms gt ON a.annotation_id = gt.annotation_id
-    WHERE v.file_id = ?
-  "
-
-  if (verbose) message("  - Extracting background GO terms...")
-  background_go <- DBI::dbGetQuery(con, background_go_query, list(background_file_id))
 
   # Create gene-to-GO mapping lists
   foreground_gene2go <- split(foreground_go$go_id, foreground_go$uniprot_accession)

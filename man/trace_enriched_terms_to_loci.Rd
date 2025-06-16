@@ -8,6 +8,7 @@ trace_enriched_terms_to_loci(
   con,
   enrichment_results,
   candidate_file_id,
+  blast_param_id = NULL,
   significance_threshold = 0.05,
   include_blast_metrics = TRUE
 )
@@ -18,6 +19,9 @@ trace_enriched_terms_to_loci(
 \item{enrichment_results}{Data frame or list of enrichment results from GO analysis}
 
 \item{candidate_file_id}{Integer. File ID of the candidate dataset used in enrichment analysis}
+
+\item{blast_param_id}{Integer. Optional. Specific BLAST run ID to trace.
+If NULL, uses all available annotations. Default is NULL.}
 
 \item{significance_threshold}{Numeric. FDR threshold for selecting significant terms. Default is 0.05}
 

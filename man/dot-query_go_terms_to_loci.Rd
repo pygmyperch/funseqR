@@ -4,7 +4,7 @@
 \alias{.query_go_terms_to_loci}
 \title{Query database to trace GO terms to genomic loci}
 \usage{
-.query_go_terms_to_loci(con, go_ids, candidate_file_id)
+.query_go_terms_to_loci(con, go_ids, candidate_file_id, blast_param_id = NULL)
 }
 \arguments{
 \item{con}{Database connection}
@@ -12,6 +12,8 @@
 \item{go_ids}{Character vector of GO term IDs}
 
 \item{candidate_file_id}{Integer. File ID of candidate dataset}
+
+\item{blast_param_id}{Integer. Optional BLAST run ID for filtering}
 }
 \value{
 Data frame with genomic coordinates and functional annotations
