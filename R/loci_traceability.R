@@ -266,8 +266,12 @@
   )
   
   summary_data <- merge(summary_data, chrom_summary, by = "go_id")
-  summary_data$chromosome.y <- NULL
+  
+  # Rename the chromosome column from chrom_summary to chromosomes
   names(summary_data)[names(summary_data) == "chromosome.y"] <- "chromosomes"
+  
+  # Remove the original chromosome column from summary_data
+  summary_data$chromosome.x <- NULL
   
   # Reorder columns
   summary_data <- summary_data[, c("go_id", "go_term", "go_category", "loci_count", "chromosomes")]
