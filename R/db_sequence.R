@@ -607,6 +607,8 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
       
       # Phase 2: Sequential database writing
       phase2_start <- Sys.time()
+      pb_phase2 <- NULL  # Initialize progress bar variable
+      
       if (verbose) {
         message("\n=== Phase 2: Writing results to database ===")
         
@@ -669,7 +671,7 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
           }
           
           # Update Phase 2 progress bar
-          if (verbose && length(computed_sequences) > 0) {
+          if (verbose && length(computed_sequences) > 0 && !is.null(pb_phase2)) {
             tryCatch({
               pb_phase2$update(end_idx / length(computed_sequences))
             }, error = function(e) {
@@ -680,7 +682,7 @@ import_flanking_seqs_to_db <- function(con, vcf_file_id, genome_id, flank_size =
         
         # Complete Phase 2 and show summary
         if (verbose) {
-          if (length(computed_sequences) > 0) {
+          if (length(computed_sequences) > 0 && !is.null(pb_phase2)) {
             tryCatch({
               pb_phase2$update(1.0)
             }, error = function(e) {
