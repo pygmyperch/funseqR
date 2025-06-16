@@ -2,7 +2,7 @@
 #' 
 #' This example demonstrates how to compare functional enrichment results
 #' from different BLAST runs (e.g., ORF sequences vs raw sequences) using
-#' the enhanced funseqR workflow with blast_param_id support.
+#' the simplified funseqR workflow with single blast_param_id parameter.
 
 library(funseqR)
 
@@ -49,8 +49,7 @@ cat("\n=== Running ORF-based GO Enrichment ===\n")
 enrich_res_orf <- run_go_enrichment_workflow(
   con, 
   candidate_vcf_file, 
-  candidate_blast_param_id = orf_blast_id,
-  background_blast_param_id = orf_blast_id,  # Use same BLAST run for background
+  blast_param_id = orf_blast_id,  # Use ORF-based BLAST run for both candidate and background
   ontologies = c("BP", "MF", "CC"),
   verbose = TRUE
 )
@@ -60,8 +59,7 @@ cat("\n=== Running Raw Sequence GO Enrichment ===\n")
 enrich_res_raw <- run_go_enrichment_workflow(
   con, 
   candidate_vcf_file,
-  candidate_blast_param_id = raw_blast_id,
-  background_blast_param_id = raw_blast_id,  # Use same BLAST run for background
+  blast_param_id = raw_blast_id,  # Use raw sequence BLAST run for both candidate and background
   ontologies = c("BP", "MF", "CC"),
   verbose = TRUE
 )

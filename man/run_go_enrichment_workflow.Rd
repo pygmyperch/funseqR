@@ -8,8 +8,7 @@ run_go_enrichment_workflow(
   con,
   candidate_vcf_file,
   background_file_id = NULL,
-  candidate_blast_param_id = NULL,
-  background_blast_param_id = NULL,
+  blast_param_id = NULL,
   ontologies = c("BP", "MF"),
   min_genes = 5,
   max_genes = 500,
@@ -25,10 +24,7 @@ run_go_enrichment_workflow(
 
 \item{background_file_id}{Integer. File ID of background dataset (or NULL to auto-detect)}
 
-\item{candidate_blast_param_id}{Integer. Optional. Specific BLAST run ID for candidate annotations.
-If NULL, uses all available annotations. Default is NULL.}
-
-\item{background_blast_param_id}{Integer. Optional. Specific BLAST run ID for background annotations.
+\item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets.
 If NULL, uses all available annotations. Default is NULL.}
 
 \item{ontologies}{Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF")}
@@ -62,9 +58,9 @@ This function performs a complete GO enrichment workflow:
 \item Store results in database (optional)
 }
 
-The blast_param_id parameters allow you to compare different annotation strategies
-(e.g., ORF sequences vs raw sequences) by using only annotations from specific
-BLAST runs. This enables comparative functional genomics analysis.
+When blast_param_id is specified, only annotations from that specific BLAST run
+are used for both candidate and background datasets, ensuring methodological
+consistency and enabling comparison of different annotation strategies.
 }
 \examples{
 \dontrun{
@@ -73,13 +69,11 @@ con <- connect_funseq_db("analysis.db")
 # Use all available annotations (default behavior)
 results <- run_go_enrichment_workflow(con, "candidates.vcf")
 
-# Compare ORF-based vs raw sequence annotations
-results_orf <- run_go_enrichment_workflow(con, "candidates.vcf", 
-                                          candidate_blast_param_id = 1,
-                                          background_blast_param_id = 1)
-results_raw <- run_go_enrichment_workflow(con, "candidates.vcf",
-                                          candidate_blast_param_id = 2, 
-                                          background_blast_param_id = 2)
+# Use only ORF-based annotations
+results_orf <- run_go_enrichment_workflow(con, "candidates.vcf", blast_param_id = 1)
+
+# Use only raw sequence annotations
+results_raw <- run_go_enrichment_workflow(con, "candidates.vcf", blast_param_id = 2)
 
 print(results_orf$summary)
 print(results_orf$plots$BP_bubble)
