@@ -15,7 +15,7 @@ annotate_blast_results(
   use_cache = TRUE,
   store_cache = TRUE,
   verify_storage = TRUE,
-  evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC"),
+  evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC", "IEA", "ISS"),
   verbose = TRUE,
   debug_accessions = NULL
 )
@@ -42,8 +42,8 @@ annotate_blast_results(
 \item{verify_storage}{If TRUE, verifies annotation storage after processing. Default is TRUE.}
 
 \item{evidence_keep}{Character vector of evidence codes to keep for GO annotations.
-Default is c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC") which includes
-high-confidence experimental and curated evidence. Set to NULL to keep all evidence codes.
+Default is c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC", "IEA", "ISS") which includes
+experimental, curated, and computational evidence (balanced approach). Set to NULL to keep all evidence codes.
 See Details section for complete evidence code definitions and recommendations.}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
@@ -108,13 +108,13 @@ For non-model organisms like teleost fish, computational annotations are often t
 primary source of functional information:
 
 \itemize{
+\item \strong{Balanced (Default - Recommended for most analyses):}
+\code{evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC", "IEA", "ISS")}
+Includes computational predictions and homology transfers. Good balance of coverage and quality.
+
 \item \strong{Conservative (High confidence only):}
 \code{evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC")}
 Use when you need high-confidence annotations only. May result in fewer GO terms.
-
-\item \strong{Balanced (Recommended for most analyses):}
-\code{evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC", "IEA", "ISS")}
-Includes computational predictions and homology transfers. Good balance of coverage and quality.
 
 \item \strong{Comprehensive (Maximum coverage):}
 \code{evidence_keep = NULL}
@@ -135,13 +135,12 @@ retrieves and caches UniProt data. Subsequent runs will be much faster using cac
 con <- connect_funseq_db("analysis.db")
 blast_results <- perform_blast_db(con, vcf_file_id, db_path, db_name, "blastx")
 
+# Balanced annotation (default - recommended for most analyses)
+annotation_results <- annotate_blast_results(con, blast_results$blast_param_id)
+
 # Conservative annotation (high-confidence evidence only)
 annotation_results <- annotate_blast_results(con, blast_results$blast_param_id,
   evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC"))
-
-# Balanced annotation (recommended for non-model organisms)
-annotation_results <- annotate_blast_results(con, blast_results$blast_param_id,
-  evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC", "IEA", "ISS"))
 
 # Comprehensive annotation (all evidence types)
 annotation_results <- annotate_blast_results(con, blast_results$blast_param_id,

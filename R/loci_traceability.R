@@ -51,58 +51,161 @@
   # Create placeholders for SQL IN clause
   go_placeholders <- paste(rep("?", length(go_ids)), collapse = ",")
   
-  # Build query with optional blast_param_id filtering
+  # Check if candidate file has direct annotations or needs linkage
   if (is.null(blast_param_id)) {
-    query <- paste0("
-      SELECT DISTINCT
-        v.chromosome,
-        v.position,
-        v.ref,
-        v.alt,
-        gt.go_id,
-        gt.go_term,
-        gt.go_category,
-        a.gene_names,
-        a.uniprot_accession,
-        br.e_value as blast_evalue,
-        br.percent_identity as blast_identity
-      FROM vcf_data v
-      JOIN input_files if_cand ON v.file_id = if_cand.file_id
+    candidate_direct_count <- DBI::dbGetQuery(con, "
+      SELECT COUNT(*) as count FROM vcf_data v
       JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
       JOIN blast_results br ON fs.flanking_id = br.flanking_id
       JOIN annotations a ON br.blast_result_id = a.blast_result_id
-      JOIN go_terms gt ON a.annotation_id = gt.annotation_id
-      WHERE if_cand.file_id = ?
-        AND gt.go_id IN (", go_placeholders, ")
-      ORDER BY v.chromosome, v.position, gt.go_id
-    ")
-    params <- c(candidate_file_id, go_ids)
+      WHERE v.file_id = ?
+    ", list(candidate_file_id))$count
   } else {
-    query <- paste0("
-      SELECT DISTINCT
-        v.chromosome,
-        v.position,
-        v.ref,
-        v.alt,
-        gt.go_id,
-        gt.go_term,
-        gt.go_category,
-        a.gene_names,
-        a.uniprot_accession,
-        br.e_value as blast_evalue,
-        br.percent_identity as blast_identity
-      FROM vcf_data v
-      JOIN input_files if_cand ON v.file_id = if_cand.file_id
+    candidate_direct_count <- DBI::dbGetQuery(con, "
+      SELECT COUNT(*) as count FROM vcf_data v
       JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
       JOIN blast_results br ON fs.flanking_id = br.flanking_id
       JOIN annotations a ON br.blast_result_id = a.blast_result_id
-      JOIN go_terms gt ON a.annotation_id = gt.annotation_id
-      WHERE if_cand.file_id = ?
-        AND br.blast_param_id = ?
-        AND gt.go_id IN (", go_placeholders, ")
-      ORDER BY v.chromosome, v.position, gt.go_id
-    ")
-    params <- c(candidate_file_id, blast_param_id, go_ids)
+      WHERE v.file_id = ? AND br.blast_param_id = ?
+    ", list(candidate_file_id, blast_param_id))$count
+  }
+  
+  if (candidate_direct_count > 0) {
+    # Use direct annotations (candidate file has its own annotations)
+    if (is.null(blast_param_id)) {
+      query <- paste0("
+        SELECT DISTINCT
+          v.chromosome,
+          v.position,
+          v.ref,
+          v.alt,
+          gt.go_id,
+          gt.go_term,
+          gt.go_category,
+          a.gene_names,
+          a.uniprot_accession,
+          br.e_value as blast_evalue,
+          br.percent_identity as blast_identity
+        FROM vcf_data v
+        JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+        WHERE v.file_id = ?
+          AND gt.go_id IN (", go_placeholders, ")
+        ORDER BY v.chromosome, v.position, gt.go_id
+      ")
+      params <- c(candidate_file_id, go_ids)
+    } else {
+      query <- paste0("
+        SELECT DISTINCT
+          v.chromosome,
+          v.position,
+          v.ref,
+          v.alt,
+          gt.go_id,
+          gt.go_term,
+          gt.go_category,
+          a.gene_names,
+          a.uniprot_accession,
+          br.e_value as blast_evalue,
+          br.percent_identity as blast_identity
+        FROM vcf_data v
+        JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+        WHERE v.file_id = ?
+          AND br.blast_param_id = ?
+          AND gt.go_id IN (", go_placeholders, ")
+        ORDER BY v.chromosome, v.position, gt.go_id
+      ")
+      params <- c(candidate_file_id, blast_param_id, go_ids)
+    }
+  } else {
+    # Use linkage (candidate file needs to link to background annotations)
+    # Find the background file by getting the first file that isn't the candidate and has annotations
+    background_file_query <- "
+      SELECT DISTINCT v.file_id 
+      FROM vcf_data v
+      JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      WHERE v.file_id != ?
+      LIMIT 1
+    "
+    background_file_id <- DBI::dbGetQuery(con, background_file_query, list(candidate_file_id))$file_id[1]
+    
+    if (is.na(background_file_id)) {
+      # No background file found
+      return(data.frame(
+        chromosome = character(0),
+        position = integer(0),
+        ref = character(0),
+        alt = character(0),
+        go_id = character(0),
+        go_term = character(0),
+        go_category = character(0),
+        gene_names = character(0),
+        uniprot_accession = character(0),
+        blast_evalue = numeric(0),
+        blast_identity = numeric(0),
+        stringsAsFactors = FALSE
+      ))
+    }
+    
+    if (is.null(blast_param_id)) {
+      query <- paste0("
+        SELECT DISTINCT
+          c.chromosome,
+          c.position,
+          c.ref,
+          c.alt,
+          gt.go_id,
+          gt.go_term,
+          gt.go_category,
+          a.gene_names,
+          a.uniprot_accession,
+          br.e_value as blast_evalue,
+          br.percent_identity as blast_identity
+        FROM vcf_data c
+        JOIN vcf_data r ON (c.chromosome = r.chromosome AND c.position = r.position)
+        JOIN flanking_sequences fs ON r.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+        WHERE c.file_id = ? AND r.file_id = ?
+          AND gt.go_id IN (", go_placeholders, ")
+        ORDER BY c.chromosome, c.position, gt.go_id
+      ")
+      params <- c(candidate_file_id, background_file_id, go_ids)
+    } else {
+      query <- paste0("
+        SELECT DISTINCT
+          c.chromosome,
+          c.position,
+          c.ref,
+          c.alt,
+          gt.go_id,
+          gt.go_term,
+          gt.go_category,
+          a.gene_names,
+          a.uniprot_accession,
+          br.e_value as blast_evalue,
+          br.percent_identity as blast_identity
+        FROM vcf_data c
+        JOIN vcf_data r ON (c.chromosome = r.chromosome AND c.position = r.position)
+        JOIN flanking_sequences fs ON r.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+        WHERE c.file_id = ? AND r.file_id = ?
+          AND br.blast_param_id = ?
+          AND gt.go_id IN (", go_placeholders, ")
+        ORDER BY c.chromosome, c.position, gt.go_id
+      ")
+      params <- c(candidate_file_id, background_file_id, blast_param_id, go_ids)
+    }
   }
   
   result <- DBI::dbGetQuery(con, query, params = params)
