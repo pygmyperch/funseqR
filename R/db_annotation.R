@@ -60,7 +60,10 @@ test_uniprot_connection <- function(verbose = FALSE) {
 #'
 #' @param con Database connection object.
 #' @param blast_param_id The ID of the BLAST parameters.
-#' @param max_hits Maximum number of hits to process per query. Default is 5.
+#' @param max_hits Maximum number of BLAST hits to annotate per genomic locus. Default is 1 (best hit only).
+#'   Setting this to 1 ensures each locus gets a single, most confident functional annotation based on 
+#'   the lowest e-value, preventing redundant annotations and statistical bias in enrichment analyses.
+#'   Use higher values only if multiple hits per locus are specifically needed for your analysis.
 #' @param e_value_threshold E-value threshold for filtering BLAST hits. Default is 1e-10.
 #' @param batch_size Number of annotations to process in each transaction. Default is 500.
 #' @param delay Delay between operations in seconds. Default is 1.
@@ -176,7 +179,7 @@ test_uniprot_connection <- function(verbose = FALSE) {
 #' }
 #'
 #' @export
-annotate_blast_results <- function(con, blast_param_id, max_hits = 5, e_value_threshold = 1e-10,
+annotate_blast_results <- function(con, blast_param_id, max_hits = 1, e_value_threshold = 1e-10,
                                    batch_size = 500, delay = 1, offline_mode = FALSE,
                                    use_cache = TRUE, store_cache = TRUE, verify_storage = TRUE,
                                    evidence_keep = c("EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "TAS", "IC", "IEA", "ISS"),

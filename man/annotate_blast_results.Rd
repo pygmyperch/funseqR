@@ -7,7 +7,7 @@
 annotate_blast_results(
   con,
   blast_param_id,
-  max_hits = 5,
+  max_hits = 1,
   e_value_threshold = 1e-10,
   batch_size = 500,
   delay = 1,
@@ -25,7 +25,10 @@ annotate_blast_results(
 
 \item{blast_param_id}{The ID of the BLAST parameters.}
 
-\item{max_hits}{Maximum number of hits to process per query. Default is 5.}
+\item{max_hits}{Maximum number of BLAST hits to annotate per genomic locus. Default is 1 (best hit only).
+Setting this to 1 ensures each locus gets a single, most confident functional annotation based on
+the lowest e-value, preventing redundant annotations and statistical bias in enrichment analyses.
+Use higher values only if multiple hits per locus are specifically needed for your analysis.}
 
 \item{e_value_threshold}{E-value threshold for filtering BLAST hits. Default is 1e-10.}
 
