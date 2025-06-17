@@ -21,6 +21,11 @@
 #' @param point_size Numeric. Size of points. Default is 1.2
 #' @param label_type Character. Type of labels for enriched loci: "go_term", "gene_name", "uniprot_accession", or "position". Default is "go_term"
 #' @param label_top_hits Integer. Number of top statistical hits to label if no functional loci. Default is 0
+#' @param numeric_x_labels Logical. Use numeric labels (1,2,3,...,U) instead of chromosome names (LG1,LG2,...,U). Default is FALSE
+#' @param enriched_point_size Numeric. Size of enriched loci points. Default is point_size * 1.5
+#' @param enriched_point_shape Integer. Shape (pch) for enriched loci points. Default is 19 (filled circle)
+#' @param enriched_point_color Character. Color for enriched loci points. Default is highlight_color
+#' @param use_label_lines Logical. Use indicator lines from labels to points. Default is TRUE
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
 #' @return ggplot2 object
@@ -72,14 +77,27 @@
 #'   plot_title = "RDA Analysis with Functional Annotation"
 #' )
 #' 
-#' # Create Manhattan plot with gene name labels
+#' # Create Manhattan plot with gene name labels and numeric x-axis
 #' manhattan_plot_genes <- create_functional_manhattan_plot(
 #'   con, 
 #'   y_values = rda.simple.pq$q.values,
 #'   vcf_file_id = 1,
 #'   functional_summary = enrich_summary,
 #'   label_type = "gene_name",
+#'   numeric_x_labels = TRUE,
 #'   y_label = "RDA q-value"
+#' )
+#' 
+#' # Create Manhattan plot with custom enriched point styling
+#' manhattan_plot_custom <- create_functional_manhattan_plot(
+#'   con, 
+#'   y_values = rda.simple.pq$q.values,
+#'   vcf_file_id = 1,
+#'   functional_summary = enrich_summary,
+#'   enriched_point_size = 3,
+#'   enriched_point_shape = 17,  # Triangle
+#'   enriched_point_color = "red",
+#'   use_label_lines = TRUE
 #' )
 #' 
 #' print(manhattan_plot)
@@ -96,6 +114,11 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
                                            point_size = 1.2,
                                            label_type = "go_term",
                                            label_top_hits = 0,
+                                           numeric_x_labels = FALSE,
+                                           enriched_point_size = NULL,
+                                           enriched_point_shape = 19,
+                                           enriched_point_color = NULL,
+                                           use_label_lines = TRUE,
                                            verbose = TRUE) {
   
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
@@ -103,6 +126,14 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
   }
   
   if (verbose) message("Creating functional Manhattan plot...")
+  
+  # Set default values for enriched point styling
+  if (is.null(enriched_point_size)) {
+    enriched_point_size <- point_size * 1.5
+  }
+  if (is.null(enriched_point_color)) {
+    enriched_point_color <- highlight_color
+  }
   
   # Get genomic coordinates from database in VCF order
   vcf_coords <- DBI::dbGetQuery(con, "
@@ -227,6 +258,35 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
   # Calculate chromosome midpoints for x-axis labels
   chr_midpoints <- aggregate(x_pos ~ chromosome, data = manhattan_data, FUN = function(x) mean(range(x)))
   
+  # Create numeric labels if requested
+  if (numeric_x_labels) {
+    # Create mapping from chromosome names to numbers
+    unique_chrs_ordered <- levels(manhattan_data$chromosome)
+    numeric_labels <- character(length(unique_chrs_ordered))
+    
+    numeric_counter <- 1
+    for (i in seq_along(unique_chrs_ordered)) {
+      chr <- unique_chrs_ordered[i]
+      if (chr == "U") {
+        numeric_labels[i] <- "U"
+      } else {
+        numeric_labels[i] <- as.character(numeric_counter)
+        numeric_counter <- numeric_counter + 1
+      }
+    }
+    
+    # Update chr_midpoints with numeric labels
+    chr_midpoints$numeric_label <- numeric_labels[match(chr_midpoints$chromosome, unique_chrs_ordered)]
+    x_axis_labels <- chr_midpoints$numeric_label
+    
+    if (verbose) {
+      message("  - Using numeric x-axis labels: ", paste(head(x_axis_labels, 10), collapse = ", "))
+      if (length(x_axis_labels) > 10) message("    ... and ", length(x_axis_labels) - 10, " more")
+    }
+  } else {
+    x_axis_labels <- chr_midpoints$chromosome
+  }
+  
   # Identify loci for labeling - prioritize functional loci
   manhattan_data$label <- ""
   
@@ -298,15 +358,18 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
     ggplot2::geom_point(data = manhattan_data[!manhattan_data$functional, ],
                        ggplot2::aes(color = chr_color), 
                        size = point_size, alpha = 0.7) +
-    # Highlighted functional points
+    # Highlighted functional points with custom styling
     ggplot2::geom_point(data = manhattan_data[manhattan_data$functional, ],
-                       color = highlight_color, size = point_size * 1.5, alpha = 0.9) +
+                       color = enriched_point_color, 
+                       size = enriched_point_size, 
+                       shape = enriched_point_shape,
+                       alpha = 0.9) +
     # Manual color scale for chromosomes
     ggplot2::scale_color_identity() +
     # X-axis
     ggplot2::scale_x_continuous(
       breaks = chr_midpoints$x_pos,
-      labels = chr_midpoints$chromosome,
+      labels = x_axis_labels,
       expand = c(0.01, 0)
     ) +
     # Y-axis
@@ -346,22 +409,42 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
                                 alpha = 0.7)
   }
   
-  # Add labels for top hits
+  # Add labels for enriched loci
   labeled_data <- manhattan_data[manhattan_data$label != "", ]
   if (nrow(labeled_data) > 0) {
     if (!requireNamespace("ggrepel", quietly = TRUE)) {
       # Fallback to basic text labels if ggrepel not available
+      if (use_label_lines) {
+        warning("ggrepel package required for label lines. Using basic text labels without lines.")
+      }
       p <- p + ggplot2::geom_text(data = labeled_data,
                                  ggplot2::aes(label = label),
                                  size = 3, vjust = -0.5, hjust = 0.5)
     } else {
-      # Use ggrepel for better label positioning
-      p <- p + ggrepel::geom_text_repel(data = labeled_data,
-                                       ggplot2::aes(label = label),
-                                       size = 3, 
-                                       max.overlaps = Inf,
-                                       box.padding = 0.3,
-                                       point.padding = 0.3)
+      # Use ggrepel for better label positioning with indicator lines
+      if (use_label_lines) {
+        p <- p + ggrepel::geom_text_repel(data = labeled_data,
+                                         ggplot2::aes(label = label),
+                                         size = 3, 
+                                         max.overlaps = Inf,
+                                         box.padding = 0.5,
+                                         point.padding = 0.3,
+                                         segment.color = "black",
+                                         segment.size = 0.3,
+                                         segment.alpha = 0.7,
+                                         min.segment.length = 0,
+                                         force = 2,
+                                         force_pull = 0.5)
+      } else {
+        # No indicator lines
+        p <- p + ggrepel::geom_text_repel(data = labeled_data,
+                                         ggplot2::aes(label = label),
+                                         size = 3, 
+                                         max.overlaps = Inf,
+                                         box.padding = 0.3,
+                                         point.padding = 0.3,
+                                         segment.size = 0)  # No lines
+      }
     }
   }
   
@@ -392,18 +475,30 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
 #' @param transform_y Character. Transform y-values: "none", "neg_log10", or "log10". Default is "neg_log10"
 #' @param chr_colors Character vector. Two colors for alternating chromosomes. Default is snapper colors
 #' @param point_size Numeric. Size of points. Default is 1.2
+#' @param numeric_x_labels Logical. Use numeric labels (1,2,3,...,U) instead of chromosome names. Default is FALSE
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
 #' @return ggplot2 object
 #'
 #' @examples
 #' \dontrun{
+#' # Basic Manhattan plot
 #' manhattan_plot <- create_manhattan_plot(
 #'   con, 
 #'   y_values = rda.simple.pq$q.values,
 #'   vcf_file_id = 1,
 #'   y_label = "RDA q-value",
 #'   plot_title = "RDA Analysis"
+#' )
+#' 
+#' # Manhattan plot with numeric x-axis labels
+#' manhattan_plot_numeric <- create_manhattan_plot(
+#'   con, 
+#'   y_values = rda.simple.pq$q.values,
+#'   vcf_file_id = 1,
+#'   y_label = "RDA q-value",
+#'   plot_title = "RDA Analysis",
+#'   numeric_x_labels = TRUE
 #' )
 #' }
 #'
@@ -415,6 +510,7 @@ create_manhattan_plot <- function(con, y_values, vcf_file_id,
                                  transform_y = "neg_log10",
                                  chr_colors = c("#A1B1CC", "#0E7EC0"),
                                  point_size = 1.2,
+                                 numeric_x_labels = FALSE,
                                  verbose = TRUE) {
   
   # Call the functional version with NULL functional summary
@@ -432,6 +528,7 @@ create_manhattan_plot <- function(con, y_values, vcf_file_id,
     point_size = point_size,
     label_type = "position",
     label_top_hits = 0,
+    numeric_x_labels = numeric_x_labels,
     verbose = verbose
   )
 }

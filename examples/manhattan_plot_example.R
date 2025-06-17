@@ -109,27 +109,69 @@ if (exists("enrich_raw_summary")) {
   cat("Saved functional_manhattan_raw.pdf\n")
 }
 
-# 7. Customized plot with different colors and threshold
-cat("\n=== Creating Customized Manhattan Plot ===\n")
-custom_plot <- create_functional_manhattan_plot(
+# 7. Manhattan plot with numeric x-axis labels
+cat("\n=== Creating Manhattan Plot with Numeric X-axis ===\n")
+numeric_plot <- create_functional_manhattan_plot(
   con, 
   y_values = rda.simple.pq$q.values,
   vcf_file_id = 1,
   functional_summary = enrich_orf_summary,
   y_label = "RDA q-value",
-  plot_title = "Custom RDA Manhattan Plot",
+  plot_title = "RDA Analysis with Numeric Chromosome Labels",
   label_type = "go_term",
-  signif_threshold = 0.05,  # Different threshold
-  highlight_color = "#FF6B6B",  # Custom highlight color
-  chr_colors = c("#2E8B57", "#4682B4"),  # Custom chromosome colors
-  point_size = 1.5,  # Larger points
+  numeric_x_labels = TRUE,  # Use 1,2,3,...,U instead of LG1,LG2,...,U
   verbose = TRUE
 )
 
-ggsave("custom_manhattan.pdf", custom_plot, width = 12, height = 6)
-cat("Saved custom_manhattan.pdf\n")
+ggsave("numeric_manhattan.pdf", numeric_plot, width = 12, height = 6)
+cat("Saved numeric_manhattan.pdf\n")
 
-# 8. Check chromosome consolidation status
+# 8. Customized plot with enhanced enriched point styling
+cat("\n=== Creating Enhanced Manhattan Plot with Custom Point Styling ===\n")
+enhanced_plot <- create_functional_manhattan_plot(
+  con, 
+  y_values = rda.simple.pq$q.values,
+  vcf_file_id = 1,
+  functional_summary = enrich_orf_summary,
+  y_label = "RDA q-value",
+  plot_title = "Enhanced RDA Manhattan Plot",
+  label_type = "gene_name",
+  signif_threshold = 0.05,
+  # Custom enriched point styling
+  enriched_point_size = 4,        # Larger enriched points
+  enriched_point_shape = 17,      # Triangle shape (pch = 17)
+  enriched_point_color = "red",   # Red color for enriched points
+  use_label_lines = TRUE,         # Indicator lines from labels to points
+  # Custom chromosome colors
+  chr_colors = c("#2E8B57", "#4682B4"),
+  point_size = 1.5,
+  verbose = TRUE
+)
+
+ggsave("enhanced_manhattan.pdf", enhanced_plot, width = 12, height = 6)
+cat("Saved enhanced_manhattan.pdf\n")
+
+# 9. Plot without label lines for comparison
+cat("\n=== Creating Plot Without Label Lines ===\n")
+no_lines_plot <- create_functional_manhattan_plot(
+  con, 
+  y_values = rda.simple.pq$q.values,
+  vcf_file_id = 1,
+  functional_summary = enrich_orf_summary,
+  y_label = "RDA q-value",
+  plot_title = "Manhattan Plot Without Label Lines",
+  label_type = "uniprot_accession",
+  use_label_lines = FALSE,  # No indicator lines
+  enriched_point_size = 3,
+  enriched_point_shape = 19,  # Circle
+  enriched_point_color = "#FF6B6B",
+  verbose = TRUE
+)
+
+ggsave("no_lines_manhattan.pdf", no_lines_plot, width = 12, height = 6)
+cat("Saved no_lines_manhattan.pdf\n")
+
+# 10. Check chromosome consolidation status
 cat("\n=== Chromosome Consolidation Status ===\n")
 main_chroms <- DBI::dbGetQuery(con, "
   SELECT value FROM metadata WHERE key = 'main_chromosomes'
@@ -151,17 +193,21 @@ cat("1. basic_manhattan.pdf - Basic plot without functional annotation\n")
 cat("2. functional_manhattan_go.pdf - Functional plot with GO term labels\n")
 cat("3. functional_manhattan_genes.pdf - Functional plot with gene name labels\n")
 cat("4. functional_manhattan_uniprot.pdf - Functional plot with UniProt labels\n")
-cat("5. custom_manhattan.pdf - Customized plot with different styling\n")
+cat("5. numeric_manhattan.pdf - Plot with numeric x-axis labels (1,2,3,...,U)\n")
+cat("6. enhanced_manhattan.pdf - Enhanced plot with custom point styling and label lines\n")
+cat("7. no_lines_manhattan.pdf - Plot without label lines\n")
 
 if (exists("enrich_raw_summary")) {
-  cat("6. functional_manhattan_raw.pdf - Raw sequence annotation comparison\n")
+  cat("8. functional_manhattan_raw.pdf - Raw sequence annotation comparison\n")
 }
 
 cat("\nKey improvements:\n")
 cat("- Automatic chromosome consolidation using database metadata\n")
 cat("- Functional loci automatically highlighted and labeled\n")
 cat("- Multiple label types: GO terms, gene names, UniProt accessions\n")
-cat("- Proper chromosome ordering (LG1, LG2, ..., LG24, U)\n")
-cat("- Clean x-axis labels without overlap\n")
+cat("- Optional numeric x-axis labels (1,2,3,...,U)\n")
+cat("- Customizable enriched point styling (size, shape, color)\n")
+cat("- Indicator lines pointing from labels to enriched points\n")
+cat("- Proper chromosome ordering and clean visualization\n")
 
 close_funseq_db(con)
