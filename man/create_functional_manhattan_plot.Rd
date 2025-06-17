@@ -16,7 +16,8 @@ create_functional_manhattan_plot(
   highlight_color = "#D0DBEE",
   chr_colors = c("#A1B1CC", "#0E7EC0"),
   point_size = 1.2,
-  label_top_hits = 10,
+  label_type = "go_term",
+  label_top_hits = 0,
   verbose = TRUE
 )
 
@@ -32,7 +33,8 @@ create_functional_manhattan_plot(
   highlight_color = "#D0DBEE",
   chr_colors = c("#A1B1CC", "#0E7EC0"),
   point_size = 1.2,
-  label_top_hits = 10,
+  label_type = "go_term",
+  label_top_hits = 0,
   verbose = TRUE
 )
 }
@@ -59,7 +61,9 @@ create_functional_manhattan_plot(
 
 \item{point_size}{Numeric. Size of points. Default is 1.2}
 
-\item{label_top_hits}{Integer. Number of top hits to label. Default is 10}
+\item{label_type}{Character. Type of labels for enriched loci: "go_term", "gene_name", "uniprot_accession", or "position". Default is "go_term"}
+
+\item{label_top_hits}{Integer. Number of top statistical hits to label if no functional loci. Default is 0}
 
 \item{verbose}{Logical. Print progress information. Default is TRUE}
 
@@ -124,18 +128,27 @@ The function automatically handles:
 Creates a Manhattan plot showing statistical values (p-values, q-values, etc.) across the genome
 with highlighted points corresponding to functionally enriched loci from GO analysis.
 
-This function creates a Manhattan plot in the style of the provided example, with:
+This function creates a Manhattan plot with functional annotation highlighting:
+
+\\strong{Chromosome Consolidation:}
+Uses consolidated chromosome names from the database metadata (set via define_chromosomes()).
+Main chromosomes (e.g., LG1-LG24) are displayed separately, while scaffolds are grouped as "U".
+
+\\strong{Functional Highlighting:}
+Points corresponding to functionally enriched loci (from functional_summary$loci_summary)
+are highlighted in a different color and automatically labeled.
+
+\\strong{Labeling Options:}
+Functional loci can be labeled with GO terms, gene names, UniProt accessions, or positions
+based on the label_type parameter. Labels are automatically applied to all enriched loci.
+
+\\strong{Visual Features:}
 \itemize{
 \item Alternating chromosome colors for easy visualization
-\item Highlighted points for functionally enriched loci
+\item Automatic chromosome ordering (LG1, LG2, ..., LG24, U)
 \item Optional significance threshold line
-\item Labels for top significant hits
-\item Proper handling of unmapped contigs
+\item Proper x-axis spacing and labeling
 }
-
-The function matches the y_values vector (in VCF order) with genomic coordinates
-from the database and highlights any positions that appear in the functional
-summary from GO enrichment analysis.
 }
 \examples{
 \dontrun{
@@ -173,22 +186,38 @@ custom_plot <- create_functional_manhattan_plot(
 \dontrun{
 con <- connect_funseq_db("analysis.db")
 
+# Define main chromosomes for consolidation
+define_chromosomes(con, c("LG1", "LG2", "LG3", "LG4", "LG5", "LG6", "LG7", "LG8", 
+                         "LG9", "LG10", "LG11", "LG12", "LG13", "LG14", "LG15", 
+                         "LG16", "LG17", "LG18", "LG19", "LG20", "LG21", "LG22", 
+                         "LG23", "LG24"))
+
 # Get functional summary from enrichment analysis
 enrich_summary <- summarize_functional_loci(con, 
                                           enrichment_results, 
                                           candidate_file_id,
                                           blast_param_id = 1)
 
-# Create Manhattan plot with RDA q-values
+# Create Manhattan plot with GO term labels (default)
 manhattan_plot <- create_functional_manhattan_plot(
   con, 
   y_values = rda.simple.pq$q.values,
   vcf_file_id = 1,
   functional_summary = enrich_summary,
   y_label = "RDA q-value",
-  plot_title = "RDA Analysis with Functional Annotation",
-  signif_threshold = 0.01
+  plot_title = "RDA Analysis with Functional Annotation"
 )
+
+# Create Manhattan plot with gene name labels
+manhattan_plot_genes <- create_functional_manhattan_plot(
+  con, 
+  y_values = rda.simple.pq$q.values,
+  vcf_file_id = 1,
+  functional_summary = enrich_summary,
+  label_type = "gene_name",
+  y_label = "RDA q-value"
+)
+
 print(manhattan_plot)
 }
 

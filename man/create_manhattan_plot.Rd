@@ -32,7 +32,7 @@ create_manhattan_plot(
 
 \item{transform_y}{Character. Transform y-values: "none", "neg_log10", or "log10". Default is "neg_log10"}
 
-\item{chr_colors}{Character vector. Two colors for alternating chromosomes}
+\item{chr_colors}{Character vector. Two colors for alternating chromosomes. Default is snapper colors}
 
 \item{point_size}{Numeric. Size of points. Default is 1.2}
 
@@ -42,7 +42,8 @@ create_manhattan_plot(
 ggplot2 object
 }
 \description{
-Creates a basic Manhattan plot without functional highlighting.
+Creates a basic Manhattan plot without functional highlighting. Uses consolidated
+chromosome names from database if available.
 }
 \examples{
 \dontrun{

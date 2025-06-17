@@ -2,7 +2,7 @@
 % Please edit documentation in R/manhattan_plots.R
 \name{.get_consolidated_chromosome_names}
 \alias{.get_consolidated_chromosome_names}
-\title{Get consolidated chromosome names from database}
+\title{Get consolidated chromosome names from database metadata}
 \usage{
 .get_consolidated_chromosome_names(con, chromosomes, verbose = FALSE)
 }
@@ -17,6 +17,6 @@
 Character vector of consolidated chromosome names
 }
 \description{
-Get consolidated chromosome names from database
+Get consolidated chromosome names from database metadata
 }
 \keyword{internal}

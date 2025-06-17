@@ -19,26 +19,42 @@
 #' @param highlight_color Character. Color for functionally enriched points. Default is "#D0DBEE"
 #' @param chr_colors Character vector. Two colors for alternating chromosomes. Default is snapper colors
 #' @param point_size Numeric. Size of points. Default is 1.2
-#' @param label_top_hits Integer. Number of top hits to label. Default is 10
+#' @param label_type Character. Type of labels for enriched loci: "go_term", "gene_name", "uniprot_accession", or "position". Default is "go_term"
+#' @param label_top_hits Integer. Number of top statistical hits to label if no functional loci. Default is 0
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
 #' @return ggplot2 object
 #'
 #' @details
-#' This function creates a Manhattan plot in the style of the provided example, with:
+#' This function creates a Manhattan plot with functional annotation highlighting:
+#' 
+#' \\strong{Chromosome Consolidation:}
+#' Uses consolidated chromosome names from the database metadata (set via define_chromosomes()).
+#' Main chromosomes (e.g., LG1-LG24) are displayed separately, while scaffolds are grouped as "U".
+#' 
+#' \\strong{Functional Highlighting:}
+#' Points corresponding to functionally enriched loci (from functional_summary$loci_summary) 
+#' are highlighted in a different color and automatically labeled.
+#' 
+#' \\strong{Labeling Options:}
+#' Functional loci can be labeled with GO terms, gene names, UniProt accessions, or positions
+#' based on the label_type parameter. Labels are automatically applied to all enriched loci.
+#' 
+#' \\strong{Visual Features:}
 #' - Alternating chromosome colors for easy visualization
-#' - Highlighted points for functionally enriched loci
+#' - Automatic chromosome ordering (LG1, LG2, ..., LG24, U)
 #' - Optional significance threshold line
-#' - Labels for top significant hits
-#' - Proper handling of unmapped contigs
-#'
-#' The function matches the y_values vector (in VCF order) with genomic coordinates
-#' from the database and highlights any positions that appear in the functional
-#' summary from GO enrichment analysis.
+#' - Proper x-axis spacing and labeling
 #'
 #' @examples
 #' \dontrun{
 #' con <- connect_funseq_db("analysis.db")
+#' 
+#' # Define main chromosomes for consolidation
+#' define_chromosomes(con, c("LG1", "LG2", "LG3", "LG4", "LG5", "LG6", "LG7", "LG8", 
+#'                          "LG9", "LG10", "LG11", "LG12", "LG13", "LG14", "LG15", 
+#'                          "LG16", "LG17", "LG18", "LG19", "LG20", "LG21", "LG22", 
+#'                          "LG23", "LG24"))
 #' 
 #' # Get functional summary from enrichment analysis
 #' enrich_summary <- summarize_functional_loci(con, 
@@ -46,16 +62,26 @@
 #'                                           candidate_file_id,
 #'                                           blast_param_id = 1)
 #' 
-#' # Create Manhattan plot with RDA q-values
+#' # Create Manhattan plot with GO term labels (default)
 #' manhattan_plot <- create_functional_manhattan_plot(
 #'   con, 
 #'   y_values = rda.simple.pq$q.values,
 #'   vcf_file_id = 1,
 #'   functional_summary = enrich_summary,
 #'   y_label = "RDA q-value",
-#'   plot_title = "RDA Analysis with Functional Annotation",
-#'   signif_threshold = 0.01
+#'   plot_title = "RDA Analysis with Functional Annotation"
 #' )
+#' 
+#' # Create Manhattan plot with gene name labels
+#' manhattan_plot_genes <- create_functional_manhattan_plot(
+#'   con, 
+#'   y_values = rda.simple.pq$q.values,
+#'   vcf_file_id = 1,
+#'   functional_summary = enrich_summary,
+#'   label_type = "gene_name",
+#'   y_label = "RDA q-value"
+#' )
+#' 
 #' print(manhattan_plot)
 #' }
 #'
@@ -68,7 +94,8 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
                                            highlight_color = "#D0DBEE",
                                            chr_colors = c("#A1B1CC", "#0E7EC0"),
                                            point_size = 1.2,
-                                           label_top_hits = 10,
+                                           label_type = "go_term",
+                                           label_top_hits = 0,
                                            verbose = TRUE) {
   
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
@@ -108,7 +135,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
     stringsAsFactors = FALSE
   )
   
-  # Use consolidated chromosome names from database if available
+  # Use consolidated chromosome names from database metadata
   manhattan_data$chromosome <- .get_consolidated_chromosome_names(con, manhattan_data$chromosome, verbose = verbose)
   
   # Transform y-values if requested
@@ -128,8 +155,23 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
   
   # Create chromosome factor with proper ordering
   unique_chrs <- unique(manhattan_data$chromosome)
+  
+  # Handle different chromosome naming conventions
+  # Extract numeric parts for proper ordering
   numeric_chrs <- unique_chrs[!unique_chrs %in% c("U", "X", "Y", "MT")]
-  numeric_chrs <- numeric_chrs[order(as.numeric(numeric_chrs))]
+  
+  # For LG chromosomes, extract number after LG
+  if (any(grepl("^LG", numeric_chrs))) {
+    lg_numbers <- as.numeric(gsub("^LG", "", numeric_chrs[grepl("^LG", numeric_chrs)]))
+    lg_numbers <- lg_numbers[!is.na(lg_numbers)]
+    numeric_chrs <- paste0("LG", sort(lg_numbers))
+  } else {
+    # For pure numeric chromosomes
+    pure_numeric <- suppressWarnings(as.numeric(numeric_chrs))
+    numeric_chrs <- numeric_chrs[order(pure_numeric, na.last = TRUE)]
+  }
+  
+  # Final chromosome order: numeric, then special, then unmapped
   chr_levels <- c(numeric_chrs, "X", "Y", "MT", "U")
   chr_levels <- chr_levels[chr_levels %in% unique_chrs]
   
@@ -185,9 +227,59 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
   # Calculate chromosome midpoints for x-axis labels
   chr_midpoints <- aggregate(x_pos ~ chromosome, data = manhattan_data, FUN = function(x) mean(range(x)))
   
-  # Identify top hits for labeling
+  # Identify loci for labeling - prioritize functional loci
   manhattan_data$label <- ""
-  if (label_top_hits > 0) {
+  
+  # First, label functional loci based on label_type
+  functional_loci <- which(manhattan_data$functional)
+  if (length(functional_loci) > 0) {
+    if (verbose) message("  - Labeling ", length(functional_loci), " functionally enriched loci")
+    
+    for (idx in functional_loci) {
+      label_text <- ""
+      
+      # Find corresponding loci_summary entry for this position
+      if (!is.null(functional_summary) && !is.null(functional_summary$loci_summary)) {
+        loci_match <- which(functional_summary$loci_summary$chromosome == manhattan_data$chromosome[idx] & 
+                           functional_summary$loci_summary$position == manhattan_data$position[idx])
+        
+        if (length(loci_match) > 0) {
+          loci_info <- functional_summary$loci_summary[loci_match[1], ]
+          
+          if (label_type == "go_term") {
+            # Use first enriched term
+            terms <- strsplit(manhattan_data$enriched_terms[idx], ";")[[1]]
+            if (length(terms) > 0) {
+              label_text <- trimws(terms[1])
+              # Truncate if too long
+              if (nchar(label_text) > 30) {
+                label_text <- paste0(substr(label_text, 1, 27), "...")
+              }
+            }
+          } else if (label_type == "gene_name" && !is.null(loci_info$gene_names) && !is.na(loci_info$gene_names) && loci_info$gene_names != "") {
+            # Use gene names
+            genes <- strsplit(loci_info$gene_names, ";")[[1]]
+            label_text <- trimws(genes[1])
+          } else if (label_type == "uniprot_accession" && !is.null(loci_info$uniprot_accession) && !is.na(loci_info$uniprot_accession)) {
+            # Use UniProt accession
+            label_text <- loci_info$uniprot_accession
+          }
+        }
+      }
+      
+      # Fallback to position if no specific label found
+      if (label_text == "") {
+        label_text <- paste0(manhattan_data$chromosome[idx], ":", format(manhattan_data$position[idx], big.mark = ","))
+      }
+      
+      manhattan_data$label[idx] <- label_text
+    }
+  }
+  
+  # Optionally label top statistical hits if no functional loci or if requested
+  if (label_top_hits > 0 && length(functional_loci) == 0) {
+    if (verbose) message("  - No functional loci found, labeling ", label_top_hits, " top statistical hits")
+    
     if (transform_y == "neg_log10") {
       top_indices <- order(manhattan_data$y_transformed, decreasing = TRUE)[1:min(label_top_hits, nrow(manhattan_data))]
     } else {
@@ -195,15 +287,8 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
     }
     
     for (idx in top_indices) {
-      if (manhattan_data$functional[idx]) {
-        # For functional loci, use first GO term
-        terms <- strsplit(manhattan_data$enriched_terms[idx], ";")[[1]]
-        manhattan_data$label[idx] <- trimws(terms[1])
-      } else {
-        # For non-functional loci, use position
-        manhattan_data$label[idx] <- paste0(manhattan_data$chromosome[idx], ":", 
-                                          format(manhattan_data$position[idx], big.mark = ","))
-      }
+      manhattan_data$label[idx] <- paste0(manhattan_data$chromosome[idx], ":", 
+                                         format(manhattan_data$position[idx], big.mark = ","))
     }
   }
   
@@ -295,7 +380,8 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
 
 #' Simple Manhattan plot without functional annotation
 #'
-#' Creates a basic Manhattan plot without functional highlighting.
+#' Creates a basic Manhattan plot without functional highlighting. Uses consolidated
+#' chromosome names from database if available.
 #'
 #' @param con Database connection object
 #' @param y_values Numeric vector of values to plot on y-axis (same order as VCF file variants)
@@ -304,7 +390,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
 #' @param plot_title Character. Title for the plot. Default is "Manhattan Plot"
 #' @param signif_threshold Numeric. Significance threshold line to draw. Default is 0.01
 #' @param transform_y Character. Transform y-values: "none", "neg_log10", or "log10". Default is "neg_log10"
-#' @param chr_colors Character vector. Two colors for alternating chromosomes
+#' @param chr_colors Character vector. Two colors for alternating chromosomes. Default is snapper colors
 #' @param point_size Numeric. Size of points. Default is 1.2
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
@@ -344,6 +430,7 @@ create_manhattan_plot <- function(con, y_values, vcf_file_id,
     highlight_color = NULL,
     chr_colors = chr_colors,
     point_size = point_size,
+    label_type = "position",
     label_top_hits = 0,
     verbose = verbose
   )
@@ -351,7 +438,7 @@ create_manhattan_plot <- function(con, y_values, vcf_file_id,
 
 # INTERNAL HELPER FUNCTIONS
 
-#' Get consolidated chromosome names from database
+#' Get consolidated chromosome names from database metadata
 #' 
 #' @param con Database connection object
 #' @param chromosomes Character vector of chromosome names from VCF
@@ -360,59 +447,65 @@ create_manhattan_plot <- function(con, y_values, vcf_file_id,
 #' @keywords internal
 .get_consolidated_chromosome_names <- function(con, chromosomes, verbose = FALSE) {
   
-  if (verbose) message("  - Using consolidated chromosome names from database...")
+  if (verbose) message("  - Using consolidated chromosome names from database metadata...")
   
-  # Check if chromosome consolidation table exists
-  tables <- DBI::dbListTables(con)
-  if (!"chromosome_consolidation" %in% tables) {
-    if (verbose) message("  - No chromosome consolidation found, using original names")
-    return(chromosomes)
-  }
-  
-  # Get consolidation mapping from database
+  # Get main chromosomes from metadata
   tryCatch({
-    consolidation_map <- DBI::dbGetQuery(con, "
-      SELECT original_name, consolidated_name 
-      FROM chromosome_consolidation
-    ")
-    
-    if (nrow(consolidation_map) == 0) {
-      if (verbose) message("  - Empty chromosome consolidation table, using original names")
+    # Check if metadata table exists
+    tables <- DBI::dbListTables(con)
+    if (!"metadata" %in% tables) {
+      if (verbose) message("  - No metadata table found, using original names")
       return(chromosomes)
     }
     
-    # Apply consolidation mapping
-    consolidated <- chromosomes
-    for (i in 1:nrow(consolidation_map)) {
-      original <- consolidation_map$original_name[i]
-      consolidated_name <- consolidation_map$consolidated_name[i]
-      consolidated[chromosomes == original] <- consolidated_name
+    # Get main chromosomes from metadata
+    result <- DBI::dbGetQuery(con, "
+      SELECT value FROM metadata WHERE key = 'main_chromosomes'
+    ")
+    
+    if (nrow(result) == 0) {
+      if (verbose) message("  - No main chromosomes defined, using original names")
+      return(chromosomes)
     }
     
+    # Parse JSON
+    main_chromosomes <- jsonlite::fromJSON(result$value[1])
+    
+    if (!is.character(main_chromosomes) || length(main_chromosomes) == 0) {
+      if (verbose) message("  - Invalid main chromosomes data, using original names")
+      return(chromosomes)
+    }
+    
+    # Apply consolidation: main chromosomes stay as-is, others become "U"
+    consolidated <- chromosomes
+    consolidated[!chromosomes %in% main_chromosomes] <- "U"
+    
     if (verbose) {
-      mapped_count <- sum(chromosomes %in% consolidation_map$original_name)
+      main_count <- sum(chromosomes %in% main_chromosomes)
+      scaffold_count <- sum(!chromosomes %in% main_chromosomes)
       total_count <- length(chromosomes)
-      message("  - Applied consolidation to ", mapped_count, " of ", total_count, " variants")
       
-      # Show unique mappings
-      unique_mappings <- unique(data.frame(
-        original = chromosomes[chromosomes %in% consolidation_map$original_name],
-        consolidated = consolidated[chromosomes %in% consolidation_map$original_name],
-        stringsAsFactors = FALSE
-      ))
+      message("  - Main chromosomes (", length(main_chromosomes), "): ", paste(main_chromosomes, collapse = ", "))
+      message("  - Applied consolidation to ", total_count, " variants:")
+      message("    - Main chromosomes: ", main_count, " variants")
+      message("    - Scaffolds -> U: ", scaffold_count, " variants")
       
-      if (nrow(unique_mappings) <= 30) {  # Only show if not too many
-        cat("  - Chromosome mappings applied:\n")
-        for (i in 1:nrow(unique_mappings)) {
-          cat("    ", unique_mappings$original[i], " -> ", unique_mappings$consolidated[i], "\n")
+      # Show some example mappings
+      unique_original <- unique(chromosomes[!chromosomes %in% main_chromosomes])
+      if (length(unique_original) > 0) {
+        sample_scaffolds <- head(unique_original, 5)
+        cat("  - Example scaffold mappings: ", paste(sample_scaffolds, "-> U", collapse = ", "))
+        if (length(unique_original) > 5) {
+          cat(" (and ", length(unique_original) - 5, " more)")
         }
+        cat("\n")
       }
     }
     
     return(consolidated)
     
   }, error = function(e) {
-    if (verbose) message("  - Error accessing consolidation table: ", e$message, ". Using original names.")
+    if (verbose) message("  - Error accessing metadata: ", e$message, ". Using original names.")
     return(chromosomes)
   })
 }
