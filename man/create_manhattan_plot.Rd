@@ -15,6 +15,7 @@ create_manhattan_plot(
   chr_colors = c("#A1B1CC", "#0E7EC0"),
   point_size = 1.2,
   numeric_x_labels = FALSE,
+  signif_line_color = "red",
   verbose = TRUE
 )
 }
@@ -39,6 +40,8 @@ create_manhattan_plot(
 
 \item{numeric_x_labels}{Logical. Use numeric labels (1,2,3,...,U) instead of chromosome names. Default is FALSE}
 
+\item{signif_line_color}{Character. Color for significance threshold line. Default is "red"}
+
 \item{verbose}{Logical. Print progress information. Default is TRUE}
 }
 \value{
@@ -52,7 +55,7 @@ chromosome names from database if available.
 \dontrun{
 # Basic Manhattan plot
 manhattan_plot <- create_manhattan_plot(
-  con, 
+  con,
   y_values = rda.simple.pq$q.values,
   vcf_file_id = 1,
   y_label = "RDA q-value",
@@ -61,7 +64,7 @@ manhattan_plot <- create_manhattan_plot(
 
 # Manhattan plot with numeric x-axis labels
 manhattan_plot_numeric <- create_manhattan_plot(
-  con, 
+  con,
   y_values = rda.simple.pq$q.values,
   vcf_file_id = 1,
   y_label = "RDA q-value",

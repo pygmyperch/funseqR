@@ -23,6 +23,7 @@ create_functional_manhattan_plot(
   enriched_point_shape = 19,
   enriched_point_color = NULL,
   use_label_lines = TRUE,
+  signif_line_color = "red",
   verbose = TRUE
 )
 
@@ -45,6 +46,7 @@ create_functional_manhattan_plot(
   enriched_point_shape = 19,
   enriched_point_color = NULL,
   use_label_lines = TRUE,
+  signif_line_color = "red",
   verbose = TRUE
 )
 }
@@ -84,6 +86,8 @@ create_functional_manhattan_plot(
 \item{enriched_point_color}{Character. Color for enriched loci points. Default is highlight_color}
 
 \item{use_label_lines}{Logical. Use indicator lines from labels to points. Default is TRUE}
+
+\item{signif_line_color}{Character. Color for significance threshold line. Default is "red"}
 
 \item{verbose}{Logical. Print progress information. Default is TRUE}
 
@@ -212,20 +216,20 @@ custom_plot <- create_functional_manhattan_plot(
 con <- connect_funseq_db("analysis.db")
 
 # Define main chromosomes for consolidation
-define_chromosomes(con, c("LG1", "LG2", "LG3", "LG4", "LG5", "LG6", "LG7", "LG8", 
-                         "LG9", "LG10", "LG11", "LG12", "LG13", "LG14", "LG15", 
-                         "LG16", "LG17", "LG18", "LG19", "LG20", "LG21", "LG22", 
+define_chromosomes(con, c("LG1", "LG2", "LG3", "LG4", "LG5", "LG6", "LG7", "LG8",
+                         "LG9", "LG10", "LG11", "LG12", "LG13", "LG14", "LG15",
+                         "LG16", "LG17", "LG18", "LG19", "LG20", "LG21", "LG22",
                          "LG23", "LG24"))
 
 # Get functional summary from enrichment analysis
-enrich_summary <- summarize_functional_loci(con, 
-                                          enrichment_results, 
+enrich_summary <- summarize_functional_loci(con,
+                                          enrichment_results,
                                           candidate_file_id,
                                           blast_param_id = 1)
 
 # Create Manhattan plot with GO term labels (default)
 manhattan_plot <- create_functional_manhattan_plot(
-  con, 
+  con,
   y_values = rda.simple.pq$q.values,
   vcf_file_id = 1,
   functional_summary = enrich_summary,
@@ -235,7 +239,7 @@ manhattan_plot <- create_functional_manhattan_plot(
 
 # Create Manhattan plot with gene name labels and numeric x-axis
 manhattan_plot_genes <- create_functional_manhattan_plot(
-  con, 
+  con,
   y_values = rda.simple.pq$q.values,
   vcf_file_id = 1,
   functional_summary = enrich_summary,
@@ -246,7 +250,7 @@ manhattan_plot_genes <- create_functional_manhattan_plot(
 
 # Create Manhattan plot with custom enriched point styling
 manhattan_plot_custom <- create_functional_manhattan_plot(
-  con, 
+  con,
   y_values = rda.simple.pq$q.values,
   vcf_file_id = 1,
   functional_summary = enrich_summary,

@@ -137,6 +137,7 @@ enhanced_plot <- create_functional_manhattan_plot(
   plot_title = "Enhanced RDA Manhattan Plot",
   label_type = "gene_name",
   signif_threshold = 0.05,
+  signif_line_color = "darkred",  # Custom significance line color
   # Custom enriched point styling
   enriched_point_size = 4,        # Larger enriched points
   enriched_point_shape = 17,      # Triangle shape (pch = 17)
@@ -162,6 +163,7 @@ no_lines_plot <- create_functional_manhattan_plot(
   plot_title = "Manhattan Plot Without Label Lines",
   label_type = "uniprot_accession",
   use_label_lines = FALSE,  # No indicator lines
+  signif_line_color = "blue", # Blue significance line
   enriched_point_size = 3,
   enriched_point_shape = 19,  # Circle
   enriched_point_color = "#FF6B6B",
@@ -227,6 +229,8 @@ cat("- Optional numeric x-axis labels (1,2,3,...,U)\n")
 cat("- Customizable enriched point styling (size, shape, color)\n")
 cat("- Indicator lines pointing from labels to enriched points\n")
 cat("- Equal chromosome widths for balanced visualization\n")
-cat("- Proper chromosome ordering and clean visualization\n")
+cat("- Clean publication-ready styling with axis lines and tick marks\n")
+cat("- Customizable significance threshold line color\n")
+cat("- Removed grid lines for cleaner appearance\n")
 
 close_funseq_db(con)
