@@ -171,7 +171,24 @@ no_lines_plot <- create_functional_manhattan_plot(
 ggsave("no_lines_manhattan.pdf", no_lines_plot, width = 12, height = 6)
 cat("Saved no_lines_manhattan.pdf\n")
 
-# 10. Check chromosome consolidation status
+# 10. Final example with equal chromosome widths (always used)
+cat("\n=== Creating Final Manhattan Plot with Equal Chromosome Widths ===\n")
+
+# All plots use equal chromosome widths by default
+final_plot <- create_functional_manhattan_plot(
+  con, 
+  y_values = rda.simple.pq$q.values,
+  vcf_file_id = 1,
+  functional_summary = enrich_orf_summary,
+  y_label = "RDA q-value",
+  plot_title = "Manhattan Plot with Equal Chromosome Widths",
+  verbose = TRUE
+)
+
+ggsave("final_manhattan.pdf", final_plot, width = 12, height = 6)
+cat("Saved final_manhattan.pdf\n")
+
+# 11. Check chromosome consolidation status
 cat("\n=== Chromosome Consolidation Status ===\n")
 main_chroms <- DBI::dbGetQuery(con, "
   SELECT value FROM metadata WHERE key = 'main_chromosomes'
@@ -196,9 +213,10 @@ cat("4. functional_manhattan_uniprot.pdf - Functional plot with UniProt labels\n
 cat("5. numeric_manhattan.pdf - Plot with numeric x-axis labels (1,2,3,...,U)\n")
 cat("6. enhanced_manhattan.pdf - Enhanced plot with custom point styling and label lines\n")
 cat("7. no_lines_manhattan.pdf - Plot without label lines\n")
+cat("8. final_manhattan.pdf - Final example with equal chromosome widths\n")
 
 if (exists("enrich_raw_summary")) {
-  cat("8. functional_manhattan_raw.pdf - Raw sequence annotation comparison\n")
+  cat("9. functional_manhattan_raw.pdf - Raw sequence annotation comparison\n")
 }
 
 cat("\nKey improvements:\n")
@@ -208,6 +226,7 @@ cat("- Multiple label types: GO terms, gene names, UniProt accessions\n")
 cat("- Optional numeric x-axis labels (1,2,3,...,U)\n")
 cat("- Customizable enriched point styling (size, shape, color)\n")
 cat("- Indicator lines pointing from labels to enriched points\n")
+cat("- Equal chromosome widths for balanced visualization\n")
 cat("- Proper chromosome ordering and clean visualization\n")
 
 close_funseq_db(con)

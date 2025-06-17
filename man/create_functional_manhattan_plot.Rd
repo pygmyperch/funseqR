@@ -166,9 +166,14 @@ based on the label_type parameter. Labels are automatically applied to all enric
 \itemize{
 \item Alternating chromosome colors for easy visualization
 \item Automatic chromosome ordering (LG1, LG2, ..., LG24, U)
+\item Equal chromosome widths for balanced visualization
 \item Optional significance threshold line
 \item Proper x-axis spacing and labeling
 }
+
+\\strong{Chromosome Width:}
+Each chromosome gets equal width on the x-axis regardless of variant count,
+providing balanced visualization across all chromosomes.
 }
 \examples{
 \dontrun{

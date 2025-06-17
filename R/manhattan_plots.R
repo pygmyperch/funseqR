@@ -48,8 +48,13 @@
 #' \\strong{Visual Features:}
 #' - Alternating chromosome colors for easy visualization
 #' - Automatic chromosome ordering (LG1, LG2, ..., LG24, U)
+#' - Equal chromosome widths for balanced visualization
 #' - Optional significance threshold line
 #' - Proper x-axis spacing and labeling
+#' 
+#' \\strong{Chromosome Width:}
+#' Each chromosome gets equal width on the x-axis regardless of variant count,
+#' providing balanced visualization across all chromosomes.
 #'
 #' @examples
 #' \dontrun{
@@ -243,20 +248,52 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
     }
   }
   
-  # Prepare for plotting - calculate cumulative positions for x-axis
+  # Prepare for plotting - calculate x-axis positions with equal chromosome widths
   manhattan_data <- manhattan_data[order(manhattan_data$chromosome, manhattan_data$position), ]
   
-  # Calculate cumulative positions for continuous x-axis
-  chr_lengths <- aggregate(position ~ chromosome, data = manhattan_data, FUN = max)
-  chr_lengths$cum_length <- cumsum(c(0, chr_lengths$position[-nrow(chr_lengths)]))
+  # Equal width for each chromosome regardless of variant count
+  unique_chrs_ordered <- levels(manhattan_data$chromosome)
+  n_chrs <- length(unique_chrs_ordered)
+  chr_width <- 1.0  # Each chromosome gets width of 1
+  chr_spacing <- 0.2  # Gap between chromosomes
   
-  # Add cumulative positions to data
-  manhattan_data <- merge(manhattan_data, chr_lengths[, c("chromosome", "cum_length")], 
-                         by = "chromosome", all.x = TRUE)
-  manhattan_data$x_pos <- manhattan_data$position + manhattan_data$cum_length
+  if (verbose) message("  - Using equal chromosome widths (", n_chrs, " chromosomes)")
   
-  # Calculate chromosome midpoints for x-axis labels
-  chr_midpoints <- aggregate(x_pos ~ chromosome, data = manhattan_data, FUN = function(x) mean(range(x)))
+  # Calculate x positions with equal spacing
+  manhattan_data$x_pos <- NA
+  chr_midpoints <- data.frame(
+    chromosome = unique_chrs_ordered,
+    x_pos = NA,
+    stringsAsFactors = FALSE
+  )
+  
+  for (i in seq_along(unique_chrs_ordered)) {
+    chr <- unique_chrs_ordered[i]
+    chr_data <- manhattan_data[manhattan_data$chromosome == chr, ]
+    
+    if (nrow(chr_data) > 0) {
+      # Calculate start position for this chromosome
+      chr_start <- (i - 1) * (chr_width + chr_spacing)
+      chr_end <- chr_start + chr_width
+      chr_midpoints$x_pos[i] <- chr_start + chr_width / 2
+      
+      # Distribute variants evenly within chromosome width
+      if (nrow(chr_data) == 1) {
+        manhattan_data[manhattan_data$chromosome == chr, "x_pos"] <- chr_midpoints$x_pos[i]
+      } else {
+        # Scale positions within chromosome width
+        pos_range <- range(chr_data$position)
+        if (pos_range[1] == pos_range[2]) {
+          # All positions the same
+          manhattan_data[manhattan_data$chromosome == chr, "x_pos"] <- chr_midpoints$x_pos[i]
+        } else {
+          # Scale positions proportionally within chromosome width
+          scaled_pos <- chr_start + (chr_data$position - pos_range[1]) / (pos_range[2] - pos_range[1]) * chr_width
+          manhattan_data[manhattan_data$chromosome == chr, "x_pos"] <- scaled_pos
+        }
+      }
+    }
+  }
   
   # Create numeric labels if requested
   if (numeric_x_labels) {
