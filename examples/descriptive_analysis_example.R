@@ -87,6 +87,20 @@ cat("  by_chromosome = FALSE,\n")
 cat("  by_blast_param = FALSE\n")
 cat(")\n\n")
 
+cat("5. COG CATEGORY ANALYSIS (eggNOG)\n")
+cat("----------------------------------\n")
+cat("# Analyze COG functional categories from eggNOG annotations\n")
+cat("cog_summary <- summarize_cog_categories(con)\n")
+cat("print(cog_summary$overview)  # COG category coverage statistics\n")
+cat("print(cog_summary$category_distribution)  # Frequency of each COG category\n")
+cat("print(cog_summary$functional_groups)  # Analysis by major functional areas\n\n")
+
+cat("# Focus on specific BLAST parameter set\n")
+cat("cog_summary_blast1 <- summarize_cog_categories(con, blast_param_id = 1)\n\n")
+
+cat("# Set minimum frequency threshold for cleaner results\n")
+cat("cog_summary_filtered <- summarize_cog_categories(con, min_frequency = 5)\n\n")
+
 cat("=== PRACTICAL ANALYSIS WORKFLOWS ===\n\n")
 
 cat("WORKFLOW 1: Quality Assessment\n")
@@ -162,6 +176,13 @@ cat("}\n\n")
 cat("# Export functional profile\n")
 cat("write.csv(profile$loci_summary, 'candidate_loci_summary.csv', row.names = FALSE)\n")
 cat("write.csv(profile$functional_diversity, 'functional_diversity.csv', row.names = FALSE)\n\n")
+
+cat("# Export COG analysis results\n")
+cat("write.csv(cog_summary$overview, 'cog_overview.csv', row.names = FALSE)\n")
+cat("write.csv(cog_summary$category_distribution, 'cog_category_distribution.csv', row.names = FALSE)\n")
+cat("if (!is.null(cog_summary$functional_groups)) {\n")
+cat("  write.csv(cog_summary$functional_groups, 'cog_functional_groups.csv', row.names = FALSE)\n")
+cat("}\n\n")
 
 cat("CREATE SUMMARY REPORT\n")
 cat("---------------------\n")
@@ -259,6 +280,11 @@ cat("             blast_quality, functional_diversity\n\n")
 cat("4. get_annotation_coverage(con, by_chromosome = TRUE, ...)\n")
 cat("   - Coverage statistics across annotation types and genomic regions\n")
 cat("   - Returns: overall, by_type, by_chromosome, by_blast_param, quality_metrics\n\n")
+
+cat("5. summarize_cog_categories(con, blast_param_id = NULL, ...)\n")
+cat("   - Comprehensive COG functional category analysis from eggNOG\n")
+cat("   - Returns: overview, category_distribution, functional_groups, \n")
+cat("             annotation_coverage, category_descriptions\n\n")
 
 cat("These functions provide the foundation for comprehensive functional\n")
 cat("genomics analysis in funseqR. Use them to assess data quality,\n")

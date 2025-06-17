@@ -80,7 +80,11 @@ summarize_go_annotations <- function(con, blast_param_id = NULL, include_evidenc
     ORDER BY gt.go_category
   ")
   
-  overview <- DBI::dbGetQuery(con, overview_query, params)
+  if (length(params) > 0) {
+    overview <- DBI::dbGetQuery(con, overview_query, params)
+  } else {
+    overview <- DBI::dbGetQuery(con, overview_query)
+  }
   
   # 2. Top GO terms by category
   if (verbose) message("  - Finding top GO terms by category...")
@@ -136,7 +140,11 @@ summarize_go_annotations <- function(con, blast_param_id = NULL, include_evidenc
       ORDER BY gt.go_category, count DESC
     ")
     
-    evidence_summary <- DBI::dbGetQuery(con, evidence_query, params)
+    if (length(params) > 0) {
+      evidence_summary <- DBI::dbGetQuery(con, evidence_query, params)
+    } else {
+      evidence_summary <- DBI::dbGetQuery(con, evidence_query)
+    }
   }
   
   # 4. Coverage statistics across BLAST parameters
@@ -536,15 +544,20 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
   
   # Combine all conditions
   where_clause <- ""
-  if (length(base_conditions) > 0 || loci_condition != "") {
-    conditions <- c(base_conditions)
-    if (loci_condition != "") {
-      where_clause <- paste("WHERE", paste(conditions, collapse = " AND "), loci_condition)
-    } else {
-      where_clause <- paste("WHERE", paste(conditions, collapse = " AND "))
-    }
-  } else if (loci_condition != "") {
-    where_clause <- paste("WHERE", substr(loci_condition, 5, nchar(loci_condition)))  # Remove "AND "
+  all_conditions <- c()
+  
+  if (length(base_conditions) > 0) {
+    all_conditions <- c(all_conditions, base_conditions)
+  }
+  
+  if (loci_condition != "") {
+    # Remove "AND " from the beginning of loci_condition
+    loci_condition_clean <- substr(loci_condition, 5, nchar(loci_condition))
+    all_conditions <- c(all_conditions, loci_condition_clean)
+  }
+  
+  if (length(all_conditions) > 0) {
+    where_clause <- paste("WHERE", paste(all_conditions, collapse = " AND "))
   }
   
   # 1. Loci summary
@@ -566,7 +579,11 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
     ", where_clause
   )
   
-  loci_summary <- DBI::dbGetQuery(con, loci_summary_query, params)
+  if (length(params) > 0) {
+    loci_summary <- DBI::dbGetQuery(con, loci_summary_query, params)
+  } else {
+    loci_summary <- DBI::dbGetQuery(con, loci_summary_query)
+  }
   
   # 2. GO profile (using existing function)
   if (verbose) message("  - Analyzing GO term profile...")
@@ -600,7 +617,11 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
       LIMIT 50
     ")
     
-    pathway_profile <- DBI::dbGetQuery(con, pathway_query, params)
+    if (length(params) > 0) {
+      pathway_profile <- DBI::dbGetQuery(con, pathway_query, params)
+    } else {
+      pathway_profile <- DBI::dbGetQuery(con, pathway_query)
+    }
   }
   
   # 5. BLAST quality statistics (if requested)
@@ -627,7 +648,11 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
       ", where_clause
     )
     
-    blast_quality <- DBI::dbGetQuery(con, blast_quality_query, params)
+    if (length(params) > 0) {
+      blast_quality <- DBI::dbGetQuery(con, blast_quality_query, params)
+    } else {
+      blast_quality <- DBI::dbGetQuery(con, blast_quality_query)
+    }
   }
   
   # 6. Functional diversity metrics
@@ -664,7 +689,11 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
     FROM functional_stats
   ")
   
-  functional_diversity <- DBI::dbGetQuery(con, diversity_query, params)
+  if (length(params) > 0) {
+    functional_diversity <- DBI::dbGetQuery(con, diversity_query, params)
+  } else {
+    functional_diversity <- DBI::dbGetQuery(con, diversity_query)
+  }
   
   # Clean up temporary table if created
   if (!is.null(candidate_loci)) {
@@ -1454,6 +1483,255 @@ annotate_with_eggnog <- function(con, eggnog_results_file, blast_param_id = NULL
     message("  - COG categories: ", cog_categories_added)
     message("  - KEGG pathways: ", kegg_pathways_added)
     message("  - Match rate: ", round(matched_count/total_processed*100, 1), "%")
+  }
+  
+  return(result)
+}
+
+#' Summarize COG categories from eggNOG annotations
+#'
+#' Provides comprehensive analysis of COG (Clusters of Orthologous Groups) functional 
+#' categories from eggNOG annotations, including distribution patterns and coverage statistics.
+#'
+#' @param con Database connection object
+#' @param blast_param_id Integer. Specific BLAST parameter set to analyze. If NULL, analyzes all.
+#' @param include_functional_groups Logical. Group COG categories by major functional areas. Default is TRUE.
+#' @param min_frequency Integer. Minimum frequency threshold for COG categories to include. Default is 1.
+#' @param verbose Logical. Print progress information. Default is TRUE.
+#'
+#' @return List containing COG category analysis:
+#' \itemize{
+#'   \item overview: Summary statistics of COG category coverage
+#'   \item category_distribution: Frequency of each COG category
+#'   \item functional_groups: Analysis by major functional areas (if include_functional_groups = TRUE)
+#'   \item annotation_coverage: Coverage statistics across annotations
+#'   \item category_descriptions: Full descriptions of COG categories found
+#' }
+#'
+#' @details
+#' COG categories are organized into major functional groups:
+#' \itemize{
+#'   \item Information Storage and Processing: Categories A, B, J, K, L
+#'   \item Cellular Processes and Signaling: Categories D, M, N, O, T, U, V, W, Y, Z
+#'   \item Metabolism: Categories C, E, F, G, H, I, P, Q
+#'   \item Poorly Characterized: Categories R, S
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' con <- connect_funseq_db("analysis.db")
+#' 
+#' # Analyze all COG categories
+#' cog_summary <- summarize_cog_categories(con)
+#' print(cog_summary$overview)
+#' print(cog_summary$functional_groups)
+#' 
+#' # Focus on specific BLAST parameter set
+#' cog_summary_blast1 <- summarize_cog_categories(con, blast_param_id = 1)
+#' 
+#' close_funseq_db(con)
+#' }
+#'
+#' @export
+summarize_cog_categories <- function(con, blast_param_id = NULL, include_functional_groups = TRUE, 
+                                   min_frequency = 1, verbose = TRUE) {
+  
+  if (verbose) message("Summarizing COG categories from eggNOG annotations...")
+  
+  # Check if required tables exist
+  tables <- DBI::dbListTables(con)
+  required_tables <- c("eggnog_annotations", "cog_categories", "annotations", "blast_results")
+  missing_tables <- required_tables[!required_tables %in% tables]
+  
+  if (length(missing_tables) > 0) {
+    stop("Missing required tables for COG analysis: ", paste(missing_tables, collapse = ", "),
+         "\nPlease run setup_eggnog_database() and annotate_with_eggnog() first.")
+  }
+  
+  # Build base query with optional blast_param_id filter
+  base_where <- ""
+  params <- list()
+  
+  if (!is.null(blast_param_id)) {
+    base_where <- "WHERE bp.blast_param_id = ?"
+    params <- list(blast_param_id)
+    if (verbose) message("  - Filtering for blast_param_id: ", blast_param_id)
+  }
+  
+  # 1. Overview statistics
+  if (verbose) message("  - Computing COG category overview...")
+  
+  overview_query <- paste0("
+    SELECT 
+      COUNT(DISTINCT cc.cog_letter) as unique_cog_categories,
+      COUNT(cc.cog_category_id) as total_cog_assignments,
+      COUNT(DISTINCT ea.eggnog_annotation_id) as proteins_with_cog,
+      COUNT(DISTINCT a.annotation_id) as annotated_sequences,
+      COUNT(DISTINCT br.flanking_id) as annotated_loci
+    FROM cog_categories cc
+    JOIN eggnog_annotations ea ON cc.eggnog_annotation_id = ea.eggnog_annotation_id
+    JOIN annotations a ON ea.annotation_id = a.annotation_id
+    JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+    ", base_where
+  )
+  
+  if (length(params) > 0) {
+    overview <- DBI::dbGetQuery(con, overview_query, params)
+  } else {
+    overview <- DBI::dbGetQuery(con, overview_query)
+  }
+  
+  # 2. COG category distribution
+  if (verbose) message("  - Analyzing COG category distribution...")
+  
+  distribution_query <- paste0("
+    SELECT 
+      cc.cog_letter,
+      cc.cog_category,
+      cc.cog_description,
+      COUNT(cc.cog_category_id) as frequency,
+      COUNT(DISTINCT ea.eggnog_annotation_id) as unique_proteins,
+      COUNT(DISTINCT br.flanking_id) as unique_loci
+    FROM cog_categories cc
+    JOIN eggnog_annotations ea ON cc.eggnog_annotation_id = ea.eggnog_annotation_id
+    JOIN annotations a ON ea.annotation_id = a.annotation_id
+    JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+    ", base_where, "
+    GROUP BY cc.cog_letter, cc.cog_category, cc.cog_description
+    HAVING COUNT(cc.cog_category_id) >= ?
+    ORDER BY frequency DESC
+  ")
+  
+  distribution_params <- c(params, list(min_frequency))
+  category_distribution <- DBI::dbGetQuery(con, distribution_query, distribution_params)
+  
+  # 3. Functional group analysis (if requested)
+  functional_groups <- NULL
+  if (include_functional_groups) {
+    if (verbose) message("  - Analyzing functional group patterns...")
+    
+    # Define COG functional groups
+    functional_group_mapping <- data.frame(
+      cog_letter = c("A", "B", "J", "K", "L",  # Information Storage and Processing
+                     "D", "M", "N", "O", "T", "U", "V", "W", "Y", "Z",  # Cellular Processes
+                     "C", "E", "F", "G", "H", "I", "P", "Q",  # Metabolism
+                     "R", "S"),  # Poorly Characterized
+      functional_group = c(rep("Information Storage and Processing", 5),
+                          rep("Cellular Processes and Signaling", 10),
+                          rep("Metabolism", 8),
+                          rep("Poorly Characterized", 2)),
+      stringsAsFactors = FALSE
+    )
+    
+    if (nrow(category_distribution) > 0) {
+      # Add functional group information to category distribution
+      distribution_with_groups <- merge(category_distribution, functional_group_mapping, 
+                                      by = "cog_letter", all.x = TRUE)
+      
+      # Summarize by functional group
+      functional_groups <- aggregate(
+        cbind(frequency, unique_proteins, unique_loci) ~ functional_group,
+        data = distribution_with_groups,
+        FUN = sum,
+        na.rm = TRUE
+      )
+      
+      # Add percentage calculations
+      total_assignments <- sum(functional_groups$frequency)
+      functional_groups$percent_of_assignments <- round(
+        (functional_groups$frequency / total_assignments) * 100, 2
+      )
+      
+      # Order by frequency
+      functional_groups <- functional_groups[order(functional_groups$frequency, decreasing = TRUE), ]
+    } else {
+      functional_groups <- data.frame(
+        functional_group = character(0),
+        frequency = integer(0),
+        unique_proteins = integer(0),
+        unique_loci = integer(0),
+        percent_of_assignments = numeric(0)
+      )
+    }
+  }
+  
+  # 4. Annotation coverage statistics
+  if (verbose) message("  - Computing annotation coverage...")
+  
+  coverage_query <- paste0("
+    WITH cog_coverage AS (
+      SELECT 
+        bp.blast_param_id,
+        bp.blast_type,
+        bp.db_name,
+        COUNT(DISTINCT cc.cog_letter) as unique_cog_categories,
+        COUNT(cc.cog_category_id) as total_cog_assignments,
+        COUNT(DISTINCT ea.eggnog_annotation_id) as proteins_with_cog,
+        COUNT(DISTINCT br.flanking_id) as loci_with_cog
+      FROM blast_parameters bp
+      LEFT JOIN blast_results br ON bp.blast_param_id = br.blast_param_id
+      LEFT JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      LEFT JOIN eggnog_annotations ea ON a.annotation_id = ea.annotation_id
+      LEFT JOIN cog_categories cc ON ea.eggnog_annotation_id = cc.eggnog_annotation_id
+      ", base_where == "" ? "" : gsub("WHERE", "AND", base_where), "
+      GROUP BY bp.blast_param_id, bp.blast_type, bp.db_name
+      ORDER BY bp.blast_param_id
+    )
+    SELECT * FROM cog_coverage
+  ")
+  
+  if (length(params) > 0 && !is.null(blast_param_id)) {
+    # For specific blast_param_id, add comparison with overall
+    coverage_params <- params
+  } else {
+    coverage_params <- list()
+  }
+  
+  annotation_coverage <- DBI::dbGetQuery(con, coverage_query, coverage_params)
+  
+  # 5. Create comprehensive category descriptions
+  category_descriptions <- if (nrow(category_distribution) > 0) {
+    unique(category_distribution[, c("cog_letter", "cog_category", "cog_description")])
+  } else {
+    data.frame(
+      cog_letter = character(0),
+      cog_category = character(0), 
+      cog_description = character(0)
+    )
+  }
+  
+  # Compile results
+  result <- list(
+    overview = overview,
+    category_distribution = category_distribution,
+    functional_groups = functional_groups,
+    annotation_coverage = annotation_coverage,
+    category_descriptions = category_descriptions,
+    parameters = list(
+      blast_param_id = blast_param_id,
+      include_functional_groups = include_functional_groups,
+      min_frequency = min_frequency
+    )
+  )
+  
+  if (verbose) {
+    message("COG category analysis complete:")
+    if (nrow(overview) > 0 && overview$total_cog_assignments[1] > 0) {
+      message("  - Unique COG categories: ", overview$unique_cog_categories[1])
+      message("  - Total COG assignments: ", overview$total_cog_assignments[1])
+      message("  - Proteins with COG: ", overview$proteins_with_cog[1])
+      message("  - Annotated loci: ", overview$annotated_loci[1])
+      
+      if (include_functional_groups && !is.null(functional_groups) && nrow(functional_groups) > 0) {
+        message("  - Top functional group: ", 
+                functional_groups$functional_group[1], " (", 
+                functional_groups$percent_of_assignments[1], "% of assignments)")
+      }
+    } else {
+      message("  - No COG annotations found with current filters")
+    }
   }
   
   return(result)
