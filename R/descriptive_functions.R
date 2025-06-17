@@ -1675,7 +1675,7 @@ summarize_cog_categories <- function(con, blast_param_id = NULL, include_functio
       LEFT JOIN annotations a ON br.blast_result_id = a.blast_result_id
       LEFT JOIN eggnog_annotations ea ON a.annotation_id = ea.annotation_id
       LEFT JOIN cog_categories cc ON ea.eggnog_annotation_id = cc.eggnog_annotation_id
-      ", base_where == "" ? "" : gsub("WHERE", "AND", base_where), "
+      ", if (base_where == "") "" else gsub("WHERE", "AND", base_where), "
       GROUP BY bp.blast_param_id, bp.blast_type, bp.db_name
       ORDER BY bp.blast_param_id
     )
