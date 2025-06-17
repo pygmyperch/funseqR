@@ -18,6 +18,11 @@ create_functional_manhattan_plot(
   point_size = 1.2,
   label_type = "go_term",
   label_top_hits = 0,
+  numeric_x_labels = FALSE,
+  enriched_point_size = NULL,
+  enriched_point_shape = 19,
+  enriched_point_color = NULL,
+  use_label_lines = TRUE,
   verbose = TRUE
 )
 
@@ -35,6 +40,11 @@ create_functional_manhattan_plot(
   point_size = 1.2,
   label_type = "go_term",
   label_top_hits = 0,
+  numeric_x_labels = FALSE,
+  enriched_point_size = NULL,
+  enriched_point_shape = 19,
+  enriched_point_color = NULL,
+  use_label_lines = TRUE,
   verbose = TRUE
 )
 }
@@ -64,6 +74,16 @@ create_functional_manhattan_plot(
 \item{label_type}{Character. Type of labels for enriched loci: "go_term", "gene_name", "uniprot_accession", or "position". Default is "go_term"}
 
 \item{label_top_hits}{Integer. Number of top statistical hits to label if no functional loci. Default is 0}
+
+\item{numeric_x_labels}{Logical. Use numeric labels (1,2,3,...,U) instead of chromosome names (LG1,LG2,...,U). Default is FALSE}
+
+\item{enriched_point_size}{Numeric. Size of enriched loci points. Default is point_size * 1.5}
+
+\item{enriched_point_shape}{Integer. Shape (pch) for enriched loci points. Default is 19 (filled circle)}
+
+\item{enriched_point_color}{Character. Color for enriched loci points. Default is highlight_color}
+
+\item{use_label_lines}{Logical. Use indicator lines from labels to points. Default is TRUE}
 
 \item{verbose}{Logical. Print progress information. Default is TRUE}
 
@@ -208,14 +228,27 @@ manhattan_plot <- create_functional_manhattan_plot(
   plot_title = "RDA Analysis with Functional Annotation"
 )
 
-# Create Manhattan plot with gene name labels
+# Create Manhattan plot with gene name labels and numeric x-axis
 manhattan_plot_genes <- create_functional_manhattan_plot(
   con, 
   y_values = rda.simple.pq$q.values,
   vcf_file_id = 1,
   functional_summary = enrich_summary,
   label_type = "gene_name",
+  numeric_x_labels = TRUE,
   y_label = "RDA q-value"
+)
+
+# Create Manhattan plot with custom enriched point styling
+manhattan_plot_custom <- create_functional_manhattan_plot(
+  con, 
+  y_values = rda.simple.pq$q.values,
+  vcf_file_id = 1,
+  functional_summary = enrich_summary,
+  enriched_point_size = 3,
+  enriched_point_shape = 17,  # Triangle
+  enriched_point_color = "red",
+  use_label_lines = TRUE
 )
 
 print(manhattan_plot)

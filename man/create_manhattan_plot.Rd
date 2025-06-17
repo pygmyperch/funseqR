@@ -14,6 +14,7 @@ create_manhattan_plot(
   transform_y = "neg_log10",
   chr_colors = c("#A1B1CC", "#0E7EC0"),
   point_size = 1.2,
+  numeric_x_labels = FALSE,
   verbose = TRUE
 )
 }
@@ -36,6 +37,8 @@ create_manhattan_plot(
 
 \item{point_size}{Numeric. Size of points. Default is 1.2}
 
+\item{numeric_x_labels}{Logical. Use numeric labels (1,2,3,...,U) instead of chromosome names. Default is FALSE}
+
 \item{verbose}{Logical. Print progress information. Default is TRUE}
 }
 \value{
@@ -47,12 +50,23 @@ chromosome names from database if available.
 }
 \examples{
 \dontrun{
+# Basic Manhattan plot
 manhattan_plot <- create_manhattan_plot(
   con, 
   y_values = rda.simple.pq$q.values,
   vcf_file_id = 1,
   y_label = "RDA q-value",
   plot_title = "RDA Analysis"
+)
+
+# Manhattan plot with numeric x-axis labels
+manhattan_plot_numeric <- create_manhattan_plot(
+  con, 
+  y_values = rda.simple.pq$q.values,
+  vcf_file_id = 1,
+  y_label = "RDA q-value",
+  plot_title = "RDA Analysis",
+  numeric_x_labels = TRUE
 )
 }
 
