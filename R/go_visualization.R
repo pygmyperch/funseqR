@@ -11,6 +11,7 @@
 #' @param min_fold_enrichment Numeric. Minimum fold enrichment to display. Default is 1.5
 #' @param title Character. Plot title. Default is auto-generated
 #' @param color_palette Character. Color palette for significance. Default is "plasma"
+#' @param significance_threshold Numeric. FDR threshold used for significance. Default is 0.05
 #'
 #' @return ggplot object
 #'
@@ -31,7 +32,7 @@
 #' @importFrom stringr str_trunc
 #' @export
 create_go_bubble_plot <- function(enrichment_results, max_terms = 20, min_fold_enrichment = 1.5, 
-                                  title = NULL, color_palette = "plasma") {
+                                  title = NULL, color_palette = "plasma", significance_threshold = 0.05) {
   
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     stop("ggplot2 package is required for this function")
@@ -93,12 +94,12 @@ create_go_bubble_plot <- function(enrichment_results, max_terms = 20, min_fold_e
                           labels = c("1", "2", "5", "10", "20", "50")) +
     ggplot2::labs(
       title = title,
-      subtitle = paste0("Top ", nrow(plot_data), " significantly enriched terms (FDR < 0.05)"),
+      subtitle = paste0("Top ", nrow(plot_data), " significantly enriched terms (FDR < ", significance_threshold, ")"),
       x = "Fold Enrichment (log scale)",
       y = "GO Term",
       caption = paste0("Bubble size = gene count; Color = significance\n",
                       "Total terms tested: ", nrow(enrichment_results), 
-                      "; Significant: ", sum(enrichment_results$p_adjusted < 0.05))
+                      "; Significant: ", sum(enrichment_results$p_adjusted < significance_threshold))
     ) +
     ggplot2::theme_minimal() +
     ggplot2::theme(

@@ -330,6 +330,7 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
 #' @param ontology Character. GO ontology: "BP" (Biological Process), "MF" (Molecular Function), or "CC" (Cellular Component)
 #' @param min_genes Integer. Minimum genes required for a GO term to be tested. Default is 5
 #' @param max_genes Integer. Maximum genes for a GO term (to exclude very broad terms). Default is 500
+#' @param significance_threshold Numeric. FDR threshold for significance classification. Default is 0.05
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
 #' @return Data frame with enrichment results, sorted by adjusted p-value
@@ -342,12 +343,18 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
 #' @examples
 #' \dontrun{
 #' go_data <- extract_go_terms_for_enrichment(con, fg_id, bg_id)
+#' 
+#' # Standard analysis (FDR < 0.05)
 #' bp_results <- perform_go_enrichment(go_data, "BP")
+#' 
+#' # More lenient threshold (FDR < 0.1)
+#' bp_results_lenient <- perform_go_enrichment(go_data, "BP", significance_threshold = 0.1)
+#' 
 #' head(bp_results)
 #' }
 #'
 #' @export
-perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_genes = 500, verbose = TRUE) {
+perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_genes = 500, significance_threshold = 0.05, verbose = TRUE) {
 
   if (verbose) message("Performing GO enrichment analysis for ontology: ", ontology)
 
@@ -434,17 +441,17 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
 
   # Add significance levels
   enrichment_results$significance_level <- ifelse(
-    enrichment_results$p_adjusted < 0.01, "highly_significant",
-    ifelse(enrichment_results$p_adjusted < 0.05, "significant",
-           ifelse(enrichment_results$p_adjusted < 0.1, "trending", "not_significant"))
+    enrichment_results$p_adjusted < (significance_threshold / 5), "highly_significant",
+    ifelse(enrichment_results$p_adjusted < significance_threshold, "significant",
+           ifelse(enrichment_results$p_adjusted < (significance_threshold * 2), "trending", "not_significant"))
   )
 
   # Sort by significance and fold enrichment
   enrichment_results <- enrichment_results[order(enrichment_results$p_adjusted, -enrichment_results$fold_enrichment), ]
 
   if (verbose) {
-    sig_count <- sum(enrichment_results$p_adjusted < 0.05)
-    message("  - Enrichment analysis complete: ", nrow(enrichment_results), " terms tested, ", sig_count, " significantly enriched")
+    sig_count <- sum(enrichment_results$p_adjusted < significance_threshold)
+    message("  - Enrichment analysis complete: ", nrow(enrichment_results), " terms tested, ", sig_count, " significantly enriched (FDR < ", significance_threshold, ")")
   }
 
   return(enrichment_results)

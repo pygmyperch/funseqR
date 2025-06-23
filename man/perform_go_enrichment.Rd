@@ -9,6 +9,7 @@ perform_go_enrichment(
   ontology = "BP",
   min_genes = 5,
   max_genes = 500,
+  significance_threshold = 0.05,
   verbose = TRUE
 )
 }
@@ -20,6 +21,8 @@ perform_go_enrichment(
 \item{min_genes}{Integer. Minimum genes required for a GO term to be tested. Default is 5}
 
 \item{max_genes}{Integer. Maximum genes for a GO term (to exclude very broad terms). Default is 500}
+
+\item{significance_threshold}{Numeric. FDR threshold for significance classification. Default is 0.05}
 
 \item{verbose}{Logical. Print progress information. Default is TRUE}
 }
@@ -37,7 +40,13 @@ Applies FDR correction for multiple testing.
 \examples{
 \dontrun{
 go_data <- extract_go_terms_for_enrichment(con, fg_id, bg_id)
+
+# Standard analysis (FDR < 0.05)
 bp_results <- perform_go_enrichment(go_data, "BP")
+
+# More lenient threshold (FDR < 0.1)
+bp_results_lenient <- perform_go_enrichment(go_data, "BP", significance_threshold = 0.1)
+
 head(bp_results)
 }
 

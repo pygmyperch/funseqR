@@ -9,7 +9,8 @@ create_go_bubble_plot(
   max_terms = 20,
   min_fold_enrichment = 1.5,
   title = NULL,
-  color_palette = "plasma"
+  color_palette = "plasma",
+  significance_threshold = 0.05
 )
 }
 \arguments{
@@ -22,6 +23,8 @@ create_go_bubble_plot(
 \item{title}{Character. Plot title. Default is auto-generated}
 
 \item{color_palette}{Character. Color palette for significance. Default is "plasma"}
+
+\item{significance_threshold}{Numeric. FDR threshold used for significance. Default is 0.05}
 }
 \value{
 ggplot object

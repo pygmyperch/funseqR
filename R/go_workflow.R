@@ -10,9 +10,10 @@
 #' @param background_file_id Integer. File ID of background dataset (or NULL to auto-detect)
 #' @param blast_param_id Integer. Optional. Specific BLAST run ID to use for both datasets.
 #'   If NULL, uses all available annotations. Default is NULL.
-#' @param ontologies Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF")
+#' @param ontologies Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF", "CC")
 #' @param min_genes Integer. Minimum genes for GO term testing. Default is 5
 #' @param max_genes Integer. Maximum genes for GO term testing. Default is 500
+#' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
 #' @param store_results Logical. Store results in database. Default is TRUE
 #' @param create_plots Logical. Generate visualization plots. Default is TRUE
 #' @param verbose Logical. Print progress information. Default is TRUE
@@ -36,24 +37,29 @@
 #' \dontrun{
 #' con <- connect_funseq_db("analysis.db")
 #' 
-#' # Use all available annotations (default behavior)
+#' # Use all available annotations and all ontologies (default behavior)
 #' results <- run_go_enrichment_workflow(con, "candidates.vcf")
+#' 
+#' # Use custom significance threshold (e.g., 0.1 for more lenient)
+#' results_lenient <- run_go_enrichment_workflow(con, "candidates.vcf", significance_threshold = 0.1)
+#' 
+#' # Use only specific ontologies and stricter threshold
+#' results_strict <- run_go_enrichment_workflow(con, "candidates.vcf", 
+#'                                             ontologies = c("BP", "MF"), 
+#'                                             significance_threshold = 0.01)
 #' 
 #' # Use only ORF-based annotations
 #' results_orf <- run_go_enrichment_workflow(con, "candidates.vcf", blast_param_id = 1)
 #' 
-#' # Use only raw sequence annotations
-#' results_raw <- run_go_enrichment_workflow(con, "candidates.vcf", blast_param_id = 2)
-#' 
-#' print(results_orf$summary)
-#' print(results_orf$plots$BP_bubble)
+#' print(results_lenient$summary)
+#' print(results_lenient$plots$BP_bubble)
 #' }
 #'
 #' @export
 run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_id = NULL,
-                                      blast_param_id = NULL, ontologies = c("BP", "MF"), 
-                                      min_genes = 5, max_genes = 500, store_results = TRUE, 
-                                      create_plots = TRUE, verbose = TRUE) {
+                                      blast_param_id = NULL, ontologies = c("BP", "MF", "CC"), 
+                                      min_genes = 5, max_genes = 500, significance_threshold = 0.05,
+                                      store_results = TRUE, create_plots = TRUE, verbose = TRUE) {
   
   if (verbose) message("=== Starting GO Enrichment Workflow ===")
   
@@ -117,7 +123,8 @@ run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_
     if (verbose) message("  - Analyzing ", ontology, " ontology...")
     
     results <- perform_go_enrichment(go_data, ontology, min_genes = min_genes, 
-                                   max_genes = max_genes, verbose = verbose)
+                                   max_genes = max_genes, significance_threshold = significance_threshold,
+                                   verbose = verbose)
     
     enrichment_results[[ontology]] <- results
     
@@ -126,7 +133,7 @@ run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_
       enrichment_id <- store_go_enrichment_results(
         con, candidate_import$file_id, background_file_id,
         results, ontology, 
-        parameters = list(min_genes = min_genes, max_genes = max_genes),
+        parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
         verbose = verbose
       )
       enrichment_ids[[ontology]] <- enrichment_id
@@ -173,8 +180,8 @@ run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_
   summary_stats <- data.frame(
     Ontology = names(enrichment_results),
     Terms_Tested = sapply(enrichment_results, nrow),
-    Significant_Terms = sapply(enrichment_results, function(x) sum(x$p_adjusted < 0.05, na.rm = TRUE)),
-    Highly_Significant = sapply(enrichment_results, function(x) sum(x$p_adjusted < 0.01, na.rm = TRUE)),
+    Significant_Terms = sapply(enrichment_results, function(x) sum(x$p_adjusted < significance_threshold, na.rm = TRUE)),
+    Highly_Significant = sapply(enrichment_results, function(x) sum(x$p_adjusted < (significance_threshold / 5), na.rm = TRUE)),
     Top_Enrichment = sapply(enrichment_results, function(x) {
       if (nrow(x) > 0) round(max(x$fold_enrichment, na.rm = TRUE), 2) else 0
     }),
@@ -189,7 +196,7 @@ run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_
     foreground_genes = length(go_data$foreground$genes),
     background_genes = length(go_data$background$genes),
     ontologies_tested = ontologies,
-    parameters = list(min_genes = min_genes, max_genes = max_genes),
+    parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
     summary_stats = summary_stats,
     stored_analysis_ids = enrichment_ids
   )

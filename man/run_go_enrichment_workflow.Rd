@@ -9,9 +9,10 @@ run_go_enrichment_workflow(
   candidate_vcf_file,
   background_file_id = NULL,
   blast_param_id = NULL,
-  ontologies = c("BP", "MF"),
+  ontologies = c("BP", "MF", "CC"),
   min_genes = 5,
   max_genes = 500,
+  significance_threshold = 0.05,
   store_results = TRUE,
   create_plots = TRUE,
   verbose = TRUE
@@ -27,11 +28,13 @@ run_go_enrichment_workflow(
 \item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets.
 If NULL, uses all available annotations. Default is NULL.}
 
-\item{ontologies}{Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF")}
+\item{ontologies}{Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF", "CC")}
 
 \item{min_genes}{Integer. Minimum genes for GO term testing. Default is 5}
 
 \item{max_genes}{Integer. Maximum genes for GO term testing. Default is 500}
+
+\item{significance_threshold}{Numeric. FDR threshold for significance. Default is 0.05}
 
 \item{store_results}{Logical. Store results in database. Default is TRUE}
 
@@ -66,17 +69,22 @@ consistency and enabling comparison of different annotation strategies.
 \dontrun{
 con <- connect_funseq_db("analysis.db")
 
-# Use all available annotations (default behavior)
+# Use all available annotations and all ontologies (default behavior)
 results <- run_go_enrichment_workflow(con, "candidates.vcf")
+
+# Use custom significance threshold (e.g., 0.1 for more lenient)
+results_lenient <- run_go_enrichment_workflow(con, "candidates.vcf", significance_threshold = 0.1)
+
+# Use only specific ontologies and stricter threshold
+results_strict <- run_go_enrichment_workflow(con, "candidates.vcf", 
+                                            ontologies = c("BP", "MF"), 
+                                            significance_threshold = 0.01)
 
 # Use only ORF-based annotations
 results_orf <- run_go_enrichment_workflow(con, "candidates.vcf", blast_param_id = 1)
 
-# Use only raw sequence annotations
-results_raw <- run_go_enrichment_workflow(con, "candidates.vcf", blast_param_id = 2)
-
-print(results_orf$summary)
-print(results_orf$plots$BP_bubble)
+print(results_lenient$summary)
+print(results_lenient$plots$BP_bubble)
 }
 
 }
