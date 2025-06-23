@@ -763,6 +763,7 @@ generate_candidate_loci_profile <- function(con, candidate_loci, background_file
       ORDER BY chromosome, position
     "
     candidate_coords <- DBI::dbGetQuery(con, loci_query, list(candidate_file_id))
+    if (verbose) message("    - Extracted ", nrow(candidate_coords), " candidate coordinates")
     
   } else if (is.data.frame(candidate_loci)) {
     # candidate_loci is a data frame with coordinates
@@ -830,7 +831,7 @@ generate_candidate_loci_profile <- function(con, candidate_loci, background_file
     blast_param_id = blast_param_id,
     include_blast_stats = TRUE,
     include_pathways = TRUE,
-    verbose = FALSE
+    verbose = TRUE
   )
   
   result$summary <- candidate_profile$loci_summary
@@ -1594,6 +1595,8 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
     base_conditions <- c(base_conditions, "bp.blast_param_id = ?")
     params <- c(params, list(blast_param_id))
     if (verbose) message("  - Using blast_param_id: ", blast_param_id)
+  } else {
+    if (verbose) message("  - No blast_param_id filter applied")
   }
   
   # Handle candidate loci filtering
@@ -1637,6 +1640,9 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
     where_clause <- paste("WHERE", paste(all_conditions, collapse = " AND "))
   }
   
+  if (verbose) message("  - WHERE clause: ", if (where_clause == "") "NONE" else where_clause)
+  if (verbose) message("  - Final params list length: ", length(params))
+  
   # 1. Loci summary
   if (verbose) message("  - Computing loci summary...")
   
@@ -1657,17 +1663,23 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
   )
   
   # Execute query with proper parameter handling
-  num_placeholders <- lengths(regmatches(loci_summary_query, gregexpr("\\?", loci_summary_query)))
-  if (num_placeholders > 0 && length(params) > 0) {
+  num_placeholders <- nchar(loci_summary_query) - nchar(gsub("\\?", "", loci_summary_query))
+  if (verbose) message("    - Loci summary query placeholders: ", num_placeholders, ", params length: ", length(params))
+  
+  if (num_placeholders > 0 && length(params) == num_placeholders) {
     loci_summary <- DBI::dbGetQuery(con, loci_summary_query, params)
-  } else {
+  } else if (num_placeholders == 0 && length(params) == 0) {
     loci_summary <- DBI::dbGetQuery(con, loci_summary_query)
+  } else {
+    stop("Parameter mismatch in loci_summary_query: ", num_placeholders, " placeholders, ", length(params), " parameters")
   }
   
   # 2. GO profile (using enhanced function with candidate loci)
   if (verbose) message("  - Analyzing GO term profile...")
+  if (verbose) message("    - Calling summarize_go_annotations with candidate_loci rows: ", 
+                      if (!is.null(candidate_loci)) nrow(candidate_loci) else "NULL")
   go_profile <- summarize_go_annotations(con, blast_param_id = blast_param_id, 
-                                        candidate_loci = candidate_loci, verbose = FALSE)
+                                        candidate_loci = candidate_loci, verbose = verbose)
   
   # 3. Protein profile (using existing function)
   if (verbose) message("  - Analyzing protein profile...")
