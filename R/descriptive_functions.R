@@ -434,7 +434,15 @@ summarize_kegg_pathways <- function(con, blast_param_id = NULL, candidate_loci =
   ")
   
   top_pathways_params <- c(params, list(min_frequency))
-  top_pathways <- DBI::dbGetQuery(con, top_pathways_query, top_pathways_params)
+  # Execute top pathways query with proper parameter handling
+  num_placeholders <- nchar(top_pathways_query) - nchar(gsub("\\?", "", top_pathways_query))
+  if (num_placeholders > 0 && length(top_pathways_params) == num_placeholders) {
+    top_pathways <- DBI::dbGetQuery(con, top_pathways_query, top_pathways_params)
+  } else if (num_placeholders == 0 && length(top_pathways_params) == 0) {
+    top_pathways <- DBI::dbGetQuery(con, top_pathways_query)
+  } else {
+    stop("Parameter mismatch in top_pathways_query: ", num_placeholders, " placeholders, ", length(top_pathways_params), " parameters")
+  }
   
   # 3. Coverage statistics across BLAST parameters
   if (verbose) message("  - Computing coverage statistics...")
@@ -2733,7 +2741,15 @@ summarize_cog_categories <- function(con, blast_param_id = NULL, include_functio
   ")
   
   distribution_params <- c(params, list(min_frequency))
-  category_distribution <- DBI::dbGetQuery(con, distribution_query, distribution_params)
+  # Execute distribution query with proper parameter handling
+  num_placeholders <- nchar(distribution_query) - nchar(gsub("\\?", "", distribution_query))
+  if (num_placeholders > 0 && length(distribution_params) == num_placeholders) {
+    category_distribution <- DBI::dbGetQuery(con, distribution_query, distribution_params)
+  } else if (num_placeholders == 0 && length(distribution_params) == 0) {
+    category_distribution <- DBI::dbGetQuery(con, distribution_query)
+  } else {
+    stop("Parameter mismatch in distribution_query: ", num_placeholders, " placeholders, ", length(distribution_params), " parameters")
+  }
   
   # 3. Functional group analysis (if requested)
   functional_groups <- NULL
@@ -2817,7 +2833,15 @@ summarize_cog_categories <- function(con, blast_param_id = NULL, include_functio
     coverage_params <- list()
   }
   
-  annotation_coverage <- DBI::dbGetQuery(con, coverage_query, coverage_params)
+  # Execute coverage query with proper parameter handling
+  num_placeholders <- nchar(coverage_query) - nchar(gsub("\\?", "", coverage_query))
+  if (num_placeholders > 0 && length(coverage_params) == num_placeholders) {
+    annotation_coverage <- DBI::dbGetQuery(con, coverage_query, coverage_params)
+  } else if (num_placeholders == 0 && length(coverage_params) == 0) {
+    annotation_coverage <- DBI::dbGetQuery(con, coverage_query)
+  } else {
+    stop("Parameter mismatch in coverage_query: ", num_placeholders, " placeholders, ", length(coverage_params), " parameters")
+  }
   
   # 5. Create comprehensive category descriptions
   category_descriptions <- if (nrow(category_distribution) > 0) {
