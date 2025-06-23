@@ -6,11 +6,14 @@
 #' Summarize GO annotations in the database
 #'
 #' Provides comprehensive statistics about GO term annotations across different
-#' ontology categories (BP, MF, CC) and blast parameter sets.
+#' ontology categories (BP, MF, CC) and blast parameter sets, with optional filtering
+#' for candidate loci and functional module grouping.
 #'
 #' @param con Database connection object
 #' @param blast_param_id Integer. Specific BLAST parameter set to analyze. If NULL, analyzes all.
+#' @param candidate_loci Data frame with chromosome and position columns, or NULL for all loci.
 #' @param include_evidence Logical. Include GO evidence code statistics. Default is TRUE.
+#' @param include_modules Logical. Group GO terms into functional modules. Default is FALSE.
 #' @param min_frequency Integer. Minimum frequency threshold for GO terms to include. Default is 1.
 #' @param verbose Logical. Print progress information. Default is TRUE.
 #'
@@ -20,6 +23,7 @@
 #'   \item top_terms: Most frequent GO terms by category
 #'   \item evidence_summary: GO evidence code distribution (if include_evidence = TRUE)
 #'   \item coverage_stats: Coverage statistics across BLAST parameters
+#'   \item functional_modules: GO terms grouped by functional modules (if include_modules = TRUE)
 #' }
 #'
 #' @examples
@@ -30,14 +34,17 @@
 #' go_summary <- summarize_go_annotations(con)
 #' print(go_summary$overview)
 #' 
-#' # Analyze specific BLAST parameter set
-#' go_summary_blast1 <- summarize_go_annotations(con, blast_param_id = 1)
+#' # Analyze specific candidate loci with module grouping
+#' candidates <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+#' go_summary_candidates <- summarize_go_annotations(con, candidate_loci = candidates, 
+#'                                                   include_modules = TRUE)
 #' 
 #' close_funseq_db(con)
 #' }
 #'
 #' @export
-summarize_go_annotations <- function(con, blast_param_id = NULL, include_evidence = TRUE, 
+summarize_go_annotations <- function(con, blast_param_id = NULL, candidate_loci = NULL,
+                                   include_evidence = TRUE, include_modules = FALSE,
                                    min_frequency = 1, verbose = TRUE) {
   
   if (verbose) message("Summarizing GO annotations...")
@@ -51,15 +58,45 @@ summarize_go_annotations <- function(con, blast_param_id = NULL, include_evidenc
     stop("Missing required tables: ", paste(missing_tables, collapse = ", "))
   }
   
-  # Build base query with optional blast_param_id filter
-  base_where <- ""
+  # Build base query with optional filters
+  base_conditions <- c()
   params <- list()
   
   if (!is.null(blast_param_id)) {
-    base_where <- "WHERE bp.blast_param_id = ?"
-    params <- list(blast_param_id)
+    base_conditions <- c(base_conditions, "bp.blast_param_id = ?")
+    params <- c(params, list(blast_param_id))
     if (verbose) message("  - Filtering for blast_param_id: ", blast_param_id)
   }
+  
+  # Handle candidate loci filtering
+  temp_table_name <- NULL
+  loci_join <- ""
+  
+  if (!is.null(candidate_loci)) {
+    if (!all(c("chromosome", "position") %in% colnames(candidate_loci))) {
+      stop("candidate_loci must have 'chromosome' and 'position' columns")
+    }
+    
+    if (verbose) message("  - Filtering for ", nrow(candidate_loci), " candidate loci")
+    
+    # Create temporary table for candidate loci
+    temp_table_name <- paste0("temp_go_candidates_", as.integer(Sys.time()))
+    
+    DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", temp_table_name, " (chromosome TEXT, position INTEGER)"))
+    
+    for (i in 1:nrow(candidate_loci)) {
+      DBI::dbExecute(con, paste0("INSERT INTO ", temp_table_name, " VALUES (?, ?)"),
+                    list(candidate_loci$chromosome[i], candidate_loci$position[i]))
+    }
+    
+    loci_join <- paste0("JOIN flanking_sequences fs ON br.flanking_id = fs.flanking_id
+                         JOIN vcf_data vd ON fs.vcf_id = vd.vcf_id
+                         JOIN ", temp_table_name, " tc ON vd.chromosome = tc.chromosome AND vd.position = tc.position")
+  } else {
+    loci_join <- "JOIN flanking_sequences fs ON br.flanking_id = fs.flanking_id"
+  }
+  
+  base_where <- if (length(base_conditions) > 0) paste("WHERE", paste(base_conditions, collapse = " AND ")) else ""
   
   # 1. Overview statistics by GO category
   if (verbose) message("  - Computing category overview...")
@@ -75,6 +112,7 @@ summarize_go_annotations <- function(con, blast_param_id = NULL, include_evidenc
     JOIN annotations a ON gt.annotation_id = a.annotation_id
     JOIN blast_results br ON a.blast_result_id = br.blast_result_id
     JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+    ", loci_join, "
     ", base_where, "
     GROUP BY gt.go_category
     ORDER BY gt.go_category
@@ -101,6 +139,7 @@ summarize_go_annotations <- function(con, blast_param_id = NULL, include_evidenc
       JOIN annotations a ON gt.annotation_id = a.annotation_id
       JOIN blast_results br ON a.blast_result_id = br.blast_result_id
       JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+      ", loci_join, "
       ", base_where, "
       GROUP BY gt.go_category, gt.go_id, gt.go_term
       HAVING COUNT(gt.go_term_id) >= ?
@@ -135,6 +174,7 @@ summarize_go_annotations <- function(con, blast_param_id = NULL, include_evidenc
       JOIN annotations a ON gt.annotation_id = a.annotation_id
       JOIN blast_results br ON a.blast_result_id = br.blast_result_id
       JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+      ", loci_join, "
       ", base_where, "
       GROUP BY gt.go_category, gt.go_evidence
       ORDER BY gt.go_category, count DESC
@@ -198,15 +238,30 @@ summarize_go_annotations <- function(con, blast_param_id = NULL, include_evidenc
     coverage_stats <- DBI::dbGetQuery(con, coverage_query, list(blast_param_id))
   }
   
+  # 5. Functional module grouping (if requested)
+  functional_modules <- NULL
+  if (include_modules) {
+    if (verbose) message("  - Grouping GO terms into functional modules...")
+    functional_modules <- .create_go_functional_modules(top_terms, verbose = FALSE)
+  }
+  
+  # Clean up temporary table if created
+  if (!is.null(temp_table_name)) {
+    DBI::dbExecute(con, paste0("DROP TABLE ", temp_table_name))
+  }
+  
   # Compile results
   result <- list(
     overview = overview,
     top_terms = top_terms,
     evidence_summary = evidence_summary,
     coverage_stats = coverage_stats,
+    functional_modules = functional_modules,
     parameters = list(
       blast_param_id = blast_param_id,
+      candidate_loci = !is.null(candidate_loci),
       include_evidence = include_evidence,
+      include_modules = include_modules,
       min_frequency = min_frequency
     )
   )
@@ -219,6 +274,1028 @@ summarize_go_annotations <- function(con, blast_param_id = NULL, include_evidenc
       message("  - Total annotations: ", sum(overview$total_annotations))
     } else {
       message("  - No GO annotations found with current filters")
+    }
+  }
+  
+  return(result)
+}
+
+#' Summarize KEGG pathways in the database
+#'
+#' Provides comprehensive statistics about KEGG pathway annotations with optional
+#' candidate loci filtering and functional module grouping by pathway categories.
+#'
+#' @param con Database connection object
+#' @param blast_param_id Integer. Specific BLAST parameter set to analyze. If NULL, analyzes all.
+#' @param candidate_loci Data frame with chromosome and position columns, or NULL for all loci.
+#' @param include_modules Logical. Group pathways into functional modules. Default is TRUE.
+#' @param min_frequency Integer. Minimum frequency threshold for pathways to include. Default is 1.
+#' @param verbose Logical. Print progress information. Default is TRUE.
+#'
+#' @return List containing KEGG pathway summaries:
+#' \itemize{
+#'   \item overview: Summary statistics of pathway coverage
+#'   \item top_pathways: Most frequent pathways 
+#'   \item pathway_modules: Pathways grouped by functional modules (if include_modules = TRUE)
+#'   \item coverage_stats: Coverage statistics across BLAST parameters
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' con <- connect_funseq_db("analysis.db")
+#' 
+#' # Analyze all KEGG pathways with module grouping
+#' kegg_summary <- summarize_kegg_pathways(con, include_modules = TRUE)
+#' print(kegg_summary$pathway_modules)
+#' 
+#' # Analyze specific candidate loci
+#' candidates <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+#' kegg_candidates <- summarize_kegg_pathways(con, candidate_loci = candidates)
+#' 
+#' close_funseq_db(con)
+#' }
+#'
+#' @export
+summarize_kegg_pathways <- function(con, blast_param_id = NULL, candidate_loci = NULL,
+                                   include_modules = TRUE, min_frequency = 1, verbose = TRUE) {
+  
+  if (verbose) message("Summarizing KEGG pathways...")
+  
+  # Check if required tables exist
+  tables <- DBI::dbListTables(con)
+  required_tables <- c("kegg_references", "annotations", "blast_results", "blast_parameters")
+  missing_tables <- required_tables[!required_tables %in% tables]
+  
+  if (length(missing_tables) > 0) {
+    stop("Missing required tables: ", paste(missing_tables, collapse = ", "))
+  }
+  
+  # Check if we have KEGG data
+  kegg_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM kegg_references")$count
+  if (kegg_count == 0) {
+    warning("No KEGG pathway data found in database")
+    return(list(
+      overview = data.frame(),
+      top_pathways = data.frame(),
+      pathway_modules = NULL,
+      coverage_stats = data.frame(),
+      parameters = list(
+        blast_param_id = blast_param_id,
+        candidate_loci = !is.null(candidate_loci),
+        include_modules = include_modules,
+        min_frequency = min_frequency
+      )
+    ))
+  }
+  
+  # Build base query with optional filters
+  base_conditions <- c()
+  params <- list()
+  
+  if (!is.null(blast_param_id)) {
+    base_conditions <- c(base_conditions, "bp.blast_param_id = ?")
+    params <- c(params, list(blast_param_id))
+    if (verbose) message("  - Filtering for blast_param_id: ", blast_param_id)
+  }
+  
+  # Handle candidate loci filtering
+  temp_table_name <- NULL
+  loci_join <- ""
+  
+  if (!is.null(candidate_loci)) {
+    if (!all(c("chromosome", "position") %in% colnames(candidate_loci))) {
+      stop("candidate_loci must have 'chromosome' and 'position' columns")
+    }
+    
+    if (verbose) message("  - Filtering for ", nrow(candidate_loci), " candidate loci")
+    
+    # Create temporary table for candidate loci
+    temp_table_name <- paste0("temp_kegg_candidates_", as.integer(Sys.time()))
+    
+    DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", temp_table_name, " (chromosome TEXT, position INTEGER)"))
+    
+    for (i in 1:nrow(candidate_loci)) {
+      DBI::dbExecute(con, paste0("INSERT INTO ", temp_table_name, " VALUES (?, ?)"),
+                    list(candidate_loci$chromosome[i], candidate_loci$position[i]))
+    }
+    
+    loci_join <- paste0("JOIN flanking_sequences fs ON br.flanking_id = fs.flanking_id
+                         JOIN vcf_data vd ON fs.vcf_id = vd.vcf_id
+                         JOIN ", temp_table_name, " tc ON vd.chromosome = tc.chromosome AND vd.position = tc.position")
+  } else {
+    loci_join <- "JOIN flanking_sequences fs ON br.flanking_id = fs.flanking_id"
+  }
+  
+  base_where <- if (length(base_conditions) > 0) paste("WHERE", paste(base_conditions, collapse = " AND ")) else ""
+  
+  # 1. Overview statistics
+  if (verbose) message("  - Computing pathway overview...")
+  
+  overview_query <- paste0("
+    SELECT 
+      COUNT(DISTINCT kr.kegg_id) as unique_pathways,
+      COUNT(kr.kegg_ref_id) as total_pathway_assignments,
+      COUNT(DISTINCT a.annotation_id) as annotated_sequences,
+      COUNT(DISTINCT br.flanking_id) as annotated_loci
+    FROM kegg_references kr
+    JOIN annotations a ON kr.annotation_id = a.annotation_id
+    JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+    ", loci_join, "
+    ", base_where
+  )
+  
+  if (length(params) > 0) {
+    overview <- DBI::dbGetQuery(con, overview_query, params)
+  } else {
+    overview <- DBI::dbGetQuery(con, overview_query)
+  }
+  
+  # 2. Top pathways by frequency
+  if (verbose) message("  - Finding most frequent pathways...")
+  
+  top_pathways_query <- paste0("
+    SELECT 
+      kr.kegg_id,
+      kr.pathway_name,
+      COUNT(kr.kegg_ref_id) as frequency,
+      COUNT(DISTINCT a.annotation_id) as unique_sequences,
+      COUNT(DISTINCT br.flanking_id) as unique_loci
+    FROM kegg_references kr
+    JOIN annotations a ON kr.annotation_id = a.annotation_id
+    JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+    ", loci_join, "
+    ", base_where, "
+    GROUP BY kr.kegg_id, kr.pathway_name
+    HAVING COUNT(kr.kegg_ref_id) >= ?
+    ORDER BY frequency DESC
+    LIMIT 50
+  ")
+  
+  top_pathways_params <- c(params, list(min_frequency))
+  top_pathways <- DBI::dbGetQuery(con, top_pathways_query, top_pathways_params)
+  
+  # 3. Coverage statistics across BLAST parameters
+  if (verbose) message("  - Computing coverage statistics...")
+  
+  if (is.null(blast_param_id)) {
+    coverage_query <- "
+      SELECT 
+        bp.blast_param_id,
+        bp.blast_type,
+        bp.db_name,
+        COUNT(DISTINCT kr.kegg_id) as unique_pathways,
+        COUNT(kr.kegg_ref_id) as total_assignments,
+        COUNT(DISTINCT a.annotation_id) as annotated_sequences,
+        COUNT(DISTINCT br.flanking_id) as annotated_loci
+      FROM blast_parameters bp
+      LEFT JOIN blast_results br ON bp.blast_param_id = br.blast_param_id
+      LEFT JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      LEFT JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
+      GROUP BY bp.blast_param_id, bp.blast_type, bp.db_name
+      ORDER BY bp.blast_param_id
+    "
+    coverage_stats <- DBI::dbGetQuery(con, coverage_query)
+  } else {
+    coverage_query <- "
+      SELECT 
+        'All BLAST parameters' as blast_type,
+        COUNT(DISTINCT kr.kegg_id) as unique_pathways,
+        COUNT(kr.kegg_ref_id) as total_assignments,
+        COUNT(DISTINCT a.annotation_id) as annotated_sequences,
+        COUNT(DISTINCT br.flanking_id) as annotated_loci
+      FROM kegg_references kr
+      JOIN annotations a ON kr.annotation_id = a.annotation_id
+      JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+      
+      UNION ALL
+      
+      SELECT 
+        'Selected BLAST parameter (' || bp.blast_param_id || ')' as blast_type,
+        COUNT(DISTINCT kr.kegg_id) as unique_pathways,
+        COUNT(kr.kegg_ref_id) as total_assignments,
+        COUNT(DISTINCT a.annotation_id) as annotated_sequences,
+        COUNT(DISTINCT br.flanking_id) as annotated_loci
+      FROM kegg_references kr
+      JOIN annotations a ON kr.annotation_id = a.annotation_id
+      JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+      JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+      WHERE bp.blast_param_id = ?
+    "
+    coverage_stats <- DBI::dbGetQuery(con, coverage_query, list(blast_param_id))
+  }
+  
+  # 4. Pathway module grouping (if requested)
+  pathway_modules <- NULL
+  if (include_modules) {
+    if (verbose) message("  - Grouping pathways into functional modules...")
+    pathway_modules <- .create_kegg_functional_modules(top_pathways, verbose = FALSE)
+  }
+  
+  # Clean up temporary table if created
+  if (!is.null(temp_table_name)) {
+    DBI::dbExecute(con, paste0("DROP TABLE ", temp_table_name))
+  }
+  
+  # Compile results
+  result <- list(
+    overview = overview,
+    top_pathways = top_pathways,
+    pathway_modules = pathway_modules,
+    coverage_stats = coverage_stats,
+    parameters = list(
+      blast_param_id = blast_param_id,
+      candidate_loci = !is.null(candidate_loci),
+      include_modules = include_modules,
+      min_frequency = min_frequency
+    )
+  )
+  
+  if (verbose) {
+    message("KEGG pathway summary complete:")
+    if (nrow(overview) > 0 && overview$total_pathway_assignments[1] > 0) {
+      message("  - Unique pathways: ", overview$unique_pathways[1])
+      message("  - Total assignments: ", overview$total_pathway_assignments[1])
+      message("  - Annotated loci: ", overview$annotated_loci[1])
+    } else {
+      message("  - No KEGG pathway assignments found with current filters")
+    }
+  }
+  
+  return(result)
+}
+
+#' Create comprehensive functional module summary
+#'
+#' Generates an integrated summary of functional modules combining GO terms, KEGG pathways,
+#' and COG categories for a comprehensive functional characterization.
+#'
+#' @param con Database connection object
+#' @param candidate_loci Data frame with chromosome and position columns, or NULL for all loci.
+#' @param blast_param_id Integer. Specific BLAST parameter set to analyze. If NULL, analyzes all.
+#' @param include_go Logical. Include GO term modules. Default is TRUE.
+#' @param include_kegg Logical. Include KEGG pathway modules. Default is TRUE.
+#' @param include_cog Logical. Include COG category analysis. Default is TRUE.
+#' @param min_frequency Integer. Minimum frequency threshold for inclusion. Default is 2.
+#' @param verbose Logical. Print progress information. Default is TRUE.
+#'
+#' @return List containing comprehensive functional module analysis:
+#' \itemize{
+#'   \item overview: Summary statistics across all annotation types
+#'   \item go_modules: GO term functional modules (if include_go = TRUE)
+#'   \item kegg_modules: KEGG pathway functional modules (if include_kegg = TRUE) 
+#'   \item cog_modules: COG functional group analysis (if include_cog = TRUE)
+#'   \item integrated_summary: Cross-platform functional summary
+#'   \item module_overlap: Analysis of overlapping functional themes
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' con <- connect_funseq_db("analysis.db")
+#' 
+#' # Comprehensive module analysis for all loci
+#' module_summary <- create_functional_module_summary(con)
+#' print(module_summary$integrated_summary)
+#' 
+#' # Focus on candidate loci
+#' candidates <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+#' candidate_modules <- create_functional_module_summary(con, candidate_loci = candidates)
+#' 
+#' close_funseq_db(con)
+#' }
+#'
+#' @export
+create_functional_module_summary <- function(con, candidate_loci = NULL, blast_param_id = NULL,
+                                           include_go = TRUE, include_kegg = TRUE, include_cog = TRUE,
+                                           min_frequency = 2, verbose = TRUE) {
+  
+  if (verbose) message("Creating comprehensive functional module summary...")
+  
+  # Initialize results
+  result <- list(
+    overview = NULL,
+    go_modules = NULL,
+    kegg_modules = NULL,
+    cog_modules = NULL,
+    integrated_summary = NULL,
+    module_overlap = NULL,
+    parameters = list(
+      candidate_loci = !is.null(candidate_loci),
+      blast_param_id = blast_param_id,
+      include_go = include_go,
+      include_kegg = include_kegg,
+      include_cog = include_cog,
+      min_frequency = min_frequency
+    )
+  )
+  
+  # 1. GO modules analysis (if requested)
+  if (include_go) {
+    if (verbose) message("  - Analyzing GO functional modules...")
+    go_summary <- summarize_go_annotations(
+      con = con,
+      blast_param_id = blast_param_id,
+      candidate_loci = candidate_loci,
+      include_modules = TRUE,
+      min_frequency = min_frequency,
+      verbose = FALSE
+    )
+    result$go_modules <- go_summary$functional_modules
+  }
+  
+  # 2. KEGG modules analysis (if requested)
+  if (include_kegg) {
+    if (verbose) message("  - Analyzing KEGG pathway modules...")
+    kegg_summary <- summarize_kegg_pathways(
+      con = con,
+      blast_param_id = blast_param_id,
+      candidate_loci = candidate_loci,
+      include_modules = TRUE,
+      min_frequency = min_frequency,
+      verbose = FALSE
+    )
+    result$kegg_modules <- kegg_summary$pathway_modules
+  }
+  
+  # 3. COG modules analysis (if requested)
+  if (include_cog) {
+    if (verbose) message("  - Analyzing COG functional groups...")
+    cog_summary <- summarize_cog_categories(
+      con = con,
+      blast_param_id = blast_param_id,
+      include_functional_groups = TRUE,
+      min_frequency = min_frequency,
+      verbose = FALSE
+    )
+    result$cog_modules <- cog_summary$functional_groups
+  }
+  
+  # 4. Create overview statistics
+  if (verbose) message("  - Computing overview statistics...")
+  
+  overview_stats <- list()
+  
+  if (include_go && !is.null(result$go_modules)) {
+    overview_stats$go_module_count <- length(result$go_modules)
+    overview_stats$go_total_terms <- sum(sapply(result$go_modules, function(m) m$term_count))
+  }
+  
+  if (include_kegg && !is.null(result$kegg_modules)) {
+    overview_stats$kegg_module_count <- length(result$kegg_modules)
+    overview_stats$kegg_total_pathways <- sum(sapply(result$kegg_modules, function(m) m$pathway_count))
+  }
+  
+  if (include_cog && !is.null(result$cog_modules)) {
+    overview_stats$cog_group_count <- nrow(result$cog_modules)
+    overview_stats$cog_total_assignments <- sum(result$cog_modules$frequency, na.rm = TRUE)
+  }
+  
+  result$overview <- overview_stats
+  
+  # 5. Create integrated summary
+  if (verbose) message("  - Creating integrated functional summary...")
+  result$integrated_summary <- .create_integrated_functional_summary(
+    go_modules = result$go_modules,
+    kegg_modules = result$kegg_modules,
+    cog_modules = result$cog_modules,
+    verbose = FALSE
+  )
+  
+  # 6. Analyze module overlap
+  if (verbose) message("  - Analyzing functional module overlap...")
+  result$module_overlap <- .analyze_module_overlap(
+    go_modules = result$go_modules,
+    kegg_modules = result$kegg_modules,
+    cog_modules = result$cog_modules,
+    verbose = FALSE
+  )
+  
+  if (verbose) {
+    message("Functional module summary complete:")
+    if (include_go && !is.null(result$go_modules)) {
+      message("  - GO modules: ", length(result$go_modules))
+    }
+    if (include_kegg && !is.null(result$kegg_modules)) {
+      message("  - KEGG modules: ", length(result$kegg_modules))
+    }
+    if (include_cog && !is.null(result$cog_modules)) {
+      message("  - COG groups: ", nrow(result$cog_modules))
+    }
+    if (!is.null(result$integrated_summary)) {
+      message("  - Integrated themes: ", length(result$integrated_summary))
+    }
+  }
+  
+  return(result)
+}
+
+#' Generate comprehensive candidate loci functional profile
+#'
+#' Creates a detailed functional characterization of candidate loci including
+#' GO terms, KEGG pathways, protein annotations, and statistical comparisons
+#' with background datasets.
+#'
+#' @param con Database connection object
+#' @param candidate_loci Data frame with chromosome and position columns, or file_id of candidate VCF.
+#' @param background_file_id Integer. File ID of background dataset for comparison. If NULL, auto-detects.
+#' @param blast_param_id Integer. Specific BLAST parameter set to analyze. If NULL, analyzes all.
+#' @param include_statistics Logical. Include statistical comparisons with background. Default is TRUE.
+#' @param include_modules Logical. Include functional module analysis. Default is TRUE.
+#' @param output_format Character. Format for results: "list", "tables", or "both". Default is "both".
+#' @param verbose Logical. Print progress information. Default is TRUE.
+#'
+#' @return List containing comprehensive candidate loci profile:
+#' \itemize{
+#'   \item summary: Overview statistics and coverage metrics
+#'   \item functional_modules: Integrated functional module analysis
+#'   \item go_profile: GO term analysis specific to candidates
+#'   \item kegg_profile: KEGG pathway analysis specific to candidates
+#'   \item protein_profile: UniProt annotation analysis specific to candidates
+#'   \item background_comparison: Statistical comparison with background (if include_statistics = TRUE)
+#'   \item summary_tables: Publication-ready summary tables (if output_format includes "tables")
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' con <- connect_funseq_db("analysis.db")
+#' 
+#' # Profile specific candidate loci
+#' candidates <- data.frame(
+#'   chromosome = c("LG1", "LG2", "LG1"),
+#'   position = c(12345, 67890, 23456)
+#' )
+#' profile <- generate_candidate_loci_profile(con, candidate_loci = candidates)
+#' 
+#' # Profile using candidate VCF file ID
+#' profile <- generate_candidate_loci_profile(con, candidate_loci = 5)
+#' 
+#' print(profile$summary)
+#' print(profile$functional_modules$integrated_summary)
+#' 
+#' close_funseq_db(con)
+#' }
+#'
+#' @export
+generate_candidate_loci_profile <- function(con, candidate_loci, background_file_id = NULL,
+                                          blast_param_id = NULL, include_statistics = TRUE,
+                                          include_modules = TRUE, output_format = "both",
+                                          verbose = TRUE) {
+  
+  if (verbose) message("Generating comprehensive candidate loci profile...")
+  
+  # Validate output format
+  if (!output_format %in% c("list", "tables", "both")) {
+    stop("output_format must be 'list', 'tables', or 'both'")
+  }
+  
+  # Handle different input types for candidate_loci
+  if (is.numeric(candidate_loci) && length(candidate_loci) == 1) {
+    # candidate_loci is a file_id
+    candidate_file_id <- candidate_loci
+    if (verbose) message("  - Using candidate file_id: ", candidate_file_id)
+    
+    # Extract loci coordinates from file
+    loci_query <- "
+      SELECT DISTINCT chromosome, position 
+      FROM vcf_data 
+      WHERE file_id = ?
+      ORDER BY chromosome, position
+    "
+    candidate_coords <- DBI::dbGetQuery(con, loci_query, list(candidate_file_id))
+    
+  } else if (is.data.frame(candidate_loci)) {
+    # candidate_loci is a data frame with coordinates
+    if (!all(c("chromosome", "position") %in% colnames(candidate_loci))) {
+      stop("candidate_loci data frame must have 'chromosome' and 'position' columns")
+    }
+    candidate_coords <- candidate_loci
+    candidate_file_id <- NULL
+    if (verbose) message("  - Using ", nrow(candidate_coords), " candidate loci coordinates")
+    
+  } else {
+    stop("candidate_loci must be either a file_id (numeric) or data frame with chromosome/position columns")
+  }
+  
+  # Auto-detect background file if not provided
+  if (is.null(background_file_id)) {
+    if (verbose) message("  - Auto-detecting background dataset...")
+    
+    input_files <- DBI::dbGetQuery(con, 
+      "SELECT file_id, file_name FROM input_files WHERE file_type = 'vcf'")
+    
+    # Exclude candidate file if it's in the database
+    if (!is.null(candidate_file_id)) {
+      input_files <- input_files[input_files$file_id != candidate_file_id, ]
+    }
+    
+    # Exclude files with "candidate" or similar in the name
+    candidate_patterns <- c("candidate", "adaptive", "outlier", "fst", "selection")
+    background_files <- input_files[!grepl(paste(candidate_patterns, collapse = "|"), 
+                                          tolower(input_files$file_name)), ]
+    
+    if (nrow(background_files) == 0) {
+      stop("No suitable background dataset found. Please specify background_file_id.")
+    }
+    
+    background_file_id <- background_files$file_id[1]
+    if (verbose) message("    - Using background file: ", background_files$file_name[1], " (ID: ", background_file_id, ")")
+  }
+  
+  # Initialize results structure
+  result <- list(
+    summary = NULL,
+    functional_modules = NULL,
+    go_profile = NULL,
+    kegg_profile = NULL,
+    protein_profile = NULL,
+    background_comparison = NULL,
+    summary_tables = NULL,
+    parameters = list(
+      candidate_count = nrow(candidate_coords),
+      background_file_id = background_file_id,
+      blast_param_id = blast_param_id,
+      include_statistics = include_statistics,
+      include_modules = include_modules,
+      output_format = output_format
+    )
+  )
+  
+  # 1. Get comprehensive functional profile for candidates
+  if (verbose) message("  - Analyzing candidate functional profile...")
+  
+  candidate_profile <- get_functional_profile(
+    con = con,
+    candidate_loci = candidate_coords,
+    blast_param_id = blast_param_id,
+    include_blast_stats = TRUE,
+    include_pathways = TRUE,
+    verbose = FALSE
+  )
+  
+  result$summary <- candidate_profile$loci_summary
+  result$go_profile <- candidate_profile$go_profile
+  result$protein_profile <- candidate_profile$protein_profile
+  
+  # Add KEGG profile if available
+  if (!is.null(candidate_profile$pathway_profile)) {
+    result$kegg_profile <- list(
+      overview = data.frame(
+        unique_pathways = length(unique(candidate_profile$pathway_profile$kegg_id)),
+        total_assignments = nrow(candidate_profile$pathway_profile),
+        annotated_loci = length(unique(candidate_profile$pathway_profile$unique_loci))
+      ),
+      top_pathways = candidate_profile$pathway_profile
+    )
+  }
+  
+  # 2. Create functional modules analysis (if requested)
+  if (include_modules) {
+    if (verbose) message("  - Creating functional module analysis...")
+    
+    result$functional_modules <- create_functional_module_summary(
+      con = con,
+      candidate_loci = candidate_coords,
+      blast_param_id = blast_param_id,
+      include_go = TRUE,
+      include_kegg = TRUE,
+      include_cog = TRUE,
+      verbose = FALSE
+    )
+  }
+  
+  # 3. Statistical comparison with background (if requested)
+  if (include_statistics) {
+    if (verbose) message("  - Performing statistical comparison with background...")
+    
+    # Get background profile
+    background_profile <- get_functional_profile(
+      con = con,
+      candidate_loci = NULL, # Use all loci for background
+      blast_param_id = blast_param_id,
+      include_blast_stats = TRUE,
+      include_pathways = TRUE,
+      verbose = FALSE
+    )
+    
+    # Create comparison statistics
+    comparison_stats <- list(
+      coverage_comparison = list(
+        candidate_coverage = if (result$summary$total_input_loci[1] > 0) {
+          round(result$summary$annotated_loci[1] / result$summary$total_input_loci[1] * 100, 2)
+        } else { 0 },
+        background_coverage = if (background_profile$loci_summary$total_input_loci[1] > 0) {
+          round(background_profile$loci_summary$annotated_loci[1] / background_profile$loci_summary$total_input_loci[1] * 100, 2)
+        } else { 0 }
+      ),
+      annotation_enrichment = list(
+        candidate_annotations_per_locus = if (result$summary$annotated_loci[1] > 0) {
+          round(result$summary$total_annotations[1] / result$summary$annotated_loci[1], 2)
+        } else { 0 },
+        background_annotations_per_locus = if (background_profile$loci_summary$annotated_loci[1] > 0) {
+          round(background_profile$loci_summary$total_annotations[1] / background_profile$loci_summary$annotated_loci[1], 2)
+        } else { 0 }
+      ),
+      functional_diversity = list(
+        candidate_go_diversity = if (!is.null(result$go_profile$overview)) {
+          result$go_profile$overview$unique_go_terms[1]
+        } else { 0 },
+        background_go_diversity = if (!is.null(background_profile$go_profile$overview)) {
+          background_profile$go_profile$overview$unique_go_terms[1]
+        } else { 0 }
+      )
+    )
+    
+    result$background_comparison <- comparison_stats
+  }
+  
+  # 4. Create summary tables (if requested)
+  if (output_format %in% c("tables", "both")) {
+    if (verbose) message("  - Creating summary tables...")
+    
+    summary_tables <- list()
+    
+    # Overview table
+    overview_table <- data.frame(
+      Metric = c(
+        "Total Candidate Loci",
+        "Annotated Loci",
+        "Annotation Coverage (%)",
+        "Total Functional Annotations",
+        "Unique Proteins",
+        "Unique GO Terms",
+        "Unique KEGG Pathways"
+      ),
+      Value = c(
+        result$summary$total_input_loci[1],
+        result$summary$annotated_loci[1],
+        result$summary$annotation_coverage_percent[1],
+        result$summary$total_annotations[1],
+        result$summary$unique_proteins[1],
+        if (!is.null(result$go_profile$overview)) result$go_profile$overview$unique_go_terms[1] else 0,
+        if (!is.null(result$kegg_profile)) result$kegg_profile$overview$unique_pathways[1] else 0
+      )
+    )
+    
+    summary_tables$overview <- overview_table
+    
+    # Top GO terms table (if available)
+    if (!is.null(result$go_profile$top_terms) && nrow(result$go_profile$top_terms) > 0) {
+      top_go_table <- result$go_profile$top_terms[1:min(10, nrow(result$go_profile$top_terms)), 
+                                                  c("go_id", "go_term", "go_category", "frequency")]
+      colnames(top_go_table) <- c("GO ID", "GO Term", "Category", "Frequency")
+      summary_tables$top_go_terms <- top_go_table
+    }
+    
+    # Top KEGG pathways table (if available)
+    if (!is.null(result$kegg_profile$top_pathways) && nrow(result$kegg_profile$top_pathways) > 0) {
+      top_kegg_table <- result$kegg_profile$top_pathways[1:min(10, nrow(result$kegg_profile$top_pathways)), 
+                                                         c("kegg_id", "pathway_name", "frequency")]
+      colnames(top_kegg_table) <- c("KEGG ID", "Pathway Name", "Frequency")
+      summary_tables$top_kegg_pathways <- top_kegg_table
+    }
+    
+    # Functional modules summary (if available)
+    if (!is.null(result$functional_modules$integrated_summary)) {
+      modules_summary <- data.frame(
+        Functional_Theme = names(result$functional_modules$integrated_summary),
+        Sources = sapply(result$functional_modules$integrated_summary, function(theme) {
+          paste(names(theme$sources), collapse = ", ")
+        }),
+        Description = sapply(result$functional_modules$integrated_summary, function(theme) {
+          theme$description
+        })
+      )
+      summary_tables$functional_modules <- modules_summary
+    }
+    
+    result$summary_tables <- summary_tables
+  }
+  
+  if (verbose) {
+    message("Candidate loci profile complete:")
+    message("  - Input loci: ", result$summary$total_input_loci[1])
+    message("  - Annotated loci: ", result$summary$annotated_loci[1], 
+            " (", result$summary$annotation_coverage_percent[1], "%)")
+    message("  - Functional annotations: ", result$summary$total_annotations[1])
+    if (include_modules && !is.null(result$functional_modules)) {
+      message("  - Functional themes identified: ", length(result$functional_modules$integrated_summary))
+    }
+  }
+  
+  return(result)
+}
+
+#' Create functional comparison tables between datasets
+#'
+#' Generates publication-ready comparison tables showing functional differences
+#' between multiple datasets (e.g., candidate vs background, or multiple candidate sets).
+#'
+#' @param con Database connection object
+#' @param dataset_list List. Named list of datasets, where each element is either:
+#'   - Data frame with chromosome/position columns
+#'   - Numeric file_id
+#'   - NULL for all loci
+#' @param blast_param_id Integer. Specific BLAST parameter set to analyze. If NULL, analyzes all.
+#' @param comparison_metrics Character vector. Metrics to compare: c("coverage", "diversity", "modules", "top_terms").
+#' @param max_terms Integer. Maximum number of top terms to show per dataset. Default is 10.
+#' @param include_statistics Logical. Include statistical significance tests. Default is TRUE.
+#' @param verbose Logical. Print progress information. Default is TRUE.
+#'
+#' @return List containing comparison tables:
+#' \itemize{
+#'   \item overview_comparison: Side-by-side overview statistics
+#'   \item coverage_comparison: Annotation coverage comparison
+#'   \item diversity_comparison: Functional diversity metrics comparison
+#'   \item top_terms_comparison: Most frequent terms per dataset
+#'   \item module_comparison: Functional module representation comparison (if "modules" in comparison_metrics)
+#'   \item statistical_tests: Statistical significance tests (if include_statistics = TRUE)
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' con <- connect_funseq_db("analysis.db")
+#' 
+#' # Compare candidate vs background
+#' datasets <- list(
+#'   "Candidates" = data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890)),
+#'   "Background" = NULL  # All loci
+#' )
+#' comparison <- create_functional_comparison_tables(con, datasets)
+#' print(comparison$overview_comparison)
+#' 
+#' # Compare multiple candidate sets
+#' datasets <- list(
+#'   "Adaptive_Set1" = 5,   # file_id
+#'   "Adaptive_Set2" = 6,   # file_id
+#'   "Neutral" = NULL       # All loci
+#' )
+#' comparison <- create_functional_comparison_tables(con, datasets)
+#' 
+#' close_funseq_db(con)
+#' }
+#'
+#' @export
+create_functional_comparison_tables <- function(con, dataset_list, blast_param_id = NULL,
+                                              comparison_metrics = c("coverage", "diversity", "top_terms"),
+                                              max_terms = 10, include_statistics = TRUE, verbose = TRUE) {
+  
+  if (verbose) message("Creating functional comparison tables...")
+  
+  # Validate inputs
+  if (!is.list(dataset_list) || is.null(names(dataset_list))) {
+    stop("dataset_list must be a named list")
+  }
+  
+  if (length(dataset_list) < 2) {
+    stop("dataset_list must contain at least 2 datasets for comparison")
+  }
+  
+  valid_metrics <- c("coverage", "diversity", "modules", "top_terms")
+  if (!all(comparison_metrics %in% valid_metrics)) {
+    stop("comparison_metrics must be from: ", paste(valid_metrics, collapse = ", "))
+  }
+  
+  # Initialize results
+  result <- list(
+    overview_comparison = NULL,
+    coverage_comparison = NULL,
+    diversity_comparison = NULL,
+    top_terms_comparison = NULL,
+    module_comparison = NULL,
+    statistical_tests = NULL,
+    parameters = list(
+      dataset_names = names(dataset_list),
+      dataset_count = length(dataset_list),
+      blast_param_id = blast_param_id,
+      comparison_metrics = comparison_metrics,
+      max_terms = max_terms,
+      include_statistics = include_statistics
+    )
+  )
+  
+  # Process each dataset
+  if (verbose) message("  - Processing ", length(dataset_list), " datasets...")
+  
+  dataset_profiles <- list()
+  
+  for (dataset_name in names(dataset_list)) {
+    if (verbose) message("    - Processing: ", dataset_name)
+    
+    dataset_data <- dataset_list[[dataset_name]]
+    
+    # Convert dataset specification to candidate_loci format
+    if (is.null(dataset_data)) {
+      # All loci
+      candidate_loci <- NULL
+    } else if (is.numeric(dataset_data) && length(dataset_data) == 1) {
+      # File ID - extract coordinates
+      loci_query <- "SELECT DISTINCT chromosome, position FROM vcf_data WHERE file_id = ?"
+      candidate_loci <- DBI::dbGetQuery(con, loci_query, list(dataset_data))
+    } else if (is.data.frame(dataset_data)) {
+      # Coordinate data frame
+      if (!all(c("chromosome", "position") %in% colnames(dataset_data))) {
+        stop("Dataset '", dataset_name, "' must have chromosome and position columns")
+      }
+      candidate_loci <- dataset_data
+    } else {
+      stop("Invalid dataset specification for '", dataset_name, "'")
+    }
+    
+    # Get functional profile
+    profile <- get_functional_profile(
+      con = con,
+      candidate_loci = candidate_loci,
+      blast_param_id = blast_param_id,
+      include_blast_stats = TRUE,
+      include_pathways = TRUE,
+      verbose = FALSE
+    )
+    
+    dataset_profiles[[dataset_name]] <- profile
+  }
+  
+  # 1. Overview comparison
+  if ("coverage" %in% comparison_metrics || "diversity" %in% comparison_metrics) {
+    if (verbose) message("  - Creating overview comparison...")
+    
+    overview_data <- data.frame(
+      Dataset = names(dataset_profiles),
+      Total_Loci = sapply(dataset_profiles, function(p) p$loci_summary$total_input_loci[1]),
+      Annotated_Loci = sapply(dataset_profiles, function(p) p$loci_summary$annotated_loci[1]),
+      Coverage_Percent = sapply(dataset_profiles, function(p) p$loci_summary$annotation_coverage_percent[1]),
+      Total_Annotations = sapply(dataset_profiles, function(p) p$loci_summary$total_annotations[1]),
+      Unique_Proteins = sapply(dataset_profiles, function(p) p$loci_summary$unique_proteins[1]),
+      Unique_GO_Terms = sapply(dataset_profiles, function(p) {
+        if (!is.null(p$go_profile$overview)) p$go_profile$overview$unique_go_terms[1] else 0
+      }),
+      stringsAsFactors = FALSE
+    )
+    
+    result$overview_comparison <- overview_data
+  }
+  
+  # 2. Coverage comparison
+  if ("coverage" %in% comparison_metrics) {
+    if (verbose) message("  - Creating coverage comparison...")
+    
+    coverage_data <- data.frame(
+      Dataset = names(dataset_profiles),
+      Annotation_Coverage = sapply(dataset_profiles, function(p) p$loci_summary$annotation_coverage_percent[1]),
+      Annotations_Per_Locus = sapply(dataset_profiles, function(p) {
+        if (p$loci_summary$annotated_loci[1] > 0) {
+          round(p$loci_summary$total_annotations[1] / p$loci_summary$annotated_loci[1], 2)
+        } else { 0 }
+      }),
+      GO_Coverage = sapply(dataset_profiles, function(p) {
+        if (!is.null(p$go_profile$coverage_stats)) {
+          p$go_profile$coverage_stats$go_coverage_percent[1]
+        } else { 0 }
+      }),
+      stringsAsFactors = FALSE
+    )
+    
+    result$coverage_comparison <- coverage_data
+  }
+  
+  # 3. Diversity comparison
+  if ("diversity" %in% comparison_metrics) {
+    if (verbose) message("  - Creating diversity comparison...")
+    
+    diversity_data <- data.frame(
+      Dataset = names(dataset_profiles),
+      Functional_Diversity = sapply(dataset_profiles, function(p) {
+        if (!is.null(p$functional_diversity)) {
+          p$functional_diversity$go_terms_per_locus[1]
+        } else { 0 }
+      }),
+      Protein_Diversity = sapply(dataset_profiles, function(p) {
+        if (!is.null(p$functional_diversity)) {
+          p$functional_diversity$proteins_per_locus[1]
+        } else { 0 }
+      }),
+      GO_Categories = sapply(dataset_profiles, function(p) {
+        if (!is.null(p$functional_diversity)) {
+          p$functional_diversity$go_categories[1]
+        } else { 0 }
+      }),
+      stringsAsFactors = FALSE
+    )
+    
+    result$diversity_comparison <- diversity_data
+  }
+  
+  # 4. Top terms comparison
+  if ("top_terms" %in% comparison_metrics) {
+    if (verbose) message("  - Creating top terms comparison...")
+    
+    # Combine top GO terms from all datasets
+    all_go_terms <- list()
+    
+    for (dataset_name in names(dataset_profiles)) {
+      profile <- dataset_profiles[[dataset_name]]
+      if (!is.null(profile$go_profile$top_terms) && nrow(profile$go_profile$top_terms) > 0) {
+        top_terms <- profile$go_profile$top_terms[1:min(max_terms, nrow(profile$go_profile$top_terms)), ]
+        top_terms$Dataset <- dataset_name
+        all_go_terms[[dataset_name]] <- top_terms[, c("Dataset", "go_id", "go_term", "go_category", "frequency")]
+      }
+    }
+    
+    if (length(all_go_terms) > 0) {
+      result$top_terms_comparison <- do.call(rbind, all_go_terms)
+      rownames(result$top_terms_comparison) <- NULL
+    }
+  }
+  
+  # 5. Module comparison (if requested)
+  if ("modules" %in% comparison_metrics) {
+    if (verbose) message("  - Creating functional module comparison...")
+    
+    module_summaries <- list()
+    
+    for (dataset_name in names(dataset_profiles)) {
+      profile <- dataset_profiles[[dataset_name]]
+      
+      # Get candidate loci for this dataset
+      dataset_data <- dataset_list[[dataset_name]]
+      if (is.null(dataset_data)) {
+        candidate_loci <- NULL
+      } else if (is.numeric(dataset_data) && length(dataset_data) == 1) {
+        loci_query <- "SELECT DISTINCT chromosome, position FROM vcf_data WHERE file_id = ?"
+        candidate_loci <- DBI::dbGetQuery(con, loci_query, list(dataset_data))
+      } else {
+        candidate_loci <- dataset_data
+      }
+      
+      # Get module analysis
+      module_analysis <- create_functional_module_summary(
+        con = con,
+        candidate_loci = candidate_loci,
+        blast_param_id = blast_param_id,
+        verbose = FALSE
+      )
+      
+      if (!is.null(module_analysis$integrated_summary)) {
+        module_summary <- data.frame(
+          Dataset = dataset_name,
+          Functional_Theme = names(module_analysis$integrated_summary),
+          Sources = sapply(module_analysis$integrated_summary, function(theme) {
+            paste(names(theme$sources), collapse = ", ")
+          }),
+          stringsAsFactors = FALSE
+        )
+        module_summaries[[dataset_name]] <- module_summary
+      }
+    }
+    
+    if (length(module_summaries) > 0) {
+      result$module_comparison <- do.call(rbind, module_summaries)
+      rownames(result$module_comparison) <- NULL
+    }
+  }
+  
+  # 6. Statistical tests (if requested)
+  if (include_statistics && length(dataset_profiles) == 2) {
+    if (verbose) message("  - Performing statistical tests...")
+    
+    dataset_names <- names(dataset_profiles)
+    profile1 <- dataset_profiles[[dataset_names[1]]]
+    profile2 <- dataset_profiles[[dataset_names[2]]]
+    
+    # Coverage comparison test
+    coverage_test <- NULL
+    if (profile1$loci_summary$total_input_loci[1] > 0 && profile2$loci_summary$total_input_loci[1] > 0) {
+      # Proportion test for annotation coverage
+      coverage_test <- prop.test(
+        x = c(profile1$loci_summary$annotated_loci[1], profile2$loci_summary$annotated_loci[1]),
+        n = c(profile1$loci_summary$total_input_loci[1], profile2$loci_summary$total_input_loci[1])
+      )
+    }
+    
+    # Annotation density comparison (if both have annotated loci)
+    annotation_test <- NULL
+    if (profile1$loci_summary$annotated_loci[1] > 0 && profile2$loci_summary$annotated_loci[1] > 0) {
+      # t-test for annotations per locus (requires individual locus data)
+      # For now, just report the comparison metrics
+      annotation_test <- list(
+        annotations_per_locus_1 = round(profile1$loci_summary$total_annotations[1] / profile1$loci_summary$annotated_loci[1], 2),
+        annotations_per_locus_2 = round(profile2$loci_summary$total_annotations[1] / profile2$loci_summary$annotated_loci[1], 2)
+      )
+    }
+    
+    result$statistical_tests <- list(
+      coverage_test = coverage_test,
+      annotation_test = annotation_test,
+      comparison_names = dataset_names
+    )
+  }
+  
+  if (verbose) {
+    message("Functional comparison complete:")
+    message("  - Datasets compared: ", length(dataset_profiles))
+    message("  - Comparison metrics: ", paste(comparison_metrics, collapse = ", "))
+    if (include_statistics) {
+      message("  - Statistical tests performed: ", !is.null(result$statistical_tests))
     }
   }
   
@@ -1735,4 +2812,541 @@ summarize_cog_categories <- function(con, blast_param_id = NULL, include_functio
   }
   
   return(result)
+}
+
+# INTERNAL HELPER FUNCTIONS
+
+#' Create GO functional modules from GO terms
+#'
+#' Groups GO terms into biologically meaningful functional modules based on 
+#' semantic relationships and common functional themes.
+#'
+#' @param go_terms_data Data frame with go_id, go_term, and go_category columns
+#' @param verbose Logical. Print progress information. Default is TRUE.
+#'
+#' @return List containing functional modules with their associated GO terms
+#'
+.create_go_functional_modules <- function(go_terms_data, verbose = TRUE) {
+  
+  if (is.null(go_terms_data) || nrow(go_terms_data) == 0) {
+    return(list())
+  }
+  
+  # Define functional module mappings based on GO term patterns
+  module_patterns <- list(
+    "DNA Repair and Maintenance" = c(
+      "DNA repair", "DNA damage", "DNA recombination", "DNA replication", 
+      "chromosome organization", "chromatin", "nucleotide excision repair",
+      "base excision repair", "mismatch repair", "double-strand break repair"
+    ),
+    
+    "Cell Cycle and Division" = c(
+      "cell cycle", "cell division", "mitotic", "meiotic", "cytokinesis",
+      "chromosome segregation", "spindle", "centrosome", "kinetochore"
+    ),
+    
+    "Transcription and Gene Expression" = c(
+      "transcription", "RNA polymerase", "promoter", "enhancer", "silencer",
+      "chromatin remodeling", "histone", "gene expression", "RNA processing"
+    ),
+    
+    "Translation and Protein Synthesis" = c(
+      "translation", "ribosome", "tRNA", "aminoacyl", "protein synthesis",
+      "ribosomal", "peptide bond", "codon"
+    ),
+    
+    "Protein Folding and Quality Control" = c(
+      "protein folding", "chaperone", "heat shock", "unfolded protein",
+      "endoplasmic reticulum stress", "proteasome", "ubiquitin", "protein degradation"
+    ),
+    
+    "Metabolic Processes" = c(
+      "metabolic process", "glycolysis", "gluconeogenesis", "citrate cycle",
+      "oxidative phosphorylation", "fatty acid", "amino acid metabolism",
+      "carbohydrate metabolism", "lipid metabolism"
+    ),
+    
+    "Signal Transduction" = c(
+      "signal transduction", "receptor", "kinase", "phosphatase", "second messenger",
+      "G protein", "calcium signaling", "cAMP", "phosphorylation"
+    ),
+    
+    "Transport and Membrane" = c(
+      "transport", "membrane", "ion channel", "carrier", "ATPase",
+      "vesicle", "endocytosis", "exocytosis", "secretion"
+    ),
+    
+    "Immune Response" = c(
+      "immune", "antigen", "antibody", "T cell", "B cell", "cytokine",
+      "complement", "inflammation", "defense response"
+    ),
+    
+    "Development and Differentiation" = c(
+      "development", "differentiation", "morphogenesis", "pattern specification",
+      "embryonic", "cell fate", "organogenesis", "tissue development"
+    ),
+    
+    "Apoptosis and Cell Death" = c(
+      "apoptosis", "cell death", "programmed cell death", "caspase",
+      "cytochrome c", "Bcl-2", "p53", "DNA fragmentation"
+    ),
+    
+    "Oxidative Stress Response" = c(
+      "oxidative stress", "antioxidant", "reactive oxygen", "superoxide",
+      "catalase", "peroxidase", "glutathione", "oxidoreductase"
+    )
+  )
+  
+  # Initialize results structure
+  modules <- list()
+  
+  for (module_name in names(module_patterns)) {
+    patterns <- module_patterns[[module_name]]
+    
+    # Find GO terms matching any of the patterns for this module
+    matching_terms <- go_terms_data[
+      apply(go_terms_data, 1, function(row) {
+        term_text <- tolower(paste(row["go_term"], collapse = " "))
+        any(sapply(patterns, function(pattern) grepl(pattern, term_text, ignore.case = TRUE)))
+      }), 
+    ]
+    
+    if (nrow(matching_terms) > 0) {
+      modules[[module_name]] <- list(
+        terms = matching_terms,
+        term_count = nrow(matching_terms),
+        categories = unique(matching_terms$go_category),
+        total_frequency = sum(matching_terms$frequency, na.rm = TRUE)
+      )
+    }
+  }
+  
+  # Add unclassified terms
+  classified_terms <- unique(do.call(rbind, lapply(modules, function(m) m$terms))$go_id)
+  unclassified <- go_terms_data[!go_terms_data$go_id %in% classified_terms, ]
+  
+  if (nrow(unclassified) > 0) {
+    modules[["Other/Unclassified"]] <- list(
+      terms = unclassified,
+      term_count = nrow(unclassified),
+      categories = unique(unclassified$go_category),
+      total_frequency = sum(unclassified$frequency, na.rm = TRUE)
+    )
+  }
+  
+  # Sort modules by total frequency
+  modules <- modules[order(sapply(modules, function(m) m$total_frequency), decreasing = TRUE)]
+  
+  if (verbose) {
+    message("    - Created ", length(modules), " functional modules")
+    message("    - Classified ", sum(sapply(modules, function(m) m$term_count)), " GO terms")
+  }
+  
+  return(modules)
+}
+
+#' Create KEGG functional modules from pathway data
+#'
+#' Groups KEGG pathways into biologically meaningful functional modules based on 
+#' KEGG pathway classification and functional categories.
+#'
+#' @param pathway_data Data frame with kegg_id, pathway_name, and frequency columns
+#' @param verbose Logical. Print progress information. Default is TRUE.
+#'
+#' @return List containing functional modules with their associated KEGG pathways
+#'
+.create_kegg_functional_modules <- function(pathway_data, verbose = TRUE) {
+  
+  if (is.null(pathway_data) || nrow(pathway_data) == 0) {
+    return(list())
+  }
+  
+  # Define KEGG functional module mappings based on pathway patterns
+  module_patterns <- list(
+    "Carbohydrate Metabolism" = c(
+      "glycolysis", "gluconeogenesis", "pentose phosphate", "citrate cycle",
+      "pyruvate metabolism", "glyoxylate", "propanoate", "butanoate",
+      "starch", "sucrose", "galactose", "fructose", "mannose"
+    ),
+    
+    "Energy Metabolism" = c(
+      "oxidative phosphorylation", "photosynthesis", "carbon fixation",
+      "methane metabolism", "nitrogen metabolism", "sulfur metabolism"
+    ),
+    
+    "Lipid Metabolism" = c(
+      "fatty acid", "steroid", "glycerolipid", "glycerophospholipid",
+      "sphingolipid", "arachidonic acid", "linoleic acid", "bile acid"
+    ),
+    
+    "Amino Acid Metabolism" = c(
+      "alanine", "arginine", "aspartate", "cysteine", "glutamate", 
+      "glycine", "histidine", "isoleucine", "leucine", "lysine",
+      "methionine", "phenylalanine", "proline", "serine", "threonine",
+      "tryptophan", "tyrosine", "valine"
+    ),
+    
+    "Nucleotide Metabolism" = c(
+      "purine metabolism", "pyrimidine metabolism", "nucleotide sugar"
+    ),
+    
+    "Vitamin and Cofactor Metabolism" = c(
+      "thiamine", "riboflavin", "niacin", "pantothenate", "pyridoxine",
+      "biotin", "folate", "ubiquinone", "terpenoid", "porphyrin"
+    ),
+    
+    "Signal Transduction" = c(
+      "MAPK", "calcium", "phosphatidylinositol", "phospholipase",
+      "sphingolipid signaling", "mTOR", "AMPK", "insulin", "Wnt", "Notch", "Hedgehog"
+    ),
+    
+    "Cell Cycle and Proliferation" = c(
+      "cell cycle", "DNA replication", "mismatch repair", "homologous recombination",
+      "non-homologous end-joining", "p53", "cellular senescence"
+    ),
+    
+    "Membrane Transport" = c(
+      "ABC transporters", "phosphotransferase", "bacterial secretion",
+      "protein export", "sulfur relay"
+    ),
+    
+    "Immune System" = c(
+      "complement", "toll-like receptor", "NOD-like receptor", "cytosolic DNA-sensing",
+      "natural killer", "T cell receptor", "B cell receptor", "chemokine",
+      "IL-17", "Th1", "Th2", "Th17", "Treg"
+    ),
+    
+    "Endocrine System" = c(
+      "insulin", "adipocytokine", "PPAR", "thyroid hormone", "estrogen",
+      "androgen", "progesterone", "cortisol", "aldosterone", "parathyroid"
+    ),
+    
+    "Development and Regeneration" = c(
+      "axon guidance", "osteoclast", "melanogenesis", "adipogenesis",
+      "chondroitin sulfate", "heparan sulfate"
+    ),
+    
+    "Drug Metabolism" = c(
+      "cytochrome P450", "drug metabolism", "xenobiotics"
+    ),
+    
+    "Disease Pathways" = c(
+      "cancer", "alzheimer", "parkinson", "huntington", "diabetes",
+      "pathways in cancer", "viral carcinogenesis", "chemical carcinogenesis"
+    )
+  )
+  
+  # Initialize results structure
+  modules <- list()
+  
+  for (module_name in names(module_patterns)) {
+    patterns <- module_patterns[[module_name]]
+    
+    # Find pathways matching any of the patterns for this module
+    matching_pathways <- pathway_data[
+      apply(pathway_data, 1, function(row) {
+        # Check both kegg_id and pathway_name for matches
+        pathway_text <- tolower(paste(row["kegg_id"], row["pathway_name"], collapse = " "))
+        any(sapply(patterns, function(pattern) grepl(pattern, pathway_text, ignore.case = TRUE)))
+      }), 
+    ]
+    
+    if (nrow(matching_pathways) > 0) {
+      modules[[module_name]] <- list(
+        pathways = matching_pathways,
+        pathway_count = nrow(matching_pathways),
+        total_frequency = sum(matching_pathways$frequency, na.rm = TRUE),
+        unique_loci = sum(matching_pathways$unique_loci, na.rm = TRUE)
+      )
+    }
+  }
+  
+  # Add unclassified pathways
+  classified_pathways <- unique(do.call(rbind, lapply(modules, function(m) m$pathways))$kegg_id)
+  unclassified <- pathway_data[!pathway_data$kegg_id %in% classified_pathways, ]
+  
+  if (nrow(unclassified) > 0) {
+    modules[["Other/Unclassified"]] <- list(
+      pathways = unclassified,
+      pathway_count = nrow(unclassified),
+      total_frequency = sum(unclassified$frequency, na.rm = TRUE),
+      unique_loci = sum(unclassified$unique_loci, na.rm = TRUE)
+    )
+  }
+  
+  # Sort modules by total frequency
+  modules <- modules[order(sapply(modules, function(m) m$total_frequency), decreasing = TRUE)]
+  
+  if (verbose) {
+    message("    - Created ", length(modules), " pathway modules")
+    message("    - Classified ", sum(sapply(modules, function(m) m$pathway_count)), " pathways")
+  }
+  
+  return(modules)
+}
+
+#' Create integrated functional summary from multiple annotation types
+#'
+#' Integrates functional modules from GO, KEGG, and COG to identify common themes
+#' and create a unified functional characterization.
+#'
+#' @param go_modules List. GO functional modules from .create_go_functional_modules()
+#' @param kegg_modules List. KEGG pathway modules from .create_kegg_functional_modules()
+#' @param cog_modules Data frame. COG functional groups 
+#' @param verbose Logical. Print progress information. Default is TRUE.
+#'
+#' @return List containing integrated functional themes
+#'
+.create_integrated_functional_summary <- function(go_modules = NULL, kegg_modules = NULL, 
+                                                 cog_modules = NULL, verbose = TRUE) {
+  
+  # Define functional theme mappings that integrate across annotation types
+  integrated_themes <- list()
+  
+  # Theme 1: DNA and Genome Maintenance
+  dna_theme <- list(
+    name = "DNA and Genome Maintenance",
+    description = "Processes involved in DNA repair, replication, and genome stability",
+    sources = list()
+  )
+  
+  if (!is.null(go_modules)) {
+    dna_go <- go_modules[grepl("DNA Repair|Cell Cycle", names(go_modules))]
+    if (length(dna_go) > 0) {
+      dna_theme$sources$GO <- dna_go
+    }
+  }
+  
+  if (!is.null(kegg_modules)) {
+    dna_kegg <- kegg_modules[grepl("Cell Cycle|DNA", names(kegg_modules))]
+    if (length(dna_kegg) > 0) {
+      dna_theme$sources$KEGG <- dna_kegg
+    }
+  }
+  
+  if (!is.null(cog_modules)) {
+    dna_cog <- cog_modules[grepl("Replication|Recombination", cog_modules$functional_group), ]
+    if (nrow(dna_cog) > 0) {
+      dna_theme$sources$COG <- dna_cog
+    }
+  }
+  
+  if (length(dna_theme$sources) > 0) {
+    integrated_themes[["DNA and Genome Maintenance"]] <- dna_theme
+  }
+  
+  # Theme 2: Metabolism and Energy
+  metabolism_theme <- list(
+    name = "Metabolism and Energy",
+    description = "Metabolic processes and energy production pathways",
+    sources = list()
+  )
+  
+  if (!is.null(go_modules)) {
+    metab_go <- go_modules[grepl("Metabolic", names(go_modules))]
+    if (length(metab_go) > 0) {
+      metabolism_theme$sources$GO <- metab_go
+    }
+  }
+  
+  if (!is.null(kegg_modules)) {
+    metab_kegg <- kegg_modules[grepl("Metabolism|Energy", names(kegg_modules))]
+    if (length(metab_kegg) > 0) {
+      metabolism_theme$sources$KEGG <- metab_kegg
+    }
+  }
+  
+  if (!is.null(cog_modules)) {
+    metab_cog <- cog_modules[grepl("Energy|Amino acid|Carbohydrate|Lipid", cog_modules$functional_group), ]
+    if (nrow(metab_cog) > 0) {
+      metabolism_theme$sources$COG <- metab_cog
+    }
+  }
+  
+  if (length(metabolism_theme$sources) > 0) {
+    integrated_themes[["Metabolism and Energy"]] <- metabolism_theme
+  }
+  
+  # Theme 3: Protein Processing and Quality Control
+  protein_theme <- list(
+    name = "Protein Processing and Quality Control",
+    description = "Protein synthesis, folding, modification, and degradation",
+    sources = list()
+  )
+  
+  if (!is.null(go_modules)) {
+    prot_go <- go_modules[grepl("Translation|Protein Folding", names(go_modules))]
+    if (length(prot_go) > 0) {
+      protein_theme$sources$GO <- prot_go
+    }
+  }
+  
+  if (!is.null(cog_modules)) {
+    prot_cog <- cog_modules[grepl("Translation|Posttranslational", cog_modules$functional_group), ]
+    if (nrow(prot_cog) > 0) {
+      protein_theme$sources$COG <- prot_cog
+    }
+  }
+  
+  if (length(protein_theme$sources) > 0) {
+    integrated_themes[["Protein Processing and Quality Control"]] <- protein_theme
+  }
+  
+  # Theme 4: Signaling and Regulation
+  signaling_theme <- list(
+    name = "Signaling and Regulation",
+    description = "Signal transduction and regulatory mechanisms",
+    sources = list()
+  )
+  
+  if (!is.null(go_modules)) {
+    sig_go <- go_modules[grepl("Signal Transduction|Transcription", names(go_modules))]
+    if (length(sig_go) > 0) {
+      signaling_theme$sources$GO <- sig_go
+    }
+  }
+  
+  if (!is.null(kegg_modules)) {
+    sig_kegg <- kegg_modules[grepl("Signal Transduction", names(kegg_modules))]
+    if (length(sig_kegg) > 0) {
+      signaling_theme$sources$KEGG <- sig_kegg
+    }
+  }
+  
+  if (!is.null(cog_modules)) {
+    sig_cog <- cog_modules[grepl("Signal transduction|Transcription", cog_modules$functional_group), ]
+    if (nrow(sig_cog) > 0) {
+      signaling_theme$sources$COG <- sig_cog
+    }
+  }
+  
+  if (length(signaling_theme$sources) > 0) {
+    integrated_themes[["Signaling and Regulation"]] <- signaling_theme
+  }
+  
+  # Theme 5: Stress Response and Defense
+  stress_theme <- list(
+    name = "Stress Response and Defense",
+    description = "Cellular stress response and defense mechanisms",
+    sources = list()
+  )
+  
+  if (!is.null(go_modules)) {
+    stress_go <- go_modules[grepl("Oxidative Stress|Immune|Apoptosis", names(go_modules))]
+    if (length(stress_go) > 0) {
+      stress_theme$sources$GO <- stress_go
+    }
+  }
+  
+  if (!is.null(kegg_modules)) {
+    stress_kegg <- kegg_modules[grepl("Immune", names(kegg_modules))]
+    if (length(stress_kegg) > 0) {
+      stress_theme$sources$KEGG <- stress_kegg
+    }
+  }
+  
+  if (!is.null(cog_modules)) {
+    stress_cog <- cog_modules[grepl("Defense", cog_modules$functional_group), ]
+    if (nrow(stress_cog) > 0) {
+      stress_theme$sources$COG <- stress_cog
+    }
+  }
+  
+  if (length(stress_theme$sources) > 0) {
+    integrated_themes[["Stress Response and Defense"]] <- stress_theme
+  }
+  
+  if (verbose && length(integrated_themes) > 0) {
+    message("    - Created ", length(integrated_themes), " integrated functional themes")
+  }
+  
+  return(integrated_themes)
+}
+
+#' Analyze overlap between functional modules from different annotation types
+#'
+#' Identifies common functional themes and overlapping coverage between
+#' GO, KEGG, and COG annotation systems.
+#'
+#' @param go_modules List. GO functional modules
+#' @param kegg_modules List. KEGG pathway modules
+#' @param cog_modules Data frame. COG functional groups
+#' @param verbose Logical. Print progress information. Default is TRUE.
+#'
+#' @return List containing overlap analysis results
+#'
+.analyze_module_overlap <- function(go_modules = NULL, kegg_modules = NULL, 
+                                   cog_modules = NULL, verbose = TRUE) {
+  
+  overlap_results <- list()
+  
+  # Count modules per annotation type
+  module_counts <- list(
+    GO = if (!is.null(go_modules)) length(go_modules) else 0,
+    KEGG = if (!is.null(kegg_modules)) length(kegg_modules) else 0,
+    COG = if (!is.null(cog_modules)) nrow(cog_modules) else 0
+  )
+  
+  overlap_results$module_counts <- module_counts
+  
+  # Identify common functional themes by name similarity
+  all_module_names <- c()
+  
+  if (!is.null(go_modules)) {
+    all_module_names <- c(all_module_names, paste("GO:", names(go_modules)))
+  }
+  
+  if (!is.null(kegg_modules)) {
+    all_module_names <- c(all_module_names, paste("KEGG:", names(kegg_modules)))
+  }
+  
+  if (!is.null(cog_modules)) {
+    all_module_names <- c(all_module_names, paste("COG:", cog_modules$functional_group))
+  }
+  
+  # Find potential overlaps based on keyword matching
+  common_keywords <- c("metabolism", "transport", "signal", "protein", "DNA", "cell cycle", "immune")
+  
+  keyword_overlap <- list()
+  for (keyword in common_keywords) {
+    matching_modules <- all_module_names[grepl(keyword, all_module_names, ignore.case = TRUE)]
+    if (length(matching_modules) > 1) {
+      keyword_overlap[[keyword]] <- matching_modules
+    }
+  }
+  
+  overlap_results$keyword_overlap <- keyword_overlap
+  
+  # Calculate coverage statistics
+  coverage_stats <- list()
+  
+  if (!is.null(go_modules) && !is.null(kegg_modules)) {
+    # Count how many themes are covered by both GO and KEGG
+    go_themes <- tolower(names(go_modules))
+    kegg_themes <- tolower(names(kegg_modules))
+    
+    shared_themes <- sum(sapply(go_themes, function(g) {
+      any(sapply(kegg_themes, function(k) {
+        length(intersect(strsplit(g, " ")[[1]], strsplit(k, " ")[[1]])) > 0
+      }))
+    }))
+    
+    coverage_stats$go_kegg_overlap <- shared_themes
+  }
+  
+  overlap_results$coverage_stats <- coverage_stats
+  
+  # Summary metrics
+  overlap_results$summary <- list(
+    total_unique_themes = length(unique(all_module_names)),
+    annotation_systems_used = sum(module_counts > 0),
+    common_keyword_themes = length(keyword_overlap)
+  )
+  
+  if (verbose) {
+    message("    - Analyzed overlap across ", overlap_results$summary$annotation_systems_used, " annotation systems")
+    message("    - Found ", overlap_results$summary$common_keyword_themes, " common functional themes")
+  }
+  
+  return(overlap_results)
 }

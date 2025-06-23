@@ -7,7 +7,9 @@
 summarize_go_annotations(
   con,
   blast_param_id = NULL,
+  candidate_loci = NULL,
   include_evidence = TRUE,
+  include_modules = FALSE,
   min_frequency = 1,
   verbose = TRUE
 )
@@ -17,7 +19,11 @@ summarize_go_annotations(
 
 \item{blast_param_id}{Integer. Specific BLAST parameter set to analyze. If NULL, analyzes all.}
 
+\item{candidate_loci}{Data frame with chromosome and position columns, or NULL for all loci.}
+
 \item{include_evidence}{Logical. Include GO evidence code statistics. Default is TRUE.}
+
+\item{include_modules}{Logical. Group GO terms into functional modules. Default is FALSE.}
 
 \item{min_frequency}{Integer. Minimum frequency threshold for GO terms to include. Default is 1.}
 
@@ -30,6 +36,7 @@ List containing GO annotation summaries:
 \item top_terms: Most frequent GO terms by category
 \item evidence_summary: GO evidence code distribution (if include_evidence = TRUE)
 \item coverage_stats: Coverage statistics across BLAST parameters
+\item functional_modules: GO terms grouped by functional modules (if include_modules = TRUE)
 }
 }
 \description{
@@ -39,7 +46,8 @@ Summarize GO annotations in the database
 }
 \details{
 Provides comprehensive statistics about GO term annotations across different
-ontology categories (BP, MF, CC) and blast parameter sets.
+ontology categories (BP, MF, CC) and blast parameter sets, with optional filtering
+for candidate loci and functional module grouping.
 }
 \examples{
 \dontrun{
@@ -49,8 +57,10 @@ con <- connect_funseq_db("analysis.db")
 go_summary <- summarize_go_annotations(con)
 print(go_summary$overview)
 
-# Analyze specific BLAST parameter set
-go_summary_blast1 <- summarize_go_annotations(con, blast_param_id = 1)
+# Analyze specific candidate loci with module grouping
+candidates <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+go_summary_candidates <- summarize_go_annotations(con, candidate_loci = candidates, 
+                                                  include_modules = TRUE)
 
 close_funseq_db(con)
 }
