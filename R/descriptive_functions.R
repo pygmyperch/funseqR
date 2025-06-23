@@ -1379,7 +1379,15 @@ summarize_uniprot_annotations <- function(con, blast_param_id = NULL, include_ge
     ", base_where
   )
   
-  overview <- DBI::dbGetQuery(con, overview_query, params)
+  # Execute overview query with proper parameter handling
+  num_placeholders <- nchar(overview_query) - nchar(gsub("\\?", "", overview_query))
+  if (num_placeholders > 0 && length(params) == num_placeholders) {
+    overview <- DBI::dbGetQuery(con, overview_query, params)
+  } else if (num_placeholders == 0 && length(params) == 0) {
+    overview <- DBI::dbGetQuery(con, overview_query)
+  } else {
+    stop("Parameter mismatch in overview_query: ", num_placeholders, " placeholders, ", length(params), " parameters")
+  }
   
   # 2. Top proteins by frequency
   if (verbose) message("  - Finding most frequent protein annotations...")
@@ -1401,7 +1409,13 @@ summarize_uniprot_annotations <- function(con, blast_param_id = NULL, include_ge
   ")
   
   top_proteins_params <- c(params, list(top_n))
-  top_proteins <- DBI::dbGetQuery(con, top_proteins_query, top_proteins_params)
+  # Execute top proteins query with proper parameter handling
+  num_placeholders <- nchar(top_proteins_query) - nchar(gsub("\\?", "", top_proteins_query))
+  if (num_placeholders > 0 && length(top_proteins_params) == num_placeholders) {
+    top_proteins <- DBI::dbGetQuery(con, top_proteins_query, top_proteins_params)
+  } else {
+    stop("Parameter mismatch in top_proteins_query: ", num_placeholders, " placeholders, ", length(top_proteins_params), " parameters")
+  }
   
   # 3. Gene name statistics (if requested)
   gene_name_stats <- NULL
@@ -1443,7 +1457,15 @@ summarize_uniprot_annotations <- function(con, blast_param_id = NULL, include_ge
     ")
     
     gene_stats_params <- c(params, list(top_n))
-    gene_name_stats <- DBI::dbGetQuery(con, gene_stats_query, gene_stats_params)
+    # Execute gene stats query with proper parameter handling
+    num_placeholders <- nchar(gene_stats_query) - nchar(gsub("\\?", "", gene_stats_query))
+    if (num_placeholders > 0 && length(gene_stats_params) == num_placeholders) {
+      gene_name_stats <- DBI::dbGetQuery(con, gene_stats_query, gene_stats_params)
+    } else if (num_placeholders == 0 && length(gene_stats_params) == 0) {
+      gene_name_stats <- DBI::dbGetQuery(con, gene_stats_query)
+    } else {
+      stop("Parameter mismatch in gene_stats_query: ", num_placeholders, " placeholders, ", length(gene_stats_params), " parameters")
+    }
   }
   
   # 4. Annotation quality metrics
@@ -1501,7 +1523,15 @@ summarize_uniprot_annotations <- function(con, blast_param_id = NULL, include_ge
     AND (a.gene_names IS NULL OR a.gene_names = '')
   ")
   
-  annotation_quality <- DBI::dbGetQuery(con, quality_query, params)
+  # Execute quality query with proper parameter handling
+  num_placeholders <- nchar(quality_query) - nchar(gsub("\\?", "", quality_query))
+  if (num_placeholders > 0 && length(params) == num_placeholders) {
+    annotation_quality <- DBI::dbGetQuery(con, quality_query, params)
+  } else if (num_placeholders == 0 && length(params) == 0) {
+    annotation_quality <- DBI::dbGetQuery(con, quality_query)
+  } else {
+    stop("Parameter mismatch in quality_query: ", num_placeholders, " placeholders, ", length(params), " parameters")
+  }
   
   # Compile results
   result <- list(
