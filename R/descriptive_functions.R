@@ -644,17 +644,17 @@ create_functional_module_summary <- function(con, candidate_loci = NULL, blast_p
   
   overview_stats <- list()
   
-  if (include_go && !is.null(result$go_modules)) {
+  if (include_go && !is.null(result$go_modules) && length(result$go_modules) > 0) {
     overview_stats$go_module_count <- length(result$go_modules)
-    overview_stats$go_total_terms <- sum(sapply(result$go_modules, function(m) m$term_count))
+    overview_stats$go_total_terms <- sum(sapply(result$go_modules, function(m) m$term_count), na.rm = TRUE)
   }
   
-  if (include_kegg && !is.null(result$kegg_modules)) {
+  if (include_kegg && !is.null(result$kegg_modules) && length(result$kegg_modules) > 0) {
     overview_stats$kegg_module_count <- length(result$kegg_modules)
-    overview_stats$kegg_total_pathways <- sum(sapply(result$kegg_modules, function(m) m$pathway_count))
+    overview_stats$kegg_total_pathways <- sum(sapply(result$kegg_modules, function(m) m$pathway_count), na.rm = TRUE)
   }
   
-  if (include_cog && !is.null(result$cog_modules)) {
+  if (include_cog && !is.null(result$cog_modules) && nrow(result$cog_modules) > 0) {
     overview_stats$cog_group_count <- nrow(result$cog_modules)
     overview_stats$cog_total_assignments <- sum(result$cog_modules$frequency, na.rm = TRUE)
   }
