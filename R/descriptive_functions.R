@@ -1656,15 +1656,18 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
     ", where_clause
   )
   
-  if (length(params) > 0) {
+  # Execute query with proper parameter handling
+  num_placeholders <- lengths(regmatches(loci_summary_query, gregexpr("\\?", loci_summary_query)))
+  if (num_placeholders > 0 && length(params) > 0) {
     loci_summary <- DBI::dbGetQuery(con, loci_summary_query, params)
   } else {
     loci_summary <- DBI::dbGetQuery(con, loci_summary_query)
   }
   
-  # 2. GO profile (using existing function)
+  # 2. GO profile (using enhanced function with candidate loci)
   if (verbose) message("  - Analyzing GO term profile...")
-  go_profile <- summarize_go_annotations(con, blast_param_id = blast_param_id, verbose = FALSE)
+  go_profile <- summarize_go_annotations(con, blast_param_id = blast_param_id, 
+                                        candidate_loci = candidate_loci, verbose = FALSE)
   
   # 3. Protein profile (using existing function)
   if (verbose) message("  - Analyzing protein profile...")
@@ -1694,7 +1697,9 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
       LIMIT 50
     ")
     
-    if (length(params) > 0) {
+    # Execute pathway query with proper parameter handling
+    num_placeholders <- lengths(regmatches(pathway_query, gregexpr("\\?", pathway_query)))
+    if (num_placeholders > 0 && length(params) > 0) {
       pathway_profile <- DBI::dbGetQuery(con, pathway_query, params)
     } else {
       pathway_profile <- DBI::dbGetQuery(con, pathway_query)
@@ -1725,7 +1730,9 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
       ", where_clause
     )
     
-    if (length(params) > 0) {
+    # Execute BLAST quality query with proper parameter handling  
+    num_placeholders <- lengths(regmatches(blast_quality_query, gregexpr("\\?", blast_quality_query)))
+    if (num_placeholders > 0 && length(params) > 0) {
       blast_quality <- DBI::dbGetQuery(con, blast_quality_query, params)
     } else {
       blast_quality <- DBI::dbGetQuery(con, blast_quality_query)
@@ -1766,7 +1773,9 @@ get_functional_profile <- function(con, candidate_loci = NULL, blast_param_id = 
     FROM functional_stats
   ")
   
-  if (length(params) > 0) {
+  # Execute diversity query with proper parameter handling
+  num_placeholders <- lengths(regmatches(diversity_query, gregexpr("\\?", diversity_query)))
+  if (num_placeholders > 0 && length(params) > 0) {
     functional_diversity <- DBI::dbGetQuery(con, diversity_query, params)
   } else {
     functional_diversity <- DBI::dbGetQuery(con, diversity_query)
