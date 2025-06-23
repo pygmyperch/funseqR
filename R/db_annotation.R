@@ -1218,17 +1218,45 @@ extract_uniprot_info <- function(uniprot_data, evidence_keep = NULL, debug = FAL
         kegg_id <- ref$id
         pathway_name <- NA_character_
 
-        # Extract properties - same pattern as GO terms
+        # Extract properties - enhanced to handle multiple property key types
         if (!is.null(ref$properties) && is.list(ref$properties)) {
+          if (debug) message("  Processing ", length(ref$properties), " properties")
           for (j in seq_along(ref$properties)) {
             prop <- ref$properties[[j]]
 
             if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
-              if (prop$key == "Description" || prop$key == "PathwayName") {
+              if (debug) message("    Property: ", prop$key, " = ", prop$value)
+              # Check for various possible pathway name keys
+              if (prop$key %in% c("Description", "PathwayName", "Pathway", "Name", "FullName")) {
                 pathway_name <- prop$value
-                if (debug) message("  Found pathway name: ", pathway_name)
+                if (debug) message("  Found pathway name via '", prop$key, "': ", pathway_name)
               }
             }
+          }
+        } else {
+          if (debug) message("  No properties found for KEGG reference")
+        }
+
+        # Handle missing pathway names - provide more informative fallback
+        if (is.na(pathway_name) || pathway_name == "") {
+          # For gene IDs (like dre:563201), extract organism info
+          if (grepl("^[a-z]{3}:", kegg_id)) {
+            organism_code <- substr(kegg_id, 1, 3)
+            organism_map <- c(
+              "dre" = "Danio rerio (zebrafish)",
+              "tru" = "Takifugu rubripes (fugu)",
+              "hsa" = "Homo sapiens (human)",
+              "mmu" = "Mus musculus (mouse)",
+              "rno" = "Rattus norvegicus (rat)"
+            )
+            if (organism_code %in% names(organism_map)) {
+              pathway_name <- paste0("Gene from ", organism_map[organism_code])
+            } else {
+              pathway_name <- paste0("Gene from organism: ", organism_code)
+            }
+            if (debug) message("  Generated descriptive name: ", pathway_name)
+          } else {
+            pathway_name <- "Unknown pathway"
           }
         }
 
@@ -1240,7 +1268,7 @@ extract_uniprot_info <- function(uniprot_data, evidence_keep = NULL, debug = FAL
         )
         kegg_refs <- rbind(kegg_refs, new_row)
 
-        if (debug) message("Added KEGG reference: ", kegg_id)
+        if (debug) message("Added KEGG reference: ", kegg_id, " -> ", pathway_name)
       }
     }
 
@@ -1801,8 +1829,33 @@ process_uniprot_json <- function(parsed, accession, evidence_keep = NULL, debug 
           if (!is.null(ref$properties)) {
             for (prop in ref$properties) {
               if (!is.null(prop$key) && !is.null(prop$value)) {
-                if (prop$key == "Description") pathway_name <- prop$value
+                # Check for various possible pathway name keys
+                if (prop$key %in% c("Description", "PathwayName", "Pathway", "Name", "FullName")) {
+                  pathway_name <- prop$value
+                }
               }
+            }
+          }
+
+          # Handle missing pathway names - provide more informative fallback
+          if (is.na(pathway_name) || pathway_name == "") {
+            # For gene IDs (like dre:563201), extract organism info
+            if (grepl("^[a-z]{3}:", kegg_id)) {
+              organism_code <- substr(kegg_id, 1, 3)
+              organism_map <- c(
+                "dre" = "Danio rerio (zebrafish)",
+                "tru" = "Takifugu rubripes (fugu)",
+                "hsa" = "Homo sapiens (human)",
+                "mmu" = "Mus musculus (mouse)",
+                "rno" = "Rattus norvegicus (rat)"
+              )
+              if (organism_code %in% names(organism_map)) {
+                pathway_name <- paste0("Gene from ", organism_map[organism_code])
+              } else {
+                pathway_name <- paste0("Gene from organism: ", organism_code)
+              }
+            } else {
+              pathway_name <- "Unknown pathway"
             }
           }
 

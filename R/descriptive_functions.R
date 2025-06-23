@@ -3108,6 +3108,27 @@ summarize_cog_categories <- function(con, blast_param_id = NULL, include_functio
     "Disease Pathways" = c(
       "cancer", "alzheimer", "parkinson", "huntington", "diabetes",
       "pathways in cancer", "viral carcinogenesis", "chemical carcinogenesis"
+    ),
+    
+    # Organism-specific gene modules (for cases where pathway names aren't available)
+    "Zebrafish Genes" = c(
+      "danio rerio", "zebrafish", "dre:"
+    ),
+    
+    "Fugu Genes" = c(
+      "takifugu rubripes", "fugu", "tru:"
+    ),
+    
+    "Human Genes" = c(
+      "homo sapiens", "human", "hsa:"
+    ),
+    
+    "Mouse Genes" = c(
+      "mus musculus", "mouse", "mmu:"
+    ),
+    
+    "Rat Genes" = c(
+      "rattus norvegicus", "rat", "rno:"
     )
   )
   
