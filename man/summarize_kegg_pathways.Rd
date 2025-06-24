@@ -10,6 +10,8 @@ summarize_kegg_pathways(
   candidate_loci = NULL,
   include_modules = TRUE,
   min_frequency = 1,
+  use_keggrest_enhancement = FALSE,
+  use_ggkegg_analysis = FALSE,
   verbose = TRUE
 )
 }
@@ -24,6 +26,10 @@ summarize_kegg_pathways(
 
 \item{min_frequency}{Integer. Minimum frequency threshold for pathways to include. Default is 1.}
 
+\item{use_keggrest_enhancement}{Logical. Enhance pathway names using KEGGREST. Default is FALSE.}
+
+\item{use_ggkegg_analysis}{Logical. Include ggkegg-based network analysis. Default is FALSE.}
+
 \item{verbose}{Logical. Print progress information. Default is TRUE.}
 }
 \value{
@@ -33,23 +39,36 @@ List containing KEGG pathway summaries:
 \item top_pathways: Most frequent pathways
 \item pathway_modules: Pathways grouped by functional modules (if include_modules = TRUE)
 \item coverage_stats: Coverage statistics across BLAST parameters
+\item enhanced_analysis: KEGGREST/ggkegg analysis results (if requested)
+\item network_summary: Pathway network analysis (if use_ggkegg_analysis = TRUE)
 }
 }
 \description{
 Provides comprehensive statistics about KEGG pathway annotations with optional
 candidate loci filtering and functional module grouping by pathway categories.
+Enhanced with KEGGREST and ggkegg integration for improved pathway analysis.
 }
 \examples{
 \dontrun{
 con <- connect_funseq_db("analysis.db")
 
-# Analyze all KEGG pathways with module grouping
+# Basic KEGG pathway analysis with module grouping
 kegg_summary <- summarize_kegg_pathways(con, include_modules = TRUE)
 print(kegg_summary$pathway_modules)
 
-# Analyze specific candidate loci
+# Enhanced analysis with KEGGREST pathway name improvement
+kegg_enhanced <- summarize_kegg_pathways(con, use_keggrest_enhancement = TRUE)
+print(kegg_enhanced$enhanced_analysis)
+
+# Full analysis with ggkegg network analysis for candidate loci
 candidates <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
-kegg_candidates <- summarize_kegg_pathways(con, candidate_loci = candidates)
+kegg_full <- summarize_kegg_pathways(
+  con, 
+  candidate_loci = candidates,
+  use_keggrest_enhancement = TRUE,
+  use_ggkegg_analysis = TRUE
+)
+print(kegg_full$network_summary)
 
 close_funseq_db(con)
 }

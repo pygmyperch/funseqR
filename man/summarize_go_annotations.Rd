@@ -42,6 +42,7 @@ List containing GO annotation summaries:
 \description{
 This file contains functions to summarize and describe functional annotations
 from BLAST results, GO terms, UniProt data, and enrichment analyses.
+Enhanced with KEGGREST and ggkegg integration for improved pathway analysis.
 Summarize GO annotations in the database
 }
 \details{

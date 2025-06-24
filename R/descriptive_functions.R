@@ -2,6 +2,7 @@
 #'
 #' This file contains functions to summarize and describe functional annotations
 #' from BLAST results, GO terms, UniProt data, and enrichment analyses.
+#' Enhanced with KEGGREST and ggkegg integration for improved pathway analysis.
 
 #' Summarize GO annotations in the database
 #'
@@ -284,12 +285,15 @@ summarize_go_annotations <- function(con, blast_param_id = NULL, candidate_loci 
 #'
 #' Provides comprehensive statistics about KEGG pathway annotations with optional
 #' candidate loci filtering and functional module grouping by pathway categories.
+#' Enhanced with KEGGREST and ggkegg integration for improved pathway analysis.
 #'
 #' @param con Database connection object
 #' @param blast_param_id Integer. Specific BLAST parameter set to analyze. If NULL, analyzes all.
 #' @param candidate_loci Data frame with chromosome and position columns, or NULL for all loci.
 #' @param include_modules Logical. Group pathways into functional modules. Default is TRUE.
 #' @param min_frequency Integer. Minimum frequency threshold for pathways to include. Default is 1.
+#' @param use_keggrest_enhancement Logical. Enhance pathway names using KEGGREST. Default is FALSE.
+#' @param use_ggkegg_analysis Logical. Include ggkegg-based network analysis. Default is FALSE.
 #' @param verbose Logical. Print progress information. Default is TRUE.
 #'
 #' @return List containing KEGG pathway summaries:
@@ -298,26 +302,40 @@ summarize_go_annotations <- function(con, blast_param_id = NULL, candidate_loci 
 #'   \item top_pathways: Most frequent pathways 
 #'   \item pathway_modules: Pathways grouped by functional modules (if include_modules = TRUE)
 #'   \item coverage_stats: Coverage statistics across BLAST parameters
+#'   \item enhanced_analysis: KEGGREST/ggkegg analysis results (if requested)
+#'   \item network_summary: Pathway network analysis (if use_ggkegg_analysis = TRUE)
 #' }
 #'
 #' @examples
 #' \dontrun{
 #' con <- connect_funseq_db("analysis.db")
 #' 
-#' # Analyze all KEGG pathways with module grouping
+#' # Basic KEGG pathway analysis with module grouping
 #' kegg_summary <- summarize_kegg_pathways(con, include_modules = TRUE)
 #' print(kegg_summary$pathway_modules)
 #' 
-#' # Analyze specific candidate loci
+#' # Enhanced analysis with KEGGREST pathway name improvement
+#' kegg_enhanced <- summarize_kegg_pathways(con, use_keggrest_enhancement = TRUE)
+#' print(kegg_enhanced$enhanced_analysis)
+#' 
+#' # Full analysis with ggkegg network analysis for candidate loci
 #' candidates <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
-#' kegg_candidates <- summarize_kegg_pathways(con, candidate_loci = candidates)
+#' kegg_full <- summarize_kegg_pathways(
+#'   con, 
+#'   candidate_loci = candidates,
+#'   use_keggrest_enhancement = TRUE,
+#'   use_ggkegg_analysis = TRUE
+#' )
+#' print(kegg_full$network_summary)
 #' 
 #' close_funseq_db(con)
 #' }
 #'
 #' @export
 summarize_kegg_pathways <- function(con, blast_param_id = NULL, candidate_loci = NULL,
-                                   include_modules = TRUE, min_frequency = 1, verbose = TRUE) {
+                                   include_modules = TRUE, min_frequency = 1, 
+                                   use_keggrest_enhancement = FALSE, use_ggkegg_analysis = FALSE,
+                                   verbose = TRUE) {
   
   if (verbose) message("Summarizing KEGG pathways...")
   
@@ -501,6 +519,62 @@ summarize_kegg_pathways <- function(con, blast_param_id = NULL, candidate_loci =
     pathway_modules <- .create_kegg_functional_modules(top_pathways, verbose = FALSE)
   }
   
+  # 5. Enhanced analysis using KEGGREST and ggkegg (if requested)
+  enhanced_analysis <- NULL
+  network_summary <- NULL
+  
+  if (use_keggrest_enhancement || use_ggkegg_analysis) {
+    if (verbose) message("  - Performing enhanced KEGG analysis...")
+    
+    # KEGGREST enhancement for pathway names
+    if (use_keggrest_enhancement) {
+      if (verbose) message("    - Updating pathway names with KEGGREST...")
+      
+      # Only update if we have pathways with missing names
+      missing_names_count <- sum(is.na(top_pathways$pathway_name) | 
+                                top_pathways$pathway_name == "" | 
+                                top_pathways$pathway_name == "-", na.rm = TRUE)
+      
+      if (missing_names_count > 0) {
+        keggrest_results <- update_kegg_pathway_names_with_keggrest(
+          con, 
+          limit = 50, 
+          verbose = verbose
+        )
+        enhanced_analysis$keggrest_update <- keggrest_results
+      } else {
+        if (verbose) message("      - No pathway names need updating")
+        enhanced_analysis$keggrest_update <- list(message = "No pathway names needed updating")
+      }
+    }
+    
+    # ggkegg network analysis
+    if (use_ggkegg_analysis) {
+      if (verbose) message("    - Performing ggkegg pathway network analysis...")
+      
+      ggkegg_results <- analyze_kegg_modules(
+        con, 
+        candidate_loci = candidate_loci,
+        blast_param_id = blast_param_id,
+        include_network_analysis = TRUE,
+        max_pathways_to_analyze = min(20, nrow(top_pathways)),
+        verbose = verbose
+      )
+      
+      network_summary <- list(
+        pathway_networks = ggkegg_results$network_data,
+        module_analysis = ggkegg_results$module_analysis,
+        pathway_interactions = ggkegg_results$pathway_interactions,
+        network_stats = ggkegg_results$coverage_stats
+      )
+      
+      # Update pathway_modules with ggkegg results if available
+      if (length(ggkegg_results$functional_modules) > 0) {
+        enhanced_analysis$ggkegg_modules <- ggkegg_results$functional_modules
+      }
+    }
+  }
+  
   # Clean up temporary table if created
   if (!is.null(temp_table_name)) {
     DBI::dbExecute(con, paste0("DROP TABLE ", temp_table_name))
@@ -512,11 +586,15 @@ summarize_kegg_pathways <- function(con, blast_param_id = NULL, candidate_loci =
     top_pathways = top_pathways,
     pathway_modules = pathway_modules,
     coverage_stats = coverage_stats,
+    enhanced_analysis = enhanced_analysis,
+    network_summary = network_summary,
     parameters = list(
       blast_param_id = blast_param_id,
       candidate_loci = !is.null(candidate_loci),
       include_modules = include_modules,
-      min_frequency = min_frequency
+      min_frequency = min_frequency,
+      use_keggrest_enhancement = use_keggrest_enhancement,
+      use_ggkegg_analysis = use_ggkegg_analysis
     )
   )
   
@@ -526,6 +604,22 @@ summarize_kegg_pathways <- function(con, blast_param_id = NULL, candidate_loci =
       message("  - Unique pathways: ", overview$unique_pathways[1])
       message("  - Total assignments: ", overview$total_pathway_assignments[1])
       message("  - Annotated loci: ", overview$annotated_loci[1])
+      
+      # Enhanced analysis results
+      if (use_keggrest_enhancement && !is.null(enhanced_analysis$keggrest_update)) {
+        if (is.list(enhanced_analysis$keggrest_update) && "updated_pathways" %in% names(enhanced_analysis$keggrest_update)) {
+          message("  - KEGGREST pathway names updated: ", enhanced_analysis$keggrest_update$updated_pathways)
+        }
+      }
+      
+      if (use_ggkegg_analysis && !is.null(network_summary)) {
+        if (!is.null(network_summary$network_stats$pathways_with_networks)) {
+          message("  - Pathway networks analyzed: ", network_summary$network_stats$pathways_with_networks)
+        }
+        if (!is.null(network_summary$pathway_interactions) && nrow(network_summary$pathway_interactions) > 0) {
+          message("  - Pathway interactions found: ", nrow(network_summary$pathway_interactions))
+        }
+      }
     } else {
       message("  - No KEGG pathway assignments found with current filters")
     }
@@ -3445,4 +3539,965 @@ summarize_cog_categories <- function(con, blast_param_id = NULL, include_functio
   }
   
   return(overlap_results)
+}
+
+#' Update KEGG pathway names using KEGGREST
+#'
+#' Fixes missing or incorrect KEGG pathway names in the database by using KEGGREST
+#' to fetch actual pathway information from the KEGG API. This addresses the issue
+#' where UniProt returns "-" as pathway names.
+#'
+#' @param con Database connection object
+#' @param limit Integer. Maximum number of KEGG IDs to process. Default is NULL (process all)
+#' @param batch_size Integer. Number of KEGG IDs to process in each batch. Default is 10
+#' @param verbose Logical. Print progress information. Default is TRUE
+#' @param dry_run Logical. If TRUE, show what would be updated without making changes. Default is FALSE
+#'
+#' @return List containing update results:
+#' \itemize{
+#'   \item total_kegg_ids: Total number of KEGG IDs found in database
+#'   \item processed_ids: Number of IDs successfully processed
+#'   \item updated_pathways: Number of pathway names updated
+#'   \item failed_ids: Vector of KEGG IDs that failed to process
+#'   \item processing_summary: Detailed summary of updates
+#' }
+#'
+#' @details
+#' This function retrieves KEGG IDs from the database that have missing or invalid
+#' pathway names (NULL, empty, or "-"), then uses KEGGREST to fetch the actual
+#' pathway information from KEGG. For gene IDs like "dre:563201", it extracts
+#' pathway names and updates the database.
+#'
+#' The function handles different types of KEGG IDs:
+#' \itemize{
+#'   \item Gene IDs (e.g., "dre:563201"): Fetches gene information and pathway associations
+#'   \item Pathway IDs (e.g., "dre00562"): Fetches pathway names directly
+#'   \item Module IDs (e.g., "M00130"): Fetches module information
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' con <- connect_funseq_db("analysis.db")
+#' 
+#' # Preview what would be updated (dry run)
+#' preview <- update_kegg_pathway_names_with_keggrest(con, limit = 5, dry_run = TRUE)
+#' print(preview$processing_summary)
+#' 
+#' # Actually update pathway names
+#' results <- update_kegg_pathway_names_with_keggrest(con, limit = 50)
+#' print(results$processing_summary)
+#' 
+#' close_funseq_db(con)
+#' }
+#'
+#' @export
+update_kegg_pathway_names_with_keggrest <- function(con, limit = NULL, batch_size = 10, 
+                                                   verbose = TRUE, dry_run = FALSE) {
+  
+  if (verbose) {
+    action <- if (dry_run) "Previewing" else "Updating"
+    message(action, " KEGG pathway names using KEGGREST...")
+  }
+  
+  # Check if KEGGREST is available
+  if (!requireNamespace("KEGGREST", quietly = TRUE)) {
+    stop("KEGGREST package is required but not installed. Please install it with:\n",
+         "BiocManager::install('KEGGREST')")
+  }
+  
+  # Get KEGG IDs with missing or invalid pathway names
+  if (verbose) message("  - Retrieving KEGG IDs with missing pathway names...")
+  
+  base_query <- "
+    SELECT 
+      kr.kegg_ref_id,
+      kr.kegg_id,
+      kr.pathway_name,
+      a.uniprot_accession,
+      a.entry_name
+    FROM kegg_references kr
+    JOIN annotations a ON kr.annotation_id = a.annotation_id
+    WHERE kr.pathway_name IS NULL 
+       OR kr.pathway_name = '' 
+       OR kr.pathway_name = '-'
+    ORDER BY kr.kegg_ref_id
+  "
+  
+  if (!is.null(limit)) {
+    base_query <- paste(base_query, "LIMIT", limit)
+  }
+  
+  kegg_records <- DBI::dbGetQuery(con, base_query)
+  
+  if (nrow(kegg_records) == 0) {
+    if (verbose) message("  - No KEGG references need updating")
+    return(list(
+      total_kegg_ids = 0,
+      processed_ids = 0,
+      updated_pathways = 0,
+      failed_ids = character(0),
+      processing_summary = data.frame()
+    ))
+  }
+  
+  if (verbose) message("  - Found ", nrow(kegg_records), " KEGG references to process")
+  
+  # Process in batches to avoid overwhelming the API
+  total_records <- nrow(kegg_records)
+  processed_count <- 0
+  updated_count <- 0
+  failed_ids <- character(0)
+  processing_details <- list()
+  
+  # Split into batches
+  batch_indices <- split(1:total_records, ceiling(seq_along(1:total_records) / batch_size))
+  
+  for (batch_num in seq_along(batch_indices)) {
+    batch_indices_current <- batch_indices[[batch_num]]
+    batch_records <- kegg_records[batch_indices_current, ]
+    
+    if (verbose) {
+      message("  - Processing batch ", batch_num, "/", length(batch_indices), 
+              " (", nrow(batch_records), " records)...")
+    }
+    
+    for (i in 1:nrow(batch_records)) {
+      record <- batch_records[i, ]
+      kegg_id <- record$kegg_id
+      kegg_ref_id <- record$kegg_ref_id
+      
+      if (verbose && (processed_count + 1) %% 25 == 0) {
+        message("    - Processed ", processed_count + 1, "/", total_records, " records...")
+      }
+      
+      tryCatch({
+        # Use KEGGREST to get pathway information
+        kegg_data <- KEGGREST::keggGet(kegg_id)
+        
+        if (length(kegg_data) > 0) {
+          gene_info <- kegg_data[[1]]
+          new_pathway_names <- character(0)
+          
+          # Extract pathway information
+          if (!is.null(gene_info$PATHWAY)) {
+            pathways <- gene_info$PATHWAY
+            # Convert to descriptive format: "pathway_id: pathway_name"
+            pathway_descriptions <- paste(names(pathways), pathways, sep = ": ")
+            new_pathway_names <- pathway_descriptions
+          }
+          
+          # If no pathways, use gene name/symbol information
+          if (length(new_pathway_names) == 0) {
+            if (!is.null(gene_info$NAME)) {
+              new_pathway_names <- paste("Gene:", gene_info$NAME)
+            } else if (!is.null(gene_info$SYMBOL)) {
+              new_pathway_names <- paste("Gene:", gene_info$SYMBOL)
+            } else {
+              # Use organism-based naming as fallback
+              if (grepl("^[a-z]{3}:", kegg_id)) {
+                organism_code <- substr(kegg_id, 1, 3)
+                organism_map <- c(
+                  "dre" = "Danio rerio (zebrafish)",
+                  "tru" = "Takifugu rubripes (fugu)",
+                  "hsa" = "Homo sapiens (human)",
+                  "mmu" = "Mus musculus (mouse)",
+                  "rno" = "Rattus norvegicus (rat)",
+                  "ath" = "Arabidopsis thaliana",
+                  "sce" = "Saccharomyces cerevisiae (yeast)",
+                  "eco" = "Escherichia coli"
+                )
+                
+                if (organism_code %in% names(organism_map)) {
+                  new_pathway_names <- paste("Gene from", organism_map[organism_code])
+                } else {
+                  new_pathway_names <- paste("Gene from organism:", organism_code)
+                }
+              } else {
+                new_pathway_names <- "Unknown pathway"
+              }
+            }
+          }
+          
+          # Use the first pathway name (or combined if multiple)
+          final_pathway_name <- if (length(new_pathway_names) > 1) {
+            # If multiple pathways, combine them
+            paste(new_pathway_names, collapse = "; ")
+          } else {
+            new_pathway_names[1]
+          }
+          
+          # Store processing details
+          processing_details[[as.character(kegg_ref_id)]] <- list(
+            kegg_id = kegg_id,
+            old_pathway_name = record$pathway_name,
+            new_pathway_name = final_pathway_name,
+            pathways_found = length(gene_info$PATHWAY %||% 0),
+            status = "success"
+          )
+          
+          # Update database (unless dry run)
+          if (!dry_run) {
+            DBI::dbExecute(con, "
+              UPDATE kegg_references 
+              SET pathway_name = ?
+              WHERE kegg_ref_id = ?
+            ", list(final_pathway_name, kegg_ref_id))
+          }
+          
+          updated_count <- updated_count + 1
+          
+        } else {
+          # No data returned from KEGG
+          processing_details[[as.character(kegg_ref_id)]] <- list(
+            kegg_id = kegg_id,
+            old_pathway_name = record$pathway_name,
+            new_pathway_name = NA,
+            pathways_found = 0,
+            status = "no_data"
+          )
+        }
+        
+        processed_count <- processed_count + 1
+        
+      }, error = function(e) {
+        # Handle API errors
+        failed_ids <- c(failed_ids, kegg_id)
+        processing_details[[as.character(kegg_ref_id)]] <- list(
+          kegg_id = kegg_id,
+          old_pathway_name = record$pathway_name,
+          new_pathway_name = NA,
+          pathways_found = 0,
+          status = paste("error:", e$message)
+        )
+        
+        if (verbose) {
+          message("    - Failed to process ", kegg_id, ": ", e$message)
+        }
+        
+        processed_count <- processed_count + 1
+      })
+      
+      # Rate limiting: small delay between requests
+      Sys.sleep(0.1)
+    }
+    
+    # Longer delay between batches
+    if (batch_num < length(batch_indices)) {
+      Sys.sleep(1)
+    }
+  }
+  
+  # Create processing summary
+  processing_summary <- do.call(rbind, lapply(names(processing_details), function(ref_id) {
+    details <- processing_details[[ref_id]]
+    data.frame(
+      kegg_ref_id = as.integer(ref_id),
+      kegg_id = details$kegg_id,
+      old_pathway_name = details$old_pathway_name %||% "",
+      new_pathway_name = details$new_pathway_name %||% "",
+      pathways_found = details$pathways_found,
+      status = details$status,
+      stringsAsFactors = FALSE
+    )
+  }))
+  
+  # Compile results
+  result <- list(
+    total_kegg_ids = total_records,
+    processed_ids = processed_count,
+    updated_pathways = updated_count,
+    failed_ids = failed_ids,
+    processing_summary = processing_summary
+  )
+  
+  if (verbose) {
+    action_past <- if (dry_run) "previewed" else "updated"
+    message("KEGG pathway name processing complete:")
+    message("  - Total records: ", total_records)
+    message("  - Successfully processed: ", processed_count)
+    message("  - Pathway names ", action_past, ": ", updated_count)
+    if (length(failed_ids) > 0) {
+      message("  - Failed IDs: ", length(failed_ids))
+    }
+    
+    if (!dry_run && updated_count > 0) {
+      message("  - Database updated with KEGGREST pathway information")
+    }
+  }
+  
+  return(result)
+}
+
+#' Analyze KEGG modules and pathway networks using ggkegg
+#'
+#' Performs advanced KEGG pathway analysis using the ggkegg package to extract
+#' pathway network information, module relationships, and functional groupings.
+#' This provides deeper insight into pathway organization than simple pathway lists.
+#'
+#' @param con Database connection object
+#' @param candidate_loci Data frame with chromosome and position columns, or NULL for all loci
+#' @param blast_param_id Integer. Specific BLAST parameter set to analyze. If NULL, analyzes all.
+#' @param use_cached_pathways Logical. Use cached ggkegg pathway data. Default is TRUE
+#' @param include_network_analysis Logical. Perform pathway network analysis. Default is TRUE
+#' @param max_pathways_to_analyze Integer. Maximum number of pathways to analyze with ggkegg. Default is 20
+#' @param verbose Logical. Print progress information. Default is TRUE
+#'
+#' @return List containing KEGG module analysis:
+#' \itemize{
+#'   \item pathway_summary: Basic pathway frequency statistics
+#'   \item module_analysis: KEGG module information and relationships
+#'   \item network_data: Pathway network graphs and connectivity (if include_network_analysis = TRUE)
+#'   \item functional_modules: Pathways grouped by functional themes
+#'   \item pathway_interactions: Cross-pathway gene/compound relationships
+#'   \item coverage_stats: Analysis coverage and quality metrics
+#' }
+#'
+#' @details
+#' This function extends basic KEGG pathway analysis by using ggkegg to:
+#' \itemize{
+#'   \item Retrieve pathway network structures from KEGG
+#'   \item Identify KEGG modules that group related pathways
+#'   \item Analyze gene/compound connectivity between pathways
+#'   \item Provide functional module classifications
+#'   \item Generate network-based pathway summaries
+#' }
+#'
+#' The analysis leverages both the KEGG database structure and the ggkegg package's
+#' ability to parse pathway networks and module relationships.
+#'
+#' @examples
+#' \dontrun{
+#' con <- connect_funseq_db("analysis.db")
+#' 
+#' # Analyze all KEGG data with module analysis
+#' kegg_modules <- analyze_kegg_modules(con)
+#' print(kegg_modules$module_analysis)
+#' 
+#' # Focus on candidate loci with network analysis
+#' candidates <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+#' kegg_analysis <- analyze_kegg_modules(
+#'   con, 
+#'   candidate_loci = candidates,
+#'   include_network_analysis = TRUE
+#' )
+#' 
+#' close_funseq_db(con)
+#' }
+#'
+#' @export
+analyze_kegg_modules <- function(con, candidate_loci = NULL, blast_param_id = NULL,
+                                use_cached_pathways = TRUE, include_network_analysis = TRUE,
+                                max_pathways_to_analyze = 20, verbose = TRUE) {
+  
+  if (verbose) message("Analyzing KEGG modules and pathway networks...")
+  
+  # Check if ggkegg is available
+  ggkegg_available <- requireNamespace("ggkegg", quietly = TRUE)
+  if (!ggkegg_available) {
+    if (verbose) message("  - ggkegg not available, using basic pathway analysis")
+    include_network_analysis <- FALSE
+  }
+  
+  # 1. Get basic pathway data from database
+  if (verbose) message("  - Retrieving KEGG pathway data from database...")
+  
+  # Build base query
+  base_where_clause <- "WHERE kr.kegg_id IS NOT NULL"
+  params <- list()
+  
+  # Add candidate loci filter if provided
+  if (!is.null(candidate_loci)) {
+    if (verbose) message("    - Filtering for candidate loci...")
+    if (!all(c("chromosome", "position") %in% colnames(candidate_loci))) {
+      stop("candidate_loci must have 'chromosome' and 'position' columns")
+    }
+    
+    # Create temporary table for candidate loci
+    temp_table_name <- paste0("temp_candidates_", as.integer(Sys.time()))
+    
+    # Create and populate temporary table
+    DBI::dbExecute(con, paste0("CREATE TEMPORARY TABLE ", temp_table_name, " (chromosome TEXT, position INTEGER)"))
+    
+    for (i in 1:nrow(candidate_loci)) {
+      DBI::dbExecute(con, paste0("INSERT INTO ", temp_table_name, " VALUES (?, ?)"),
+                    list(candidate_loci$chromosome[i], candidate_loci$position[i]))
+    }
+    
+    base_where_clause <- paste0(base_where_clause, " AND vd.chromosome IN (SELECT chromosome FROM ", temp_table_name, 
+                               ") AND vd.position IN (SELECT position FROM ", temp_table_name, ")")
+  }
+  
+  # Add blast parameter filter if provided
+  if (!is.null(blast_param_id)) {
+    base_where_clause <- paste0(base_where_clause, " AND bp.blast_param_id = ?")
+    params <- c(params, list(blast_param_id))
+    if (verbose) message("    - Filtering for blast_param_id: ", blast_param_id)
+  }
+  
+  # Query for pathway data
+  pathway_query <- paste0("
+    SELECT 
+      kr.kegg_id,
+      kr.pathway_name,
+      COUNT(*) as frequency,
+      COUNT(DISTINCT vd.vcf_id) as unique_loci,
+      COUNT(DISTINCT a.uniprot_accession) as unique_proteins,
+      GROUP_CONCAT(DISTINCT a.uniprot_accession) as protein_list
+    FROM kegg_references kr
+    JOIN annotations a ON kr.annotation_id = a.annotation_id
+    JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+    JOIN flanking_sequences fs ON br.flanking_id = fs.flanking_id
+    JOIN vcf_data vd ON fs.vcf_id = vd.vcf_id
+    ", base_where_clause, "
+    GROUP BY kr.kegg_id, kr.pathway_name
+    ORDER BY frequency DESC
+  ")
+  
+  pathway_data <- DBI::dbGetQuery(con, pathway_query, params)
+  
+  if (nrow(pathway_data) == 0) {
+    if (verbose) message("  - No KEGG pathway data found with current filters")
+    return(list(
+      pathway_summary = data.frame(),
+      module_analysis = list(),
+      network_data = list(),
+      functional_modules = list(),
+      pathway_interactions = data.frame(),
+      coverage_stats = list()
+    ))
+  }
+  
+  if (verbose) message("  - Found ", nrow(pathway_data), " unique KEGG pathways")
+  
+  # 2. Basic pathway summary
+  pathway_summary <- pathway_data[, c("kegg_id", "pathway_name", "frequency", "unique_loci", "unique_proteins")]
+  
+  # 3. KEGG module analysis using ggkegg (if available)
+  module_analysis <- list()
+  network_data <- list()
+  
+  if (ggkegg_available && include_network_analysis) {
+    if (verbose) message("  - Performing ggkegg-based module analysis...")
+    
+    # Focus on most frequent pathways to avoid API overload
+    top_pathways <- head(pathway_data, max_pathways_to_analyze)
+    
+    # Extract pathway IDs that look like pathway maps (e.g., "dre00562")
+    pathway_ids <- top_pathways$kegg_id[grepl("^[a-z]{3}\\d{5}$", top_pathways$kegg_id)]
+    
+    if (length(pathway_ids) > 0) {
+      if (verbose) message("    - Analyzing ", length(pathway_ids), " pathway networks...")
+      
+      pathway_networks <- list()
+      module_info <- list()
+      
+      for (i in seq_along(pathway_ids)) {
+        pathway_id <- pathway_ids[i]
+        
+        if (verbose && i %% 5 == 0) {
+          message("      - Processing pathway ", i, "/", length(pathway_ids), ": ", pathway_id)
+        }
+        
+        tryCatch({
+          # Get pathway network using ggkegg
+          pathway_graph <- ggkegg::pathway(pathway_id, use_cache = use_cached_pathways)
+          
+          if (!is.null(pathway_graph)) {
+            # Extract network information
+            nodes <- igraph::V(pathway_graph)
+            edges <- igraph::E(pathway_graph)
+            
+            # Store network data
+            pathway_networks[[pathway_id]] <- list(
+              pathway_id = pathway_id,
+              node_count = length(nodes),
+              edge_count = length(edges),
+              graph = pathway_graph,
+              genes = nodes$name[nodes$type == "gene"],
+              compounds = nodes$name[nodes$type == "compound"]
+            )
+            
+            # Try to get associated module information
+            # Look for module IDs in the pathway data
+            if (!is.null(nodes$pathway_id) && length(unique(nodes$pathway_id)) > 0) {
+              # This pathway is part of larger network - could indicate module structure
+              module_info[[pathway_id]] <- list(
+                pathway_id = pathway_id,
+                connected_pathways = unique(nodes$pathway_id),
+                module_genes = length(unique(nodes$name[nodes$type == "gene"])),
+                module_compounds = length(unique(nodes$name[nodes$type == "compound"]))
+              )
+            }
+          }
+          
+          # Rate limiting
+          Sys.sleep(0.5)
+          
+        }, error = function(e) {
+          if (verbose) {
+            message("      - Failed to process pathway ", pathway_id, ": ", e$message)
+          }
+        })
+      }
+      
+      network_data <- pathway_networks
+      module_analysis <- module_info
+      
+    } else {
+      if (verbose) message("    - No valid pathway IDs found for network analysis")
+    }
+  }
+  
+  # 4. Functional module classification (using enhanced patterns)
+  if (verbose) message("  - Creating functional module classifications...")
+  
+  functional_modules <- .create_kegg_functional_modules(pathway_data, verbose = verbose)
+  
+  # 5. Pathway interaction analysis
+  pathway_interactions <- data.frame()
+  
+  if (length(network_data) > 1) {
+    if (verbose) message("  - Analyzing pathway interactions...")
+    
+    # Find shared genes/compounds between pathways
+    interaction_data <- list()
+    
+    pathway_names <- names(network_data)
+    for (i in 1:(length(pathway_names) - 1)) {
+      for (j in (i + 1):length(pathway_names)) {
+        pathway1 <- pathway_names[i]
+        pathway2 <- pathway_names[j]
+        
+        net1 <- network_data[[pathway1]]
+        net2 <- network_data[[pathway2]]
+        
+        shared_genes <- intersect(net1$genes, net2$genes)
+        shared_compounds <- intersect(net1$compounds, net2$compounds)
+        
+        if (length(shared_genes) > 0 || length(shared_compounds) > 0) {
+          interaction_data[[paste(pathway1, pathway2, sep = "_")]] <- data.frame(
+            pathway1 = pathway1,
+            pathway2 = pathway2,
+            shared_genes = length(shared_genes),
+            shared_compounds = length(shared_compounds),
+            total_shared = length(shared_genes) + length(shared_compounds),
+            shared_gene_list = paste(shared_genes, collapse = "; "),
+            shared_compound_list = paste(shared_compounds, collapse = "; "),
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+    }
+    
+    if (length(interaction_data) > 0) {
+      pathway_interactions <- do.call(rbind, interaction_data)
+      rownames(pathway_interactions) <- NULL
+      
+      # Sort by total shared elements
+      pathway_interactions <- pathway_interactions[order(pathway_interactions$total_shared, decreasing = TRUE), ]
+    }
+  }
+  
+  # 6. Coverage statistics
+  coverage_stats <- list(
+    total_pathways = nrow(pathway_data),
+    pathways_with_networks = length(network_data),
+    total_modules = length(module_analysis),
+    functional_module_count = length(functional_modules),
+    pathway_interactions_count = nrow(pathway_interactions),
+    analysis_parameters = list(
+      ggkegg_available = ggkegg_available,
+      network_analysis_performed = include_network_analysis && ggkegg_available,
+      max_pathways_analyzed = max_pathways_to_analyze,
+      candidate_loci_provided = !is.null(candidate_loci),
+      blast_param_filter = blast_param_id
+    )
+  )
+  
+  # Compile results
+  result <- list(
+    pathway_summary = pathway_summary,
+    module_analysis = module_analysis,
+    network_data = network_data,
+    functional_modules = functional_modules,
+    pathway_interactions = pathway_interactions,
+    coverage_stats = coverage_stats
+  )
+  
+  if (verbose) {
+    message("KEGG module analysis complete:")
+    message("  - Pathways analyzed: ", coverage_stats$total_pathways)
+    if (ggkegg_available && include_network_analysis) {
+      message("  - Network data retrieved: ", coverage_stats$pathways_with_networks)
+      message("  - Functional modules: ", coverage_stats$functional_module_count)
+      message("  - Pathway interactions: ", coverage_stats$pathway_interactions_count)
+    } else {
+      message("  - Basic functional classification performed")
+    }
+  }
+  
+  return(result)
+}
+
+#' Create pathway network summary for candidate loci
+#'
+#' Generates a comprehensive network-based summary of how candidate loci
+#' connect through metabolic and regulatory pathways, identifying key
+#' pathway hubs and functional relationships.
+#'
+#' @param con Database connection object
+#' @param candidate_loci Data frame with chromosome and position columns
+#' @param background_loci Data frame with chromosome and position columns for background, or NULL
+#' @param include_pathway_crosstalk Logical. Analyze pathway crosstalk and interactions. Default is TRUE
+#' @param include_centrality_analysis Logical. Calculate network centrality metrics. Default is TRUE
+#' @param min_pathway_size Integer. Minimum pathway size to include in network. Default is 3
+#' @param max_pathways Integer. Maximum pathways to include in network analysis. Default is 50
+#' @param verbose Logical. Print progress information. Default is TRUE
+#'
+#' @return List containing pathway network analysis:
+#' \itemize{
+#'   \item network_graph: igraph object representing pathway network
+#'   \item pathway_hubs: Pathways with high connectivity (centrality)
+#'   \item crosstalk_analysis: Pathway interaction analysis
+#'   \item candidate_pathway_profile: Pathway enrichment in candidate vs background
+#'   \item network_metrics: Network topology metrics
+#'   \item functional_clusters: Groups of functionally related pathways
+#' }
+#'
+#' @details
+#' This function creates a comprehensive pathway network by:
+#' \itemize{
+#'   \item Building a network where nodes are pathways and edges represent shared genes/compounds
+#'   \item Identifying pathway hubs (highly connected pathways)
+#'   \item Analyzing pathway crosstalk and functional relationships
+#'   \item Comparing candidate loci pathway profiles to background
+#'   \item Clustering pathways into functional modules
+#'   \item Computing network topology metrics
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' con <- connect_funseq_db("analysis.db")
+#' 
+#' # Define candidate and background loci
+#' candidates <- data.frame(
+#'   chromosome = c("LG1", "LG2", "LG3"), 
+#'   position = c(12345, 67890, 111213)
+#' )
+#' background <- data.frame(
+#'   chromosome = c("LG1", "LG2", "LG3", "LG4"), 
+#'   position = c(54321, 98765, 131415, 161718)
+#' )
+#' 
+#' # Create pathway network summary
+#' network_summary <- create_pathway_network_summary(
+#'   con, 
+#'   candidate_loci = candidates,
+#'   background_loci = background
+#' )
+#' 
+#' print(network_summary$pathway_hubs)
+#' print(network_summary$network_metrics)
+#' 
+#' close_funseq_db(con)
+#' }
+#'
+#' @export
+create_pathway_network_summary <- function(con, candidate_loci, background_loci = NULL,
+                                          include_pathway_crosstalk = TRUE, 
+                                          include_centrality_analysis = TRUE,
+                                          min_pathway_size = 3, max_pathways = 50,
+                                          verbose = TRUE) {
+  
+  if (verbose) message("Creating pathway network summary for candidate loci...")
+  
+  # Check if required packages are available
+  igraph_available <- requireNamespace("igraph", quietly = TRUE)
+  if (!igraph_available) {
+    stop("igraph package is required for network analysis. Please install it with:\n",
+         "install.packages('igraph')")
+  }
+  
+  # Validate input
+  if (is.null(candidate_loci) || nrow(candidate_loci) == 0) {
+    stop("candidate_loci is required and must contain at least one locus")
+  }
+  
+  if (!all(c("chromosome", "position") %in% colnames(candidate_loci))) {
+    stop("candidate_loci must have 'chromosome' and 'position' columns")
+  }
+  
+  # 1. Get pathway data for candidate loci
+  if (verbose) message("  - Retrieving pathway data for candidate loci...")
+  
+  candidate_pathways <- analyze_kegg_modules(
+    con, 
+    candidate_loci = candidate_loci,
+    include_network_analysis = TRUE,
+    max_pathways_to_analyze = max_pathways,
+    verbose = FALSE
+  )
+  
+  if (length(candidate_pathways$network_data) == 0) {
+    if (verbose) message("  - No pathway network data found for candidate loci")
+    return(list(
+      network_graph = NULL,
+      pathway_hubs = data.frame(),
+      crosstalk_analysis = data.frame(),
+      candidate_pathway_profile = data.frame(),
+      network_metrics = list(),
+      functional_clusters = list()
+    ))
+  }
+  
+  # 2. Get background pathway data (if provided)
+  background_pathways <- NULL
+  if (!is.null(background_loci)) {
+    if (verbose) message("  - Retrieving pathway data for background loci...")
+    
+    if (!all(c("chromosome", "position") %in% colnames(background_loci))) {
+      stop("background_loci must have 'chromosome' and 'position' columns")
+    }
+    
+    background_pathways <- analyze_kegg_modules(
+      con, 
+      candidate_loci = background_loci,
+      include_network_analysis = FALSE,  # Just need pathway summary
+      verbose = FALSE
+    )
+  }
+  
+  # 3. Build pathway network
+  if (verbose) message("  - Building pathway interaction network...")
+  
+  # Extract pathway interactions from candidate data
+  pathway_interactions <- candidate_pathways$pathway_interactions
+  
+  if (nrow(pathway_interactions) == 0) {
+    if (verbose) message("    - No pathway interactions found")
+    network_graph <- NULL
+    pathway_hubs <- data.frame()
+    network_metrics <- list()
+  } else {
+    # Create igraph network
+    edges <- pathway_interactions[, c("pathway1", "pathway2", "total_shared")]
+    colnames(edges) <- c("from", "to", "weight")
+    
+    # Get all unique pathways
+    all_pathways <- unique(c(edges$from, edges$to))
+    
+    # Filter by minimum pathway size if network data is available
+    if (min_pathway_size > 1) {
+      pathway_summary <- candidate_pathways$pathway_summary
+      valid_pathways <- pathway_summary$kegg_id[pathway_summary$unique_loci >= min_pathway_size]
+      
+      # Filter edges to only include valid pathways
+      edges <- edges[edges$from %in% valid_pathways & edges$to %in% valid_pathways, ]
+      all_pathways <- unique(c(edges$from, edges$to))
+    }
+    
+    if (nrow(edges) > 0) {
+      # Create network graph
+      network_graph <- igraph::graph_from_data_frame(edges, vertices = all_pathways, directed = FALSE)
+      
+      # Add vertex attributes (pathway information)
+      pathway_info <- candidate_pathways$pathway_summary
+      vertex_names <- igraph::V(network_graph)$name
+      
+      for (i in seq_along(vertex_names)) {
+        pathway_id <- vertex_names[i]
+        pathway_row <- pathway_info[pathway_info$kegg_id == pathway_id, ]
+        
+        if (nrow(pathway_row) > 0) {
+          igraph::V(network_graph)$pathway_name[i] <- pathway_row$pathway_name[1]
+          igraph::V(network_graph)$frequency[i] <- pathway_row$frequency[1]
+          igraph::V(network_graph)$unique_loci[i] <- pathway_row$unique_loci[1]
+        } else {
+          igraph::V(network_graph)$pathway_name[i] <- "Unknown"
+          igraph::V(network_graph)$frequency[i] <- 0
+          igraph::V(network_graph)$unique_loci[i] <- 0
+        }
+      }
+      
+      # 4. Calculate centrality measures (if requested)
+      pathway_hubs <- data.frame()
+      if (include_centrality_analysis) {
+        if (verbose) message("  - Calculating pathway centrality measures...")
+        
+        # Calculate various centrality measures
+        degree_centrality <- igraph::degree(network_graph)
+        betweenness_centrality <- igraph::betweenness(network_graph)
+        closeness_centrality <- igraph::closeness(network_graph)
+        eigenvector_centrality <- igraph::eigen_centrality(network_graph)$vector
+        
+        # Create pathway hubs dataframe
+        pathway_hubs <- data.frame(
+          pathway_id = names(degree_centrality),
+          pathway_name = igraph::V(network_graph)$pathway_name,
+          degree = degree_centrality,
+          betweenness = betweenness_centrality,
+          closeness = closeness_centrality,
+          eigenvector = eigenvector_centrality,
+          frequency = igraph::V(network_graph)$frequency,
+          unique_loci = igraph::V(network_graph)$unique_loci,
+          stringsAsFactors = FALSE
+        )
+        
+        # Calculate hub score (composite of centrality measures)
+        pathway_hubs$hub_score <- scale(pathway_hubs$degree)[,1] + 
+                                 scale(pathway_hubs$betweenness)[,1] + 
+                                 scale(pathway_hubs$eigenvector)[,1]
+        
+        # Sort by hub score
+        pathway_hubs <- pathway_hubs[order(pathway_hubs$hub_score, decreasing = TRUE), ]
+        rownames(pathway_hubs) <- NULL
+      }
+      
+      # 5. Network topology metrics
+      if (verbose) message("  - Computing network topology metrics...")
+      
+      network_metrics <- list(
+        nodes = igraph::vcount(network_graph),
+        edges = igraph::ecount(network_graph),
+        density = igraph::edge_density(network_graph),
+        diameter = ifelse(igraph::is.connected(network_graph), igraph::diameter(network_graph), NA),
+        avg_path_length = ifelse(igraph::is.connected(network_graph), igraph::mean_distance(network_graph), NA),
+        clustering_coefficient = igraph::transitivity(network_graph),
+        connected_components = igraph::components(network_graph)$no,
+        largest_component_size = max(igraph::components(network_graph)$csize)
+      )
+      
+    } else {
+      network_graph <- NULL
+      pathway_hubs <- data.frame()
+      network_metrics <- list()
+    }
+  }
+  
+  # 6. Pathway crosstalk analysis
+  crosstalk_analysis <- data.frame()
+  if (include_pathway_crosstalk && !is.null(network_graph)) {
+    if (verbose) message("  - Analyzing pathway crosstalk...")
+    
+    # Use the existing pathway interactions data
+    crosstalk_analysis <- pathway_interactions
+    
+    # Add crosstalk strength categories
+    if (nrow(crosstalk_analysis) > 0) {
+      crosstalk_analysis$crosstalk_strength <- cut(
+        crosstalk_analysis$total_shared,
+        breaks = c(0, 1, 3, 10, Inf),
+        labels = c("Weak", "Moderate", "Strong", "Very Strong"),
+        include.lowest = TRUE
+      )
+      
+      # Sort by total shared elements
+      crosstalk_analysis <- crosstalk_analysis[order(crosstalk_analysis$total_shared, decreasing = TRUE), ]
+    }
+  }
+  
+  # 7. Candidate vs background pathway profile (if background provided)
+  candidate_pathway_profile <- data.frame()
+  if (!is.null(background_pathways)) {
+    if (verbose) message("  - Comparing candidate vs background pathway profiles...")
+    
+    candidate_summary <- candidate_pathways$pathway_summary
+    background_summary <- background_pathways$pathway_summary
+    
+    # Merge candidate and background data
+    all_pathways_comp <- merge(
+      candidate_summary[, c("kegg_id", "pathway_name", "frequency", "unique_loci")],
+      background_summary[, c("kegg_id", "frequency", "unique_loci")],
+      by = "kegg_id", all = TRUE, suffixes = c("_candidate", "_background")
+    )
+    
+    # Replace NAs with 0
+    all_pathways_comp[is.na(all_pathways_comp)] <- 0
+    
+    # Calculate enrichment metrics
+    all_pathways_comp$fold_change <- ifelse(
+      all_pathways_comp$frequency_background > 0,
+      all_pathways_comp$frequency_candidate / all_pathways_comp$frequency_background,
+      ifelse(all_pathways_comp$frequency_candidate > 0, Inf, 1)
+    )
+    
+    all_pathways_comp$enrichment_status <- ifelse(
+      all_pathways_comp$fold_change > 2, "Enriched",
+      ifelse(all_pathways_comp$fold_change < 0.5, "Depleted", "Similar")
+    )
+    
+    # Sort by fold change
+    candidate_pathway_profile <- all_pathways_comp[order(all_pathways_comp$fold_change, decreasing = TRUE), ]
+    rownames(candidate_pathway_profile) <- NULL
+  }
+  
+  # 8. Functional clustering
+  functional_clusters <- list()
+  if (!is.null(network_graph) && igraph::vcount(network_graph) > 2) {
+    if (verbose) message("  - Identifying functional pathway clusters...")
+    
+    # Use community detection to find functional clusters
+    tryCatch({
+      communities <- igraph::cluster_louvain(network_graph)
+      
+      # Extract cluster information
+      cluster_membership <- igraph::membership(communities)
+      
+      for (cluster_id in unique(cluster_membership)) {
+        cluster_pathways <- names(cluster_membership)[cluster_membership == cluster_id]
+        
+        if (length(cluster_pathways) >= 2) {  # Only include clusters with multiple pathways
+          cluster_info <- pathway_hubs[pathway_hubs$pathway_id %in% cluster_pathways, ]
+          
+          functional_clusters[[paste0("Cluster_", cluster_id)]] <- list(
+            pathway_ids = cluster_pathways,
+            pathway_count = length(cluster_pathways),
+            pathways = cluster_info,
+            total_loci = sum(cluster_info$unique_loci, na.rm = TRUE),
+            avg_connectivity = mean(cluster_info$degree, na.rm = TRUE)
+          )
+        }
+      }
+    }, error = function(e) {
+      if (verbose) message("    - Community detection failed: ", e$message)
+    })
+  }
+  
+  # Compile results
+  result <- list(
+    network_graph = network_graph,
+    pathway_hubs = pathway_hubs,
+    crosstalk_analysis = crosstalk_analysis,
+    candidate_pathway_profile = candidate_pathway_profile,
+    network_metrics = network_metrics,
+    functional_clusters = functional_clusters,
+    analysis_parameters = list(
+      candidate_loci_count = nrow(candidate_loci),
+      background_loci_count = if (!is.null(background_loci)) nrow(background_loci) else 0,
+      include_pathway_crosstalk = include_pathway_crosstalk,
+      include_centrality_analysis = include_centrality_analysis,
+      min_pathway_size = min_pathway_size,
+      max_pathways = max_pathways
+    )
+  )
+  
+  if (verbose) {
+    message("Pathway network analysis complete:")
+    if (!is.null(network_graph)) {
+      message("  - Network nodes (pathways): ", igraph::vcount(network_graph))
+      message("  - Network edges (interactions): ", igraph::ecount(network_graph))
+      message("  - Pathway hubs identified: ", nrow(pathway_hubs))
+      message("  - Functional clusters: ", length(functional_clusters))
+    } else {
+      message("  - No pathway network could be constructed")
+    }
+    
+    if (!is.null(background_loci) && nrow(candidate_pathway_profile) > 0) {
+      enriched_count <- sum(candidate_pathway_profile$enrichment_status == "Enriched", na.rm = TRUE)
+      message("  - Enriched pathways vs background: ", enriched_count)
+    }
+  }
+  
+  return(result)
 }
