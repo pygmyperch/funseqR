@@ -7,7 +7,8 @@
 create_pathway_network_summary(
   con,
   candidate_loci,
-  background_loci = NULL,
+  background_file_id,
+  blast_param_id = NULL,
   include_pathway_crosstalk = TRUE,
   include_centrality_analysis = TRUE,
   min_pathway_size = 3,
@@ -20,7 +21,9 @@ create_pathway_network_summary(
 
 \item{candidate_loci}{Data frame with chromosome and position columns}
 
-\item{background_loci}{Data frame with chromosome and position columns for background, or NULL}
+\item{background_file_id}{Integer. File ID of background dataset (required for comparison)}
+
+\item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets. Default is NULL}
 
 \item{include_pathway_crosstalk}{Logical. Analyze pathway crosstalk and interactions. Default is TRUE}
 
@@ -46,7 +49,8 @@ List containing pathway network analysis:
 \description{
 Generates a comprehensive network-based summary of how candidate loci
 connect through metabolic and regulatory pathways, identifying key
-pathway hubs and functional relationships.
+pathway hubs and functional relationships. Automatically generates
+background from annotated loci for statistical comparison.
 }
 \details{
 This function creates a comprehensive pathway network by:
@@ -63,21 +67,18 @@ This function creates a comprehensive pathway network by:
 \dontrun{
 con <- connect_funseq_db("analysis.db")
 
-# Define candidate and background loci
+# Define candidate loci
 candidates <- data.frame(
   chromosome = c("LG1", "LG2", "LG3"), 
   position = c(12345, 67890, 111213)
 )
-background <- data.frame(
-  chromosome = c("LG1", "LG2", "LG3", "LG4"), 
-  position = c(54321, 98765, 131415, 161718)
-)
 
-# Create pathway network summary
+# Use specific background file and BLAST parameter
 network_summary <- create_pathway_network_summary(
   con, 
   candidate_loci = candidates,
-  background_loci = background
+  background_file_id = 1,
+  blast_param_id = 1
 )
 
 print(network_summary$pathway_hubs)

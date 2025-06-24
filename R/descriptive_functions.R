@@ -4152,11 +4152,13 @@ analyze_kegg_modules <- function(con, candidate_loci = NULL, blast_param_id = NU
 #'
 #' Generates a comprehensive network-based summary of how candidate loci
 #' connect through metabolic and regulatory pathways, identifying key
-#' pathway hubs and functional relationships.
+#' pathway hubs and functional relationships. Automatically generates 
+#' background from annotated loci for statistical comparison.
 #'
 #' @param con Database connection object
 #' @param candidate_loci Data frame with chromosome and position columns
-#' @param background_loci Data frame with chromosome and position columns for background, or NULL
+#' @param background_file_id Integer. File ID of background dataset (required for comparison)
+#' @param blast_param_id Integer. Optional. Specific BLAST run ID to use for both datasets. Default is NULL
 #' @param include_pathway_crosstalk Logical. Analyze pathway crosstalk and interactions. Default is TRUE
 #' @param include_centrality_analysis Logical. Calculate network centrality metrics. Default is TRUE
 #' @param min_pathway_size Integer. Minimum pathway size to include in network. Default is 3
@@ -4188,21 +4190,18 @@ analyze_kegg_modules <- function(con, candidate_loci = NULL, blast_param_id = NU
 #' \dontrun{
 #' con <- connect_funseq_db("analysis.db")
 #' 
-#' # Define candidate and background loci
+#' # Define candidate loci
 #' candidates <- data.frame(
 #'   chromosome = c("LG1", "LG2", "LG3"), 
 #'   position = c(12345, 67890, 111213)
 #' )
-#' background <- data.frame(
-#'   chromosome = c("LG1", "LG2", "LG3", "LG4"), 
-#'   position = c(54321, 98765, 131415, 161718)
-#' )
 #' 
-#' # Create pathway network summary
+#' # Use specific background file and BLAST parameter
 #' network_summary <- create_pathway_network_summary(
 #'   con, 
 #'   candidate_loci = candidates,
-#'   background_loci = background
+#'   background_file_id = 1,
+#'   blast_param_id = 1
 #' )
 #' 
 #' print(network_summary$pathway_hubs)
@@ -4212,8 +4211,8 @@ analyze_kegg_modules <- function(con, candidate_loci = NULL, blast_param_id = NU
 #' }
 #'
 #' @export
-create_pathway_network_summary <- function(con, candidate_loci, background_loci = NULL,
-                                          include_pathway_crosstalk = TRUE, 
+create_pathway_network_summary <- function(con, candidate_loci, background_file_id,
+                                          blast_param_id = NULL, include_pathway_crosstalk = TRUE, 
                                           include_centrality_analysis = TRUE,
                                           min_pathway_size = 3, max_pathways = 50,
                                           verbose = TRUE) {
@@ -4242,6 +4241,7 @@ create_pathway_network_summary <- function(con, candidate_loci, background_loci 
   candidate_pathways <- analyze_kegg_modules(
     con, 
     candidate_loci = candidate_loci,
+    blast_param_id = blast_param_id,
     include_network_analysis = TRUE,
     max_pathways_to_analyze = max_pathways,
     verbose = FALSE
@@ -4259,22 +4259,61 @@ create_pathway_network_summary <- function(con, candidate_loci, background_loci 
     ))
   }
   
-  # 2. Get background pathway data (if provided)
-  background_pathways <- NULL
-  if (!is.null(background_loci)) {
-    if (verbose) message("  - Retrieving pathway data for background loci...")
-    
-    if (!all(c("chromosome", "position") %in% colnames(background_loci))) {
-      stop("background_loci must have 'chromosome' and 'position' columns")
-    }
-    
-    background_pathways <- analyze_kegg_modules(
-      con, 
-      candidate_loci = background_loci,
-      include_network_analysis = FALSE,  # Just need pathway summary
-      verbose = FALSE
-    )
+  # 2. Extract annotated loci from background dataset
+  if (verbose) message("  - Extracting annotated loci from background dataset...")
+  
+  # Build query to get all annotated loci from background file
+  base_conditions <- c("vd.file_id = ?")
+  params <- list(background_file_id)
+  
+  # Add blast parameter filter if provided
+  if (!is.null(blast_param_id)) {
+    base_conditions <- c(base_conditions, "bp.blast_param_id = ?")
+    params <- c(params, list(blast_param_id))
+    if (verbose) message("    - Filtering for blast_param_id: ", blast_param_id)
   }
+  
+  base_where <- paste("WHERE", paste(base_conditions, collapse = " AND "))
+  
+  # Query to get all annotated loci from background
+  background_query <- paste0("
+    SELECT DISTINCT 
+      vd.chromosome,
+      vd.position
+    FROM vcf_data vd
+    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id
+    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+    JOIN annotations a ON br.blast_result_id = a.blast_result_id
+    JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
+    ", base_where, "
+    ORDER BY vd.chromosome, vd.position
+  ")
+  
+  background_loci <- DBI::dbGetQuery(con, background_query, params)
+  
+  if (nrow(background_loci) == 0) {
+    warning("No annotated loci found in background dataset")
+    return(list(
+      network_graph = NULL,
+      pathway_hubs = data.frame(),
+      crosstalk_analysis = data.frame(),
+      candidate_pathway_profile = data.frame(),
+      network_metrics = list(),
+      functional_clusters = list()
+    ))
+  }
+  
+  if (verbose) message("    - Found ", nrow(background_loci), " annotated loci in background")
+  
+  # 3. Get pathway analysis for background loci
+  background_pathways <- analyze_kegg_modules(
+    con, 
+    candidate_loci = background_loci,
+    blast_param_id = blast_param_id,
+    include_network_analysis = FALSE,  # Just need pathway summary
+    verbose = FALSE
+  )
   
   # 3. Build pathway network
   if (verbose) message("  - Building pathway interaction network...")
@@ -4483,6 +4522,8 @@ create_pathway_network_summary <- function(con, candidate_loci, background_loci 
     analysis_parameters = list(
       candidate_loci_count = nrow(candidate_loci),
       background_loci_count = if (!is.null(background_loci)) nrow(background_loci) else 0,
+      background_file_id = background_file_id,
+      blast_param_id = blast_param_id,
       include_pathway_crosstalk = include_pathway_crosstalk,
       include_centrality_analysis = include_centrality_analysis,
       min_pathway_size = min_pathway_size,
