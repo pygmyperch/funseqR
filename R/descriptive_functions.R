@@ -3954,7 +3954,15 @@ analyze_kegg_modules <- function(con, candidate_loci = NULL, blast_param_id = NU
     ORDER BY frequency DESC
   ")
   
-  pathway_data <- DBI::dbGetQuery(con, pathway_query, params)
+  # Execute query with proper parameter handling
+  num_placeholders <- nchar(pathway_query) - nchar(gsub("\\?", "", pathway_query))
+  if (num_placeholders > 0 && length(params) == num_placeholders) {
+    pathway_data <- DBI::dbGetQuery(con, pathway_query, params)
+  } else if (num_placeholders == 0 && length(params) == 0) {
+    pathway_data <- DBI::dbGetQuery(con, pathway_query)
+  } else {
+    stop("Parameter mismatch in pathway_query: ", num_placeholders, " placeholders, ", length(params), " parameters")
+  }
   
   if (nrow(pathway_data) == 0) {
     if (verbose) message("  - No KEGG pathway data found with current filters")
