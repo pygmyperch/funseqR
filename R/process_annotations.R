@@ -123,7 +123,6 @@ process_annotations <- function(con, include = c("GO", "KEGG"), blast_param_id =
       a.uniprot_accession,
       a.entry_name,
       a.gene_names,
-      a.protein_names,
       br.blast_result_id
     FROM vcf_data vd
     JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
@@ -152,7 +151,7 @@ process_annotations <- function(con, include = c("GO", "KEGG"), blast_param_id =
     group_by(locus_id, chromosome, position) %>%
     summarise(
       gene_name = first(na.omit(gene_names))[1],
-      protein_name = first(na.omit(protein_names))[1],
+      protein_name = first(na.omit(entry_name))[1],  # Use entry_name as protein description
       uniprot_accession = paste(unique(uniprot_accession), collapse = ";"),
       annotation_ids = list(unique(annotation_id)),
       .groups = "drop"
@@ -205,7 +204,7 @@ process_annotations <- function(con, include = c("GO", "KEGG"), blast_param_id =
     SELECT 
       a.annotation_id,
       gt.go_id,
-      gt.go_name,
+      gt.go_term,
       gt.go_category
     FROM annotations a
     JOIN blast_results br ON a.blast_result_id = br.blast_result_id
@@ -226,7 +225,7 @@ process_annotations <- function(con, include = c("GO", "KEGG"), blast_param_id =
       group_by(annotation_id) %>%
       summarise(
         go_terms = paste(unique(go_id), collapse = ";"),
-        go_names = paste(unique(go_name), collapse = ";"),
+        go_names = paste(unique(go_term), collapse = ";"),
         go_categories = paste(unique(go_category), collapse = ";"),
         .groups = "drop"
       )
