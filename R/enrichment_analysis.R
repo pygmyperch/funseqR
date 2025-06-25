@@ -4,7 +4,9 @@
 #' This is a simplified interface that works with the standardized output from process_annotations().
 #'
 #' @param annotations Data frame from process_annotations() containing GO annotations
-#' @param candidate_loci Data frame with chromosome and position columns, or vector of locus_ids
+#' @param candidate_loci Data frame with coordinates (BED or VCF format), or vector of locus_ids. 
+#'   Accepts: (1) BED format with 'chromosome', 'start', 'end' columns, 
+#'   (2) VCF format with 'chromosome', 'position' columns, or (3) vector of locus_ids
 #' @param ontologies Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF", "CC")
 #' @param min_genes Integer. Minimum genes for GO term testing. Default is 5
 #' @param max_genes Integer. Maximum genes for GO term testing. Default is 500
@@ -18,15 +20,16 @@
 #' # Process annotations first
 #' annotations <- process_annotations(con, include = c("GO", "KEGG"))
 #' 
-#' # Define candidate loci
-#' candidates <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+#' # Using VCF format
+#' candidates_vcf <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+#' go_results <- run_go_enrichment_analysis(annotations, candidates_vcf)
 #' 
-#' # Run GO enrichment
-#' go_results <- run_go_enrichment_analysis(
-#'   annotations, 
-#'   candidate_loci = candidates,
-#'   ontologies = c("BP", "MF")
-#' )
+#' # Using BED format (from import_candidate_loci)
+#' candidates <- import_candidate_loci(con, candidate_vcf_file, background_file_id = 1)
+#' go_results <- run_go_enrichment_analysis(annotations, candidates$bed_file)
+#' 
+#' # Using locus IDs directly
+#' go_results <- run_go_enrichment_analysis(annotations, c("1_LG1_12345", "1_LG2_67890"))
 #' 
 #' print(go_results$BP)
 #' }
@@ -45,26 +48,55 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
     stop("GO annotations not found. Run process_annotations() with include='GO' first.")
   }
   
-  # Identify candidate loci
+  # Identify candidate loci - handle multiple input formats
   if (is.data.frame(candidate_loci)) {
-    if (all(c("chromosome", "position") %in% colnames(candidate_loci))) {
-      # Create locus IDs from chromosome and position
-      candidate_ids <- with(candidate_loci, paste0("*", "_", chromosome, "_", position))
-      # Match against locus_id patterns in annotations
-      candidate_mask <- sapply(candidate_ids, function(x) {
-        any(grepl(gsub("\\*", ".*", x), annotations$locus_id))
-      })
-      candidate_locus_ids <- annotations$locus_id[
-        sapply(annotations$locus_id, function(locus_id) {
-          any(sapply(candidate_ids, function(pattern) {
-            grepl(gsub("\\*", ".*", pattern), locus_id)
-          }))
-        })
-      ]
-    } else {
-      stop("candidate_loci data frame must have 'chromosome' and 'position' columns")
+    # Handle BED file format (chromosome, start, end)
+    if (all(c("chromosome", "start", "end") %in% colnames(candidate_loci))) {
+      if (verbose) message("  - Detected BED format input (chromosome, start, end)")
+      # Convert BED coordinates - use start position as the position
+      candidate_df <- data.frame(
+        chromosome = candidate_loci$chromosome,
+        position = candidate_loci$start,
+        stringsAsFactors = FALSE
+      )
+    } 
+    # Handle VCF format (chromosome, position)
+    else if (all(c("chromosome", "position") %in% colnames(candidate_loci))) {
+      if (verbose) message("  - Detected VCF format input (chromosome, position)")
+      candidate_df <- candidate_loci[, c("chromosome", "position")]
     }
-  } else {
+    # Handle file_id input - extract from database
+    else if ("file_id" %in% colnames(candidate_loci) && nrow(candidate_loci) == 1) {
+      if (verbose) message("  - Extracting candidate loci from file_id: ", candidate_loci$file_id[1])
+      candidate_df <- DBI::dbGetQuery(annotations_con, 
+        "SELECT chromosome, position FROM vcf_data WHERE file_id = ?",
+        list(candidate_loci$file_id[1]))
+    }
+    else {
+      stop("candidate_loci data frame must have either:\n",
+           "  - 'chromosome' and 'position' columns (VCF format), or\n", 
+           "  - 'chromosome', 'start', and 'end' columns (BED format), or\n",
+           "  - single 'file_id' column")
+    }
+    
+    # Create locus IDs from chromosome and position
+    candidate_ids <- with(candidate_df, paste0("*", "_", chromosome, "_", position))
+    # Match against locus_id patterns in annotations
+    candidate_locus_ids <- annotations$locus_id[
+      sapply(annotations$locus_id, function(locus_id) {
+        any(sapply(candidate_ids, function(pattern) {
+          grepl(gsub("\\*", ".*", pattern), locus_id)
+        }))
+      })
+    ]
+  } 
+  # Handle direct file_id input
+  else if (is.numeric(candidate_loci) && length(candidate_loci) == 1) {
+    if (verbose) message("  - Extracting candidate loci from file_id: ", candidate_loci)
+    # Need to access the database connection - this requires the con parameter
+    stop("Direct file_id input not yet supported. Please provide a data frame with coordinates.")
+  }
+  else {
     # Assume vector of locus_ids
     candidate_locus_ids <- candidate_loci
   }
@@ -115,7 +147,9 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
 #' Performs KEGG pathway enrichment analysis using candidate loci and processed annotation data.
 #'
 #' @param annotations Data frame from process_annotations() containing KEGG annotations
-#' @param candidate_loci Data frame with chromosome and position columns, or vector of locus_ids
+#' @param candidate_loci Data frame with coordinates (BED or VCF format), or vector of locus_ids. 
+#'   Accepts: (1) BED format with 'chromosome', 'start', 'end' columns, 
+#'   (2) VCF format with 'chromosome', 'position' columns, or (3) vector of locus_ids
 #' @param min_pathways Integer. Minimum genes for pathway testing. Default is 3
 #' @param max_pathways Integer. Maximum genes for pathway testing. Default is 500
 #' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
@@ -128,14 +162,13 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
 #' # Process annotations first
 #' annotations <- process_annotations(con, include = c("GO", "KEGG"))
 #' 
-#' # Define candidate loci
-#' candidates <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+#' # Using BED format (from import_candidate_loci) 
+#' candidates <- import_candidate_loci(con, candidate_vcf_file, background_file_id = 1)
+#' kegg_results <- run_kegg_enrichment_analysis(annotations, candidates$bed_file)
 #' 
-#' # Run KEGG enrichment
-#' kegg_results <- run_kegg_enrichment_analysis(
-#'   annotations, 
-#'   candidate_loci = candidates
-#' )
+#' # Using VCF format
+#' candidates_vcf <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+#' kegg_results <- run_kegg_enrichment_analysis(annotations, candidates_vcf)
 #' 
 #' print(kegg_results)
 #' }
@@ -153,20 +186,39 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
     stop("KEGG annotations not found. Run process_annotations() with include='KEGG' first.")
   }
   
-  # Identify candidate loci (same logic as GO function)
+  # Identify candidate loci - handle multiple input formats (same as GO function)
   if (is.data.frame(candidate_loci)) {
-    if (all(c("chromosome", "position") %in% colnames(candidate_loci))) {
-      candidate_ids <- with(candidate_loci, paste0("*", "_", chromosome, "_", position))
-      candidate_locus_ids <- annotations$locus_id[
-        sapply(annotations$locus_id, function(locus_id) {
-          any(sapply(candidate_ids, function(pattern) {
-            grepl(gsub("\\*", ".*", pattern), locus_id)
-          }))
-        })
-      ]
-    } else {
-      stop("candidate_loci data frame must have 'chromosome' and 'position' columns")
+    # Handle BED file format (chromosome, start, end)
+    if (all(c("chromosome", "start", "end") %in% colnames(candidate_loci))) {
+      if (verbose) message("  - Detected BED format input (chromosome, start, end)")
+      # Convert BED coordinates - use start position as the position
+      candidate_df <- data.frame(
+        chromosome = candidate_loci$chromosome,
+        position = candidate_loci$start,
+        stringsAsFactors = FALSE
+      )
+    } 
+    # Handle VCF format (chromosome, position)
+    else if (all(c("chromosome", "position") %in% colnames(candidate_loci))) {
+      if (verbose) message("  - Detected VCF format input (chromosome, position)")
+      candidate_df <- candidate_loci[, c("chromosome", "position")]
     }
+    else {
+      stop("candidate_loci data frame must have either:\n",
+           "  - 'chromosome' and 'position' columns (VCF format), or\n", 
+           "  - 'chromosome', 'start', and 'end' columns (BED format)")
+    }
+    
+    # Create locus IDs from chromosome and position
+    candidate_ids <- with(candidate_df, paste0("*", "_", chromosome, "_", position))
+    # Match against locus_id patterns in annotations
+    candidate_locus_ids <- annotations$locus_id[
+      sapply(annotations$locus_id, function(locus_id) {
+        any(sapply(candidate_ids, function(pattern) {
+          grepl(gsub("\\*", ".*", pattern), locus_id)
+        }))
+      })
+    ]
   } else {
     candidate_locus_ids <- candidate_loci
   }

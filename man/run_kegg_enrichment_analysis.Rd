@@ -16,7 +16,9 @@ run_kegg_enrichment_analysis(
 \arguments{
 \item{annotations}{Data frame from process_annotations() containing KEGG annotations}
 
-\item{candidate_loci}{Data frame with chromosome and position columns, or vector of locus_ids}
+\item{candidate_loci}{Data frame with coordinates (BED or VCF format), or vector of locus_ids.
+Accepts: (1) BED format with 'chromosome', 'start', 'end' columns,
+(2) VCF format with 'chromosome', 'position' columns, or (3) vector of locus_ids}
 
 \item{min_pathways}{Integer. Minimum genes for pathway testing. Default is 3}
 
@@ -37,14 +39,13 @@ Performs KEGG pathway enrichment analysis using candidate loci and processed ann
 # Process annotations first
 annotations <- process_annotations(con, include = c("GO", "KEGG"))
 
-# Define candidate loci
-candidates <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+# Using BED format (from import_candidate_loci) 
+candidates <- import_candidate_loci(con, candidate_vcf_file, background_file_id = 1)
+kegg_results <- run_kegg_enrichment_analysis(annotations, candidates$bed_file)
 
-# Run KEGG enrichment
-kegg_results <- run_kegg_enrichment_analysis(
-  annotations, 
-  candidate_loci = candidates
-)
+# Using VCF format
+candidates_vcf <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+kegg_results <- run_kegg_enrichment_analysis(annotations, candidates_vcf)
 
 print(kegg_results)
 }

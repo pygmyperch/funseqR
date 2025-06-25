@@ -17,7 +17,9 @@ run_go_enrichment_analysis(
 \arguments{
 \item{annotations}{Data frame from process_annotations() containing GO annotations}
 
-\item{candidate_loci}{Data frame with chromosome and position columns, or vector of locus_ids}
+\item{candidate_loci}{Data frame with coordinates (BED or VCF format), or vector of locus_ids.
+Accepts: (1) BED format with 'chromosome', 'start', 'end' columns,
+(2) VCF format with 'chromosome', 'position' columns, or (3) vector of locus_ids}
 
 \item{ontologies}{Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF", "CC")}
 
@@ -41,15 +43,16 @@ This is a simplified interface that works with the standardized output from proc
 # Process annotations first
 annotations <- process_annotations(con, include = c("GO", "KEGG"))
 
-# Define candidate loci
-candidates <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+# Using VCF format
+candidates_vcf <- data.frame(chromosome = c("LG1", "LG2"), position = c(12345, 67890))
+go_results <- run_go_enrichment_analysis(annotations, candidates_vcf)
 
-# Run GO enrichment
-go_results <- run_go_enrichment_analysis(
-  annotations, 
-  candidate_loci = candidates,
-  ontologies = c("BP", "MF")
-)
+# Using BED format (from import_candidate_loci)
+candidates <- import_candidate_loci(con, candidate_vcf_file, background_file_id = 1)
+go_results <- run_go_enrichment_analysis(annotations, candidates$bed_file)
+
+# Using locus IDs directly
+go_results <- run_go_enrichment_analysis(annotations, c("1_LG1_12345", "1_LG2_67890"))
 
 print(go_results$BP)
 }
