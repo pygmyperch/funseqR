@@ -18,8 +18,8 @@ run_go_enrichment_analysis(
 \item{annotations}{Data frame from process_annotations() containing GO annotations}
 
 \item{candidate_loci}{Data frame with coordinates (BED or VCF format), or vector of locus_ids.
-Accepts: (1) BED format with 'chromosome', 'start', 'end' columns,
-(2) VCF format with 'chromosome', 'position' columns, or (3) vector of locus_ids}
+Accepts: (1) BED format with 'chrom' (or 'chromosome'), 'start', 'end' columns,
+(2) VCF format with 'chrom' (or 'chromosome'), 'position' columns, or (3) vector of locus_ids}
 
 \item{ontologies}{Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF", "CC")}
 

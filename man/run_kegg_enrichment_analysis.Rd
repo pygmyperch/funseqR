@@ -17,8 +17,8 @@ run_kegg_enrichment_analysis(
 \item{annotations}{Data frame from process_annotations() containing KEGG annotations}
 
 \item{candidate_loci}{Data frame with coordinates (BED or VCF format), or vector of locus_ids.
-Accepts: (1) BED format with 'chromosome', 'start', 'end' columns,
-(2) VCF format with 'chromosome', 'position' columns, or (3) vector of locus_ids}
+Accepts: (1) BED format with 'chrom' (or 'chromosome'), 'start', 'end' columns,
+(2) VCF format with 'chrom' (or 'chromosome'), 'position' columns, or (3) vector of locus_ids}
 
 \item{min_pathways}{Integer. Minimum genes for pathway testing. Default is 3}
 

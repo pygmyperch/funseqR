@@ -5,8 +5,8 @@
 #'
 #' @param annotations Data frame from process_annotations() containing GO annotations
 #' @param candidate_loci Data frame with coordinates (BED or VCF format), or vector of locus_ids. 
-#'   Accepts: (1) BED format with 'chromosome', 'start', 'end' columns, 
-#'   (2) VCF format with 'chromosome', 'position' columns, or (3) vector of locus_ids
+#'   Accepts: (1) BED format with 'chrom' (or 'chromosome'), 'start', 'end' columns, 
+#'   (2) VCF format with 'chrom' (or 'chromosome'), 'position' columns, or (3) vector of locus_ids
 #' @param ontologies Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF", "CC")
 #' @param min_genes Integer. Minimum genes for GO term testing. Default is 5
 #' @param max_genes Integer. Maximum genes for GO term testing. Default is 500
@@ -48,22 +48,38 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
     stop("GO annotations not found. Run process_annotations() with include='GO' first.")
   }
   
-  # Identify candidate loci - handle multiple input formats
+  # Identify candidate loci - handle multiple input formats with flexible column naming
   if (is.data.frame(candidate_loci)) {
-    # Handle BED file format (chromosome, start, end)
-    if (all(c("chromosome", "start", "end") %in% colnames(candidate_loci))) {
-      if (verbose) message("  - Detected BED format input (chromosome, start, end)")
+    
+    # Detect available column names (support both standard formats)
+    has_chrom <- "chrom" %in% colnames(candidate_loci)
+    has_chromosome <- "chromosome" %in% colnames(candidate_loci)
+    has_start <- "start" %in% colnames(candidate_loci)
+    has_end <- "end" %in% colnames(candidate_loci)
+    has_position <- "position" %in% colnames(candidate_loci)
+    
+    # Handle BED file format (chrom/chromosome, start, end)
+    if ((has_chrom || has_chromosome) && has_start && has_end) {
+      chrom_col <- if (has_chrom) "chrom" else "chromosome"
+      if (verbose) message("  - Detected BED format input (", chrom_col, ", start, end)")
+      
       # Convert BED coordinates - use start position as the position
       candidate_df <- data.frame(
-        chromosome = candidate_loci$chromosome,
+        chromosome = candidate_loci[[chrom_col]],
         position = candidate_loci$start,
         stringsAsFactors = FALSE
       )
     } 
-    # Handle VCF format (chromosome, position)
-    else if (all(c("chromosome", "position") %in% colnames(candidate_loci))) {
-      if (verbose) message("  - Detected VCF format input (chromosome, position)")
-      candidate_df <- candidate_loci[, c("chromosome", "position")]
+    # Handle VCF format (chrom/chromosome, position)
+    else if ((has_chrom || has_chromosome) && has_position) {
+      chrom_col <- if (has_chrom) "chrom" else "chromosome"
+      if (verbose) message("  - Detected VCF format input (", chrom_col, ", position)")
+      
+      candidate_df <- data.frame(
+        chromosome = candidate_loci[[chrom_col]],
+        position = candidate_loci$position,
+        stringsAsFactors = FALSE
+      )
     }
     # Handle file_id input - extract from database
     else if ("file_id" %in% colnames(candidate_loci) && nrow(candidate_loci) == 1) {
@@ -73,10 +89,14 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
         list(candidate_loci$file_id[1]))
     }
     else {
-      stop("candidate_loci data frame must have either:\n",
-           "  - 'chromosome' and 'position' columns (VCF format), or\n", 
-           "  - 'chromosome', 'start', and 'end' columns (BED format), or\n",
-           "  - single 'file_id' column")
+      # Show helpful error with actual column names found
+      found_cols <- paste(colnames(candidate_loci), collapse = ", ")
+      stop("candidate_loci data frame format not recognized.\n",
+           "Found columns: ", found_cols, "\n",
+           "Expected one of:\n",
+           "  - BED format: 'chrom' (or 'chromosome'), 'start', 'end'\n",
+           "  - VCF format: 'chrom' (or 'chromosome'), 'position'\n",
+           "  - File reference: 'file_id'")
     }
     
     # Create locus IDs from chromosome and position
@@ -148,8 +168,8 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
 #'
 #' @param annotations Data frame from process_annotations() containing KEGG annotations
 #' @param candidate_loci Data frame with coordinates (BED or VCF format), or vector of locus_ids. 
-#'   Accepts: (1) BED format with 'chromosome', 'start', 'end' columns, 
-#'   (2) VCF format with 'chromosome', 'position' columns, or (3) vector of locus_ids
+#'   Accepts: (1) BED format with 'chrom' (or 'chromosome'), 'start', 'end' columns, 
+#'   (2) VCF format with 'chrom' (or 'chromosome'), 'position' columns, or (3) vector of locus_ids
 #' @param min_pathways Integer. Minimum genes for pathway testing. Default is 3
 #' @param max_pathways Integer. Maximum genes for pathway testing. Default is 500
 #' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
@@ -186,27 +206,48 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
     stop("KEGG annotations not found. Run process_annotations() with include='KEGG' first.")
   }
   
-  # Identify candidate loci - handle multiple input formats (same as GO function)
+  # Identify candidate loci - handle multiple input formats with flexible column naming
   if (is.data.frame(candidate_loci)) {
-    # Handle BED file format (chromosome, start, end)
-    if (all(c("chromosome", "start", "end") %in% colnames(candidate_loci))) {
-      if (verbose) message("  - Detected BED format input (chromosome, start, end)")
+    
+    # Detect available column names (support both standard formats)
+    has_chrom <- "chrom" %in% colnames(candidate_loci)
+    has_chromosome <- "chromosome" %in% colnames(candidate_loci)
+    has_start <- "start" %in% colnames(candidate_loci)
+    has_end <- "end" %in% colnames(candidate_loci)
+    has_position <- "position" %in% colnames(candidate_loci)
+    
+    # Handle BED file format (chrom/chromosome, start, end)
+    if ((has_chrom || has_chromosome) && has_start && has_end) {
+      chrom_col <- if (has_chrom) "chrom" else "chromosome"
+      if (verbose) message("  - Detected BED format input (", chrom_col, ", start, end)")
+      
       # Convert BED coordinates - use start position as the position
       candidate_df <- data.frame(
-        chromosome = candidate_loci$chromosome,
+        chromosome = candidate_loci[[chrom_col]],
         position = candidate_loci$start,
         stringsAsFactors = FALSE
       )
     } 
-    # Handle VCF format (chromosome, position)
-    else if (all(c("chromosome", "position") %in% colnames(candidate_loci))) {
-      if (verbose) message("  - Detected VCF format input (chromosome, position)")
-      candidate_df <- candidate_loci[, c("chromosome", "position")]
+    # Handle VCF format (chrom/chromosome, position)
+    else if ((has_chrom || has_chromosome) && has_position) {
+      chrom_col <- if (has_chrom) "chrom" else "chromosome"
+      if (verbose) message("  - Detected VCF format input (", chrom_col, ", position)")
+      
+      candidate_df <- data.frame(
+        chromosome = candidate_loci[[chrom_col]],
+        position = candidate_loci$position,
+        stringsAsFactors = FALSE
+      )
     }
     else {
-      stop("candidate_loci data frame must have either:\n",
-           "  - 'chromosome' and 'position' columns (VCF format), or\n", 
-           "  - 'chromosome', 'start', and 'end' columns (BED format)")
+      # Show helpful error with actual column names found
+      found_cols <- paste(colnames(candidate_loci), collapse = ", ")
+      stop("candidate_loci data frame format not recognized.\n",
+           "Found columns: ", found_cols, "\n",
+           "Expected one of:\n",
+           "  - BED format: 'chrom' (or 'chromosome'), 'start', 'end'\n",
+           "  - VCF format: 'chrom' (or 'chromosome'), 'position'\n",
+           "  - File reference: 'file_id'")
     }
     
     # Create locus IDs from chromosome and position
