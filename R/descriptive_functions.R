@@ -3991,8 +3991,45 @@ analyze_kegg_modules <- function(con, candidate_loci = NULL, blast_param_id = NU
     # Focus on most frequent pathways to avoid API overload
     top_pathways <- head(pathway_data, max_pathways_to_analyze)
     
-    # Extract pathway IDs that look like pathway maps (e.g., "dre00562")
-    pathway_ids <- top_pathways$kegg_id[grepl("^[a-z]{3}\\d{5}$", top_pathways$kegg_id)]
+    # Extract KEGG IDs and convert gene IDs to pathway map IDs if needed
+    gene_ids <- top_pathways$kegg_id[grepl("^[a-z]{3}:\\d+$", top_pathways$kegg_id)]
+    pathway_map_ids <- top_pathways$kegg_id[grepl("^[a-z]{3}\\d{5}$", top_pathways$kegg_id)]
+    
+    # Convert gene IDs to pathway map IDs using KEGGREST
+    pathway_ids <- pathway_map_ids  # Start with any existing pathway maps
+    
+    if (length(gene_ids) > 0) {
+      if (verbose) message("    - Converting ", length(gene_ids), " gene IDs to pathway maps...")
+      
+      # Get unique pathways from gene IDs
+      gene_pathways <- list()
+      
+      for (gene_id in head(gene_ids, max_pathways_to_analyze)) {  # Limit to avoid API overload
+        tryCatch({
+          gene_info <- KEGGREST::keggGet(gene_id)
+          if (length(gene_info) > 0 && !is.null(gene_info[[1]]$PATHWAY)) {
+            pathways <- names(gene_info[[1]]$PATHWAY)
+            gene_pathways <- c(gene_pathways, pathways)
+          }
+          Sys.sleep(0.2)  # Rate limiting
+        }, error = function(e) {
+          if (verbose) message("      - Failed to get pathways for ", gene_id)
+        })
+      }
+      
+      # Get unique pathway IDs and add to our list
+      unique_pathway_maps <- unique(unlist(gene_pathways))
+      if (length(unique_pathway_maps) > 0) {
+        pathway_ids <- c(pathway_ids, unique_pathway_maps)
+        if (verbose) message("    - Found ", length(unique_pathway_maps), " unique pathway maps from gene IDs")
+      }
+    }
+    
+    # Remove duplicates and limit to reasonable number
+    pathway_ids <- unique(pathway_ids)
+    if (length(pathway_ids) > max_pathways_to_analyze) {
+      pathway_ids <- head(pathway_ids, max_pathways_to_analyze)
+    }
     
     if (length(pathway_ids) > 0) {
       if (verbose) message("    - Analyzing ", length(pathway_ids), " pathway networks...")
@@ -4549,4 +4586,53 @@ create_pathway_network_summary <- function(con, candidate_loci, background_file_
   }
   
   return(result)
+}
+
+#' Diagnose KEGG ID formats in database
+#'
+#' Helper function to check what formats KEGG IDs are stored in
+#'
+#' @param con Database connection object
+#' @param limit Integer. Number of examples to show. Default is 20.
+#'
+#' @return Data frame showing KEGG ID formats and patterns
+#'
+#' @export
+diagnose_kegg_id_formats <- function(con, limit = 20) {
+  
+  message("Checking KEGG ID formats in database...")
+  
+  # Get sample of KEGG IDs
+  sample_query <- paste0("
+    SELECT DISTINCT 
+      kegg_id, 
+      pathway_name,
+      LENGTH(kegg_id) as id_length
+    FROM kegg_references 
+    ORDER BY kegg_id
+    LIMIT ", limit)
+  
+  sample_data <- DBI::dbGetQuery(con, sample_query)
+  
+  if (nrow(sample_data) == 0) {
+    message("No KEGG references found in database")
+    return(data.frame())
+  }
+  
+  message("Sample KEGG IDs found:")
+  print(sample_data)
+  
+  # Analyze patterns
+  patterns <- list(
+    "Gene IDs (organism:number)" = sum(grepl("^[a-z]{3}:\\d+$", sample_data$kegg_id)),
+    "Pathway IDs (organism5digits)" = sum(grepl("^[a-z]{3}\\d{5}$", sample_data$kegg_id)),
+    "Other patterns" = sum(!grepl("^[a-z]{3}:\\d+$|^[a-z]{3}\\d{5}$", sample_data$kegg_id))
+  )
+  
+  message("\nPattern analysis:")
+  for (pattern_name in names(patterns)) {
+    message("  ", pattern_name, ": ", patterns[[pattern_name]], " IDs")
+  }
+  
+  return(sample_data)
 }
