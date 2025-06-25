@@ -53,15 +53,28 @@ pathway hubs and functional relationships. Automatically generates
 background from annotated loci for statistical comparison.
 }
 \details{
-This function creates a comprehensive pathway network by:
+This function performs pathway network analysis in the following sequence:
+
+\enumerate{
+\item \strong{Candidate Pathway Analysis}: Identifies KEGG pathways in candidate loci using analyze_kegg_modules()
+\item \strong{Background Data Extraction}: Finds all KEGG-annotated loci in the specified background dataset
+\item \strong{Background Pathway Analysis}: Identifies KEGG pathways in background loci
+\item \strong{Network Construction}: Attempts to build pathway interaction network from candidate pathways
 \itemize{
-\item Building a network where nodes are pathways and edges represent shared genes/compounds
-\item Identifying pathway hubs (highly connected pathways)
-\item Analyzing pathway crosstalk and functional relationships
-\item Comparing candidate loci pathway profiles to background
-\item Clustering pathways into functional modules
-\item Computing network topology metrics
+\item Requires shared genes/compounds between pathways
+\item Applies min_pathway_size filtering
+\item May fail if pathways are functionally independent
 }
+\item \strong{Pathway Enrichment Analysis}: Compares candidate vs background pathway frequencies (independent of network)
+\itemize{
+\item Calculates fold-change enrichment
+\item Identifies enriched/depleted/similar pathways
+}
+\item \strong{Network Analysis} (if network exists): Calculates centrality, clusters, and topology metrics
+}
+
+\strong{Important Note}: Network construction and pathway enrichment are independent analyses -
+enrichment results are provided even if network construction fails.
 }
 \examples{
 \dontrun{
