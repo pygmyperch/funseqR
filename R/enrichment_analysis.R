@@ -13,6 +13,10 @@
 #' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
+#' @details
+#' This function automatically maps ontology codes from the analysis interface ("BP", "MF", "CC") 
+#' to the database storage format ("P", "F", "C") used in GO term categories.
+#'
 #' @return List containing enrichment results for each ontology tested
 #'
 #' @examples
@@ -432,11 +436,26 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
 .perform_go_enrichment_from_data <- function(go_data, ontology, min_genes, max_genes, 
                                            significance_threshold, verbose) {
   
-  # Filter GO terms for the specific ontology
-  ontology_terms <- go_data$go_terms[go_data$go_terms$go_category == ontology, ]
+  # Map ontology codes - database stores single letters, analysis uses full names
+  ontology_map <- c("BP" = "P", "MF" = "F", "CC" = "C")
+  category_code <- ontology_map[ontology]
+  
+  if (is.na(category_code)) {
+    stop("Invalid ontology. Must be 'BP', 'MF', or 'CC'")
+  }
+  
+  # Filter GO terms for the specific ontology using mapped category code
+  ontology_terms <- go_data$go_terms[go_data$go_terms$go_category == category_code, ]
   
   if (nrow(ontology_terms) == 0) {
-    if (verbose) message("    - No ", ontology, " terms found")
+    if (verbose) {
+      message("    - No ", ontology, " terms found (searching for category '", category_code, "')")
+      # Debug: show available categories
+      if (nrow(go_data$go_terms) > 0) {
+        available_cats <- unique(go_data$go_terms$go_category)
+        message("    - Available categories in data: ", paste(available_cats, collapse = ", "))
+      }
+    }
     return(data.frame())
   }
   
