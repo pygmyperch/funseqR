@@ -1,7 +1,4 @@
 #' Process Functional Annotations into Standardized Summary Table
-#' 
-#' @importFrom dplyr group_by summarise first mutate rowwise ungroup
-#' @importFrom magrittr %>%
 #'
 #' Processes functional annotation results from annotate_blast_results() into a
 #' comprehensive, standardized data frame linking each locus to functional annotations.
@@ -70,6 +67,8 @@
 #' kegg_enrichment <- run_kegg_enrichment_analysis(annotations, candidate_loci)
 #' }
 #'
+#' @importFrom dplyr group_by summarise first rowwise ungroup
+#' @importFrom magrittr %>%
 #' @export
 process_annotations <- function(con, include = c("GO", "KEGG"), blast_param_id = NULL, 
                                export_csv = NULL, verbose = TRUE) {

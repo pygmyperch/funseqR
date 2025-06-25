@@ -42,7 +42,10 @@ Data frame with standardized functional annotations:
 }
 }
 \description{
-Process Functional Annotations into Standardized Summary Table
+Processes functional annotation results from annotate_blast_results() into a
+comprehensive, standardized data frame linking each locus to functional annotations.
+Automatically applies name standardization using KEGGREST and includes KEGG BRITE
+hierarchy and module classifications.
 }
 \details{
 This function streamlines the functional annotation workflow by:
