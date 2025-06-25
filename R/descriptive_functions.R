@@ -4341,7 +4341,7 @@ create_pathway_network_summary <- function(con, candidate_loci, background_file_
     ))
   }
   
-  if (verbose) message("    - Found ", nrow(background_loci), " annotated loci in background")
+  if (verbose) message("    - Found ", nrow(background_loci), " KEGG-annotated loci in background")
   
   # 3. Get pathway analysis for background loci
   background_pathways <- analyze_kegg_modules(
@@ -4358,8 +4358,18 @@ create_pathway_network_summary <- function(con, candidate_loci, background_file_
   # Extract pathway interactions from candidate data
   pathway_interactions <- candidate_pathways$pathway_interactions
   
+  # Add diagnostic information about candidate pathways
+  if (verbose) {
+    candidate_pathway_count <- nrow(candidate_pathways$pathway_summary)
+    message("    - Found ", candidate_pathway_count, " KEGG pathways in candidate loci")
+    message("    - Found ", nrow(pathway_interactions), " pathway interactions from candidate analysis")
+  }
+  
   if (nrow(pathway_interactions) == 0) {
-    if (verbose) message("    - No pathway interactions found")
+    if (verbose) {
+      message("    - Cannot build network: No shared genes/compounds found between pathways")
+      message("    - This is normal when pathways are functionally independent")
+    }
     network_graph <- NULL
     pathway_hubs <- data.frame()
     network_metrics <- list()
@@ -4376,12 +4386,22 @@ create_pathway_network_summary <- function(con, candidate_loci, background_file_
       pathway_summary <- candidate_pathways$pathway_summary
       valid_pathways <- pathway_summary$kegg_id[pathway_summary$unique_loci >= min_pathway_size]
       
+      if (verbose) {
+        message("    - Applying min_pathway_size filter (", min_pathway_size, " loci): ", 
+                length(valid_pathways), "/", length(all_pathways), " pathways pass")
+      }
+      
       # Filter edges to only include valid pathways
       edges <- edges[edges$from %in% valid_pathways & edges$to %in% valid_pathways, ]
       all_pathways <- unique(c(edges$from, edges$to))
+      
+      if (verbose) {
+        message("    - After filtering: ", nrow(edges), " pathway interactions remain")
+      }
     }
     
     if (nrow(edges) > 0) {
+      if (verbose) message("    - Constructing network with ", nrow(edges), " interactions")
       # Create network graph
       network_graph <- igraph::graph_from_data_frame(edges, vertices = all_pathways, directed = FALSE)
       
@@ -4481,13 +4501,18 @@ create_pathway_network_summary <- function(con, candidate_loci, background_file_
     }
   }
   
-  # 7. Candidate vs background pathway profile (if background provided)
+  # 7. Candidate vs background pathway enrichment analysis (independent of network)
   candidate_pathway_profile <- data.frame()
   if (!is.null(background_pathways)) {
-    if (verbose) message("  - Comparing candidate vs background pathway profiles...")
+    if (verbose) message("  - Performing pathway enrichment analysis (candidate vs background)...")
     
     candidate_summary <- candidate_pathways$pathway_summary
     background_summary <- background_pathways$pathway_summary
+    
+    if (verbose) {
+      message("    - Candidate pathways: ", nrow(candidate_summary))
+      message("    - Background pathways: ", nrow(background_summary))
+    }
     
     # Merge candidate and background data
     all_pathways_comp <- merge(
@@ -4514,6 +4539,15 @@ create_pathway_network_summary <- function(con, candidate_loci, background_file_
     # Sort by fold change
     candidate_pathway_profile <- all_pathways_comp[order(all_pathways_comp$fold_change, decreasing = TRUE), ]
     rownames(candidate_pathway_profile) <- NULL
+    
+    # Report enrichment results
+    if (verbose) {
+      enriched_count <- sum(candidate_pathway_profile$enrichment_status == "Enriched", na.rm = TRUE)
+      depleted_count <- sum(candidate_pathway_profile$enrichment_status == "Depleted", na.rm = TRUE)
+      similar_count <- sum(candidate_pathway_profile$enrichment_status == "Similar", na.rm = TRUE)
+      message("    - Enrichment results: ", enriched_count, " enriched, ", 
+              depleted_count, " depleted, ", similar_count, " similar")
+    }
   }
   
   # 8. Functional clustering
@@ -4570,18 +4604,33 @@ create_pathway_network_summary <- function(con, candidate_loci, background_file_
   
   if (verbose) {
     message("Pathway network analysis complete:")
+    
+    # Network construction results
     if (!is.null(network_graph)) {
-      message("  - Network nodes (pathways): ", igraph::vcount(network_graph))
-      message("  - Network edges (interactions): ", igraph::ecount(network_graph))
-      message("  - Pathway hubs identified: ", nrow(pathway_hubs))
-      message("  - Functional clusters: ", length(functional_clusters))
+      message("  - Network construction: SUCCESS")
+      message("    - Network nodes (pathways): ", igraph::vcount(network_graph))
+      message("    - Network edges (interactions): ", igraph::ecount(network_graph))
+      message("    - Pathway hubs identified: ", nrow(pathway_hubs))
+      message("    - Functional clusters: ", length(functional_clusters))
     } else {
-      message("  - No pathway network could be constructed")
+      message("  - Network construction: FAILED (no pathway interactions found)")
+      message("    - Suggestion: Try reducing min_pathway_size parameter (current: ", min_pathway_size, ")")
+      message("    - Note: This indicates pathways are functionally independent")
     }
     
+    # Pathway enrichment results (independent analysis)
     if (!is.null(background_loci) && nrow(candidate_pathway_profile) > 0) {
       enriched_count <- sum(candidate_pathway_profile$enrichment_status == "Enriched", na.rm = TRUE)
-      message("  - Enriched pathways vs background: ", enriched_count)
+      depleted_count <- sum(candidate_pathway_profile$enrichment_status == "Depleted", na.rm = TRUE)
+      message("  - Pathway enrichment analysis: COMPLETE")
+      message("    - Enriched pathways: ", enriched_count)
+      message("    - Depleted pathways: ", depleted_count)
+      
+      if (enriched_count == 0 && depleted_count == 0) {
+        message("    - Note: No significant enrichment/depletion found (fold-change threshold: 2x)")
+      }
+    } else if (nrow(candidate_pathway_profile) == 0) {
+      message("  - Pathway enrichment analysis: No comparison possible (no shared pathways)")
     }
   }
   
