@@ -1,8 +1,15 @@
-#' Descriptive Functions for Functional Annotation Analysis
+#' Deprecated Descriptive Functions for Functional Annotation Analysis
 #'
-#' This file contains functions to summarize and describe functional annotations
-#' from BLAST results, GO terms, UniProt data, and enrichment analyses.
-#' Enhanced with KEGGREST and ggkegg integration for improved pathway analysis.
+#' WARNING: Most functions in this file are DEPRECATED and replaced by the simplified
+#' process_annotations() workflow. These functions are kept for reference but may be
+#' removed in future versions.
+#'
+#' NEW SIMPLIFIED WORKFLOW:
+#' 1. Run annotate_blast_results() as before
+#' 2. Use process_annotations() to create standardized summary table
+#' 3. Use run_go_enrichment_analysis() and run_kegg_enrichment_analysis() for enrichment
+#'
+#' This file contains legacy functions that are now deprecated.
 
 #' Summarize GO annotations in the database
 #'
@@ -47,6 +54,11 @@
 summarize_go_annotations <- function(con, blast_param_id = NULL, candidate_loci = NULL,
                                    include_evidence = TRUE, include_modules = FALSE,
                                    min_frequency = 1, verbose = TRUE) {
+  
+  .Deprecated(
+    new = "process_annotations", 
+    msg = "summarize_go_annotations() is deprecated. Use process_annotations() followed by run_go_enrichment_analysis() for the new simplified workflow."
+  )
   
   if (verbose) message("Summarizing GO annotations...")
   
@@ -336,6 +348,11 @@ summarize_kegg_pathways <- function(con, blast_param_id = NULL, candidate_loci =
                                    include_modules = TRUE, min_frequency = 1, 
                                    use_keggrest_enhancement = FALSE, use_ggkegg_analysis = FALSE,
                                    verbose = TRUE) {
+  
+  .Deprecated(
+    new = "process_annotations", 
+    msg = "summarize_kegg_pathways() is deprecated. Use process_annotations() followed by run_kegg_enrichment_analysis() for the new simplified workflow."
+  )
   
   if (verbose) message("Summarizing KEGG pathways...")
   
