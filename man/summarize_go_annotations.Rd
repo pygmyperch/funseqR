@@ -2,7 +2,7 @@
 % Please edit documentation in R/descriptive_functions.R
 \name{summarize_go_annotations}
 \alias{summarize_go_annotations}
-\title{Descriptive Functions for Functional Annotation Analysis}
+\title{Deprecated Descriptive Functions for Functional Annotation Analysis}
 \usage{
 summarize_go_annotations(
   con,
@@ -40,12 +40,21 @@ List containing GO annotation summaries:
 }
 }
 \description{
-This file contains functions to summarize and describe functional annotations
-from BLAST results, GO terms, UniProt data, and enrichment analyses.
-Enhanced with KEGGREST and ggkegg integration for improved pathway analysis.
-Summarize GO annotations in the database
+WARNING: Most functions in this file are DEPRECATED and replaced by the simplified
+process_annotations() workflow. These functions are kept for reference but may be
+removed in future versions.
 }
 \details{
+NEW SIMPLIFIED WORKFLOW:
+\enumerate{
+\item Run annotate_blast_results() as before
+\item Use process_annotations() to create standardized summary table
+\item Use run_go_enrichment_analysis() and run_kegg_enrichment_analysis() for enrichment
+}
+
+This file contains legacy functions that are now deprecated.
+Summarize GO annotations in the database
+
 Provides comprehensive statistics about GO term annotations across different
 ontology categories (BP, MF, CC) and blast parameter sets, with optional filtering
 for candidate loci and functional module grouping.
