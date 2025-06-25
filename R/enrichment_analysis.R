@@ -63,10 +63,10 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
       chrom_col <- if (has_chrom) "chrom" else "chromosome"
       if (verbose) message("  - Detected BED format input (", chrom_col, ", start, end)")
       
-      # Convert BED coordinates - use start position as the position
+      # Convert BED coordinates - add 1 to start position to convert from 0-based to 1-based
       candidate_df <- data.frame(
         chromosome = candidate_loci[[chrom_col]],
-        position = candidate_loci$start,
+        position = candidate_loci$start + 1,  # Convert 0-based BED to 1-based VCF coordinates
         stringsAsFactors = FALSE
       )
     } 
@@ -99,13 +99,16 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
            "  - File reference: 'file_id'")
     }
     
-    # Create locus IDs from chromosome and position
-    candidate_ids <- with(candidate_df, paste0("*", "_", chromosome, "_", position))
+    # Create coordinate patterns for matching
+    # Annotation locus_ids have format: vcf_id_chromosome_position
+    # We need to match on chromosome_position part
+    candidate_patterns <- with(candidate_df, paste0("_", chromosome, "_", position, "$"))
+    
     # Match against locus_id patterns in annotations
     candidate_locus_ids <- annotations$locus_id[
       sapply(annotations$locus_id, function(locus_id) {
-        any(sapply(candidate_ids, function(pattern) {
-          grepl(gsub("\\*", ".*", pattern), locus_id)
+        any(sapply(candidate_patterns, function(pattern) {
+          grepl(pattern, locus_id)
         }))
       })
     ]
@@ -122,6 +125,10 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
   }
   
   if (length(candidate_locus_ids) == 0) {
+    if (verbose && exists("candidate_patterns")) {
+      message("  - Debug: First few candidate patterns: ", paste(head(candidate_patterns, 3), collapse = ", "))
+      message("  - Debug: First few annotation locus_ids: ", paste(head(annotations$locus_id, 3), collapse = ", "))
+    }
     stop("No candidate loci found in annotations")
   }
   
@@ -221,10 +228,10 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
       chrom_col <- if (has_chrom) "chrom" else "chromosome"
       if (verbose) message("  - Detected BED format input (", chrom_col, ", start, end)")
       
-      # Convert BED coordinates - use start position as the position
+      # Convert BED coordinates - add 1 to start position to convert from 0-based to 1-based
       candidate_df <- data.frame(
         chromosome = candidate_loci[[chrom_col]],
-        position = candidate_loci$start,
+        position = candidate_loci$start + 1,  # Convert 0-based BED to 1-based VCF coordinates
         stringsAsFactors = FALSE
       )
     } 
@@ -250,13 +257,16 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
            "  - File reference: 'file_id'")
     }
     
-    # Create locus IDs from chromosome and position
-    candidate_ids <- with(candidate_df, paste0("*", "_", chromosome, "_", position))
+    # Create coordinate patterns for matching
+    # Annotation locus_ids have format: vcf_id_chromosome_position
+    # We need to match on chromosome_position part
+    candidate_patterns <- with(candidate_df, paste0("_", chromosome, "_", position, "$"))
+    
     # Match against locus_id patterns in annotations
     candidate_locus_ids <- annotations$locus_id[
       sapply(annotations$locus_id, function(locus_id) {
-        any(sapply(candidate_ids, function(pattern) {
-          grepl(gsub("\\*", ".*", pattern), locus_id)
+        any(sapply(candidate_patterns, function(pattern) {
+          grepl(pattern, locus_id)
         }))
       })
     ]
@@ -265,6 +275,10 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
   }
   
   if (length(candidate_locus_ids) == 0) {
+    if (verbose && exists("candidate_patterns")) {
+      message("  - Debug: First few candidate patterns: ", paste(head(candidate_patterns, 3), collapse = ", "))
+      message("  - Debug: First few annotation locus_ids: ", paste(head(annotations$locus_id, 3), collapse = ", "))
+    }
     stop("No candidate loci found in annotations")
   }
   
