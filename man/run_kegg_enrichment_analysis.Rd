@@ -20,9 +20,11 @@ run_kegg_enrichment_analysis(
 Accepts: (1) BED format with 'chrom' (or 'chromosome'), 'start', 'end' columns,
 (2) VCF format with 'chrom' (or 'chromosome'), 'position' columns, or (3) vector of locus_ids}
 
-\item{min_pathways}{Integer. Minimum genes for pathway testing. Default is 3}
+\item{min_pathways}{Integer. Minimum genes for pathway testing. Default is 3
+(inclusive approach - researchers can evaluate biological relevance of smaller pathways)}
 
-\item{max_pathways}{Integer. Maximum genes for pathway testing. Default is 500}
+\item{max_pathways}{Integer. Maximum genes for pathway testing. Default is 500
+(excludes overly broad pathways)}
 
 \item{significance_threshold}{Numeric. FDR threshold for significance. Default is 0.05}
 

@@ -8,8 +8,10 @@
 #'   Accepts: (1) BED format with 'chrom' (or 'chromosome'), 'start', 'end' columns, 
 #'   (2) VCF format with 'chrom' (or 'chromosome'), 'position' columns, or (3) vector of locus_ids
 #' @param ontologies Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF", "CC")
-#' @param min_genes Integer. Minimum genes for GO term testing. Default is 5
-#' @param max_genes Integer. Maximum genes for GO term testing. Default is 500
+#' @param min_genes Integer. Minimum genes for GO term testing. Default is 3 
+#'   (inclusive approach - researchers can evaluate biological relevance of smaller terms)
+#' @param max_genes Integer. Maximum genes for GO term testing. Default is 500 
+#'   (excludes overly broad terms like 'biological process')
 #' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
@@ -41,7 +43,7 @@
 #' @export
 run_go_enrichment_analysis <- function(annotations, candidate_loci, 
                                      ontologies = c("BP", "MF", "CC"),
-                                     min_genes = 5, max_genes = 500,
+                                     min_genes = 3, max_genes = 500,
                                      significance_threshold = 0.05,
                                      verbose = TRUE) {
   
@@ -182,7 +184,9 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
 #'   Accepts: (1) BED format with 'chrom' (or 'chromosome'), 'start', 'end' columns, 
 #'   (2) VCF format with 'chrom' (or 'chromosome'), 'position' columns, or (3) vector of locus_ids
 #' @param min_pathways Integer. Minimum genes for pathway testing. Default is 3
+#'   (inclusive approach - researchers can evaluate biological relevance of smaller pathways)
 #' @param max_pathways Integer. Maximum genes for pathway testing. Default is 500
+#'   (excludes overly broad pathways)
 #' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
@@ -447,6 +451,10 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
   # Filter GO terms for the specific ontology using mapped category code
   ontology_terms <- go_data$go_terms[go_data$go_terms$go_category == category_code, ]
   
+  if (verbose) {
+    message("    - Total ", ontology, " terms available: ", nrow(ontology_terms))
+  }
+  
   if (nrow(ontology_terms) == 0) {
     if (verbose) {
       message("    - No ", ontology, " terms found (searching for category '", category_code, "')")
@@ -459,17 +467,31 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
     return(data.frame())
   }
   
-  # Filter by size
+  # Filter by size with detailed reporting
+  too_small <- sum(ontology_terms$locus_count < min_genes)
+  too_large <- sum(ontology_terms$locus_count > max_genes)
   size_filtered <- ontology_terms[ontology_terms$locus_count >= min_genes & 
                                  ontology_terms$locus_count <= max_genes, ]
   
+  if (verbose) {
+    if (too_small > 0) {
+      message("    - Excluded (< ", min_genes, " genes): ", too_small, " terms")
+    }
+    if (too_large > 0) {
+      message("    - Excluded (> ", max_genes, " genes): ", too_large, " terms")
+    }
+    message("    - Terms passing size filters: ", nrow(size_filtered))
+  }
+  
   if (nrow(size_filtered) == 0) {
-    if (verbose) message("    - No ", ontology, " terms pass size filters")
+    if (verbose) message("    - No ", ontology, " terms pass size filters (", min_genes, "-", max_genes, " genes)")
     return(data.frame())
   }
   
   # Perform enrichment tests
   results <- data.frame()
+  terms_with_candidates <- 0
+  terms_without_candidates <- 0
   
   for (i in 1:nrow(size_filtered)) {
     go_id <- size_filtered$go_id[i]
@@ -486,7 +508,9 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
                           background_with_term, background_without_term), 
                         nrow = 2, byrow = TRUE)
     
+    # Track terms with/without candidates
     if (candidate_with_term > 0) {
+      terms_with_candidates <- terms_with_candidates + 1
       test_result <- fisher.test(cont_table, alternative = "greater")
       
       results <- rbind(results, data.frame(
@@ -502,7 +526,15 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
         p_value = test_result$p.value,
         stringsAsFactors = FALSE
       ))
+    } else {
+      terms_without_candidates <- terms_without_candidates + 1
     }
+  }
+  
+  # Report testing summary
+  if (verbose) {
+    message("    - Excluded (0 candidates): ", terms_without_candidates, " terms")
+    message("    - Terms tested: ", terms_with_candidates)
   }
   
   if (nrow(results) > 0) {
@@ -522,17 +554,33 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
 .perform_kegg_enrichment_from_data <- function(kegg_data, min_pathways, max_pathways, 
                                              significance_threshold, verbose) {
   
-  # Filter pathways by size
+  # Filter pathways by size with detailed reporting
+  total_pathways <- nrow(kegg_data$pathways)
+  too_small <- sum(kegg_data$pathways$locus_count < min_pathways)
+  too_large <- sum(kegg_data$pathways$locus_count > max_pathways)
   size_filtered <- kegg_data$pathways[kegg_data$pathways$locus_count >= min_pathways & 
                                      kegg_data$pathways$locus_count <= max_pathways, ]
   
+  if (verbose) {
+    message("    - Total KEGG pathways available: ", total_pathways)
+    if (too_small > 0) {
+      message("    - Excluded (< ", min_pathways, " genes): ", too_small, " pathways")
+    }
+    if (too_large > 0) {
+      message("    - Excluded (> ", max_pathways, " genes): ", too_large, " pathways")
+    }
+    message("    - Pathways passing size filters: ", nrow(size_filtered))
+  }
+  
   if (nrow(size_filtered) == 0) {
-    if (verbose) message("    - No pathways pass size filters")
+    if (verbose) message("    - No pathways pass size filters (", min_pathways, "-", max_pathways, " genes)")
     return(data.frame())
   }
   
   # Perform enrichment tests
   results <- data.frame()
+  pathways_with_candidates <- 0
+  pathways_without_candidates <- 0
   
   for (i in 1:nrow(size_filtered)) {
     pathway_id <- size_filtered$pathway_id[i]
@@ -549,7 +597,9 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
                           background_with_pathway, background_without_pathway), 
                         nrow = 2, byrow = TRUE)
     
+    # Track pathways with/without candidates
     if (candidate_with_pathway > 0) {
+      pathways_with_candidates <- pathways_with_candidates + 1
       test_result <- fisher.test(cont_table, alternative = "greater")
       
       results <- rbind(results, data.frame(
@@ -564,7 +614,15 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
         p_value = test_result$p.value,
         stringsAsFactors = FALSE
       ))
+    } else {
+      pathways_without_candidates <- pathways_without_candidates + 1
     }
+  }
+  
+  # Report testing summary
+  if (verbose) {
+    message("    - Excluded (0 candidates): ", pathways_without_candidates, " pathways")
+    message("    - Pathways tested: ", pathways_with_candidates)
   }
   
   if (nrow(results) > 0) {

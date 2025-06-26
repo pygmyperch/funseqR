@@ -8,7 +8,7 @@ run_go_enrichment_analysis(
   annotations,
   candidate_loci,
   ontologies = c("BP", "MF", "CC"),
-  min_genes = 5,
+  min_genes = 3,
   max_genes = 500,
   significance_threshold = 0.05,
   verbose = TRUE
@@ -23,9 +23,11 @@ Accepts: (1) BED format with 'chrom' (or 'chromosome'), 'start', 'end' columns,
 
 \item{ontologies}{Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF", "CC")}
 
-\item{min_genes}{Integer. Minimum genes for GO term testing. Default is 5}
+\item{min_genes}{Integer. Minimum genes for GO term testing. Default is 3
+(inclusive approach - researchers can evaluate biological relevance of smaller terms)}
 
-\item{max_genes}{Integer. Maximum genes for GO term testing. Default is 500}
+\item{max_genes}{Integer. Maximum genes for GO term testing. Default is 500
+(excludes overly broad terms like 'biological process')}
 
 \item{significance_threshold}{Numeric. FDR threshold for significance. Default is 0.05}
 
@@ -37,6 +39,10 @@ List containing enrichment results for each ontology tested
 \description{
 Performs GO enrichment analysis using candidate loci and processed annotation data.
 This is a simplified interface that works with the standardized output from process_annotations().
+}
+\details{
+This function automatically maps ontology codes from the analysis interface ("BP", "MF", "CC")
+to the database storage format ("P", "F", "C") used in GO term categories.
 }
 \examples{
 \dontrun{
