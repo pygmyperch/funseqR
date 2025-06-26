@@ -144,15 +144,12 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
     message("  - Testing ontologies: ", paste(ontologies, collapse = ", "))
   }
   
-  # Filter annotations to only those with GO terms
-  go_annotations <- annotations[!is.na(annotations$go_terms) & annotations$go_terms != "", ]
+  # Prepare GO data (filtering will be done in the helper function)
+  go_data <- .prepare_go_data_from_annotations(annotations, candidate_locus_ids, verbose)
   
-  if (nrow(go_annotations) == 0) {
+  if (nrow(go_data$go_terms) == 0) {
     stop("No GO annotations found in the data")
   }
-  
-  # Prepare GO data
-  go_data <- .prepare_go_data_from_annotations(go_annotations, candidate_locus_ids, verbose)
   
   # Run enrichment for each ontology
   results <- list()
@@ -290,20 +287,17 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
     stop("No candidate loci found in annotations")
   }
   
-  # Filter annotations to only those with KEGG pathways
-  kegg_annotations <- annotations[!is.na(annotations$kegg_pathways) & annotations$kegg_pathways != "", ]
-  
-  if (nrow(kegg_annotations) == 0) {
-    stop("No KEGG annotations found in the data")
-  }
-  
   if (verbose) {
     message("  - Candidate loci: ", length(candidate_locus_ids))
-    message("  - Background loci with KEGG: ", nrow(kegg_annotations))
+    message("  - Background loci: ", nrow(annotations))
   }
   
-  # Prepare KEGG pathway data
-  kegg_data <- .prepare_kegg_data_from_annotations(kegg_annotations, candidate_locus_ids, verbose)
+  # Prepare KEGG pathway data (filtering will be done in the helper function)
+  kegg_data <- .prepare_kegg_data_from_annotations(annotations, candidate_locus_ids, verbose)
+  
+  if (nrow(kegg_data$pathways) == 0) {
+    stop("No KEGG annotations found in the data")
+  }
   
   # Perform enrichment analysis
   results <- .perform_kegg_enrichment_from_data(
@@ -322,14 +316,22 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
 #' @keywords internal
 .prepare_go_data_from_annotations <- function(annotations, candidate_locus_ids, verbose) {
   
+  # Filter annotations to only those with GO terms (critical for correct background)
+  go_annotations <- annotations[!is.na(annotations$go_terms) & annotations$go_terms != "", ]
+  
+  if (verbose) {
+    message("    - Total annotations: ", nrow(annotations))
+    message("    - Annotations with GO terms: ", nrow(go_annotations))
+  }
+  
   # Create GO term mappings
   go_term_map <- list()
   
-  for (i in 1:nrow(annotations)) {
-    locus_id <- annotations$locus_id[i]
-    go_terms <- unlist(strsplit(annotations$go_terms[i], ";"))
-    go_names <- unlist(strsplit(annotations$go_names[i], ";"))
-    go_categories <- unlist(strsplit(annotations$go_categories[i], ";"))
+  for (i in 1:nrow(go_annotations)) {
+    locus_id <- go_annotations$locus_id[i]
+    go_terms <- unlist(strsplit(go_annotations$go_terms[i], ";"))
+    go_names <- unlist(strsplit(go_annotations$go_names[i], ";"))
+    go_categories <- unlist(strsplit(go_annotations$go_categories[i], ";"))
     
     for (j in seq_along(go_terms)) {
       go_id <- go_terms[j]
@@ -354,8 +356,8 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
       genes = candidate_locus_ids  # Using locus_ids as gene identifiers
     ),
     background = list(
-      loci = annotations$locus_id,
-      genes = annotations$locus_id
+      loci = go_annotations$locus_id,  # Only loci with GO terms (527 vs 694)
+      genes = go_annotations$locus_id
     ),
     go_terms = do.call(rbind, lapply(go_term_map, function(x) {
       data.frame(
@@ -382,13 +384,21 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
 #' @keywords internal
 .prepare_kegg_data_from_annotations <- function(annotations, candidate_locus_ids, verbose) {
   
+  # Filter annotations to only those with KEGG pathways (critical for correct background)
+  kegg_annotations <- annotations[!is.na(annotations$kegg_pathways) & annotations$kegg_pathways != "", ]
+  
+  if (verbose) {
+    message("    - Total annotations: ", nrow(annotations))
+    message("    - Annotations with KEGG pathways: ", nrow(kegg_annotations))
+  }
+  
   # Create KEGG pathway mappings
   pathway_map <- list()
   
-  for (i in 1:nrow(annotations)) {
-    locus_id <- annotations$locus_id[i]
-    pathways <- unlist(strsplit(annotations$kegg_pathways[i], ";"))
-    pathway_names <- unlist(strsplit(annotations$kegg_pathway_names[i], ";"))
+  for (i in 1:nrow(kegg_annotations)) {
+    locus_id <- kegg_annotations$locus_id[i]
+    pathways <- unlist(strsplit(kegg_annotations$kegg_pathways[i], ";"))
+    pathway_names <- unlist(strsplit(kegg_annotations$kegg_pathway_names[i], ";"))
     
     for (j in seq_along(pathways)) {
       pathway_id <- pathways[j]
@@ -412,8 +422,8 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
       genes = candidate_locus_ids
     ),
     background = list(
-      loci = annotations$locus_id,
-      genes = annotations$locus_id
+      loci = kegg_annotations$locus_id,  # Only loci with KEGG pathways
+      genes = kegg_annotations$locus_id
     ),
     pathways = do.call(rbind, lapply(pathway_map, function(x) {
       data.frame(
