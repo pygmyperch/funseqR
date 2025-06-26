@@ -3,17 +3,19 @@
 #' High-level wrapper functions for complete GO enrichment workflows
 #'
 
-#' Complete GO enrichment analysis workflow
+#' Over-Representation Analysis (ORA) workflow for GO and KEGG enrichment
 #'
 #' @param con Database connection object
 #' @param candidate_vcf_file Character. Path to candidate VCF file
 #' @param background_file_id Integer. File ID of background dataset (or NULL to auto-detect)
 #' @param blast_param_id Integer. Optional. Specific BLAST run ID to use for both datasets.
 #'   If NULL, uses all available annotations. Default is NULL.
-#' @param ontologies Character vector. GO ontologies to test: c("BP", "MF", "CC"). Default is c("BP", "MF", "CC")
-#' @param min_genes Integer. Minimum genes for GO term testing. Default is 5
-#' @param max_genes Integer. Maximum genes for GO term testing. Default is 500
+#' @param annotation_type Character. Type of annotations to analyze: "GO", "KEGG", or "both". Default is "both"
+#' @param ontologies Character vector. GO ontologies to test: c("BP", "MF", "CC"). Only used when GO is included. Default is c("BP", "MF", "CC")
+#' @param min_genes Integer. Minimum genes for term/pathway testing. Default is 5
+#' @param max_genes Integer. Maximum genes for term/pathway testing. Default is 500
 #' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
+#' @param method Character. Enrichment method: "clusterprofiler" or "legacy". Default is "clusterprofiler"
 #' @param store_results Logical. Store results in database. Default is TRUE
 #' @param create_plots Logical. Generate visualization plots. Default is TRUE
 #' @param verbose Logical. Print progress information. Default is TRUE
@@ -21,13 +23,16 @@
 #' @return List containing all analysis results, plots, and summary tables
 #'
 #' @details
-#' This function performs a complete GO enrichment workflow:
+#' This function performs complete Over-Representation Analysis (ORA) workflow:
 #' 1. Import candidate loci file
 #' 2. Link to existing annotations
-#' 3. Extract GO terms for both datasets (optionally filtered by BLAST run)
-#' 4. Perform enrichment testing for specified ontologies
+#' 3. Extract annotations for both datasets (optionally filtered by BLAST run)
+#' 4. Perform enrichment testing using clusterProfiler:
+#'    - GO: Tests specified ontologies (BP, MF, CC)
+#'    - KEGG: Tests pathway enrichment
+#'    - both: Runs both GO and KEGG analyses
 #' 5. Create visualizations
-#' 6. Store results in database (optional)
+#' 6. Store results in unified database schema
 #' 
 #' When blast_param_id is specified, only annotations from that specific BLAST run
 #' are used for both candidate and background datasets, ensuring methodological 
@@ -37,31 +42,38 @@
 #' \dontrun{
 #' con <- connect_funseq_db("analysis.db")
 #' 
-#' # Use all available annotations and all ontologies (default behavior)
-#' results <- run_go_enrichment_workflow(con, "candidates.vcf")
+#' # Run both GO and KEGG enrichment (default)
+#' results <- run_ORA(con, "candidates.vcf")
 #' 
-#' # Use custom significance threshold (e.g., 0.1 for more lenient)
-#' results_lenient <- run_go_enrichment_workflow(con, "candidates.vcf", significance_threshold = 0.1)
+#' # Run only GO enrichment
+#' go_results <- run_ORA(con, "candidates.vcf", annotation_type = "GO")
 #' 
-#' # Use only specific ontologies and stricter threshold
-#' results_strict <- run_go_enrichment_workflow(con, "candidates.vcf", 
-#'                                             ontologies = c("BP", "MF"), 
-#'                                             significance_threshold = 0.01)
+#' # Run only KEGG enrichment
+#' kegg_results <- run_ORA(con, "candidates.vcf", annotation_type = "KEGG")
 #' 
-#' # Use only ORF-based annotations
-#' results_orf <- run_go_enrichment_workflow(con, "candidates.vcf", blast_param_id = 1)
+#' # Use custom significance threshold
+#' results_lenient <- run_ORA(con, "candidates.vcf", significance_threshold = 0.1)
 #' 
-#' print(results_lenient$summary)
-#' print(results_lenient$plots$BP_bubble)
+#' # Use only ORF-based annotations for both GO and KEGG
+#' results_orf <- run_ORA(con, "candidates.vcf", blast_param_id = 1)
+#' 
+#' print(results$summary)
+#' print(results$plots$GO_BP_bubble)
+#' print(results$plots$KEGG_pathway_bubble)
 #' }
 #'
 #' @export
-run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_id = NULL,
-                                      blast_param_id = NULL, ontologies = c("BP", "MF", "CC"), 
-                                      min_genes = 5, max_genes = 500, significance_threshold = 0.05,
-                                      method = "clusterprofiler", store_results = TRUE, create_plots = TRUE, verbose = TRUE) {
+run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
+                   blast_param_id = NULL, annotation_type = c("both", "GO", "KEGG"),
+                   ontologies = c("BP", "MF", "CC"), 
+                   min_genes = 5, max_genes = 500, significance_threshold = 0.05,
+                   method = "clusterprofiler", store_results = TRUE, create_plots = TRUE, verbose = TRUE) {
   
-  if (verbose) message("=== Starting GO Enrichment Workflow ===")
+  # Validate annotation_type parameter
+  annotation_type <- match.arg(annotation_type)
+  
+  if (verbose) message("=== Starting Over-Representation Analysis (ORA) ===")
+  if (verbose) message("Annotation types: ", annotation_type)
   
   # Report BLAST run configuration
   if (!is.null(blast_param_id)) {
@@ -100,45 +112,91 @@ run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_
   if (verbose) message("\n=== Step 1: Importing Candidate Loci ===")
   candidate_import <- import_candidate_loci(con, candidate_vcf_file, background_file_id, verbose = verbose)
   
-  # Step 2: Extract GO terms
-  if (verbose) message("\n=== Step 2: Extracting GO Terms ===")
-  go_data <- extract_go_terms_for_enrichment(con, candidate_import$file_id, background_file_id, 
-                                           blast_param_id = blast_param_id, verbose = verbose)
+  # Step 2: Extract annotation data and perform enrichment
+  if (verbose) message("\n=== Step 2: Extracting Annotation Data ===")
   
-  if (length(go_data$foreground$genes) == 0) {
-    warning("No GO terms found for candidate genes. Cannot perform enrichment analysis.")
-    return(list(
-      status = "failed",
-      message = "No GO terms found for candidate genes",
-      candidate_import = candidate_import
-    ))
-  }
-  
-  # Step 3: Perform enrichment analysis for each ontology
-  if (verbose) message("\n=== Step 3: Performing Enrichment Analysis ===")
   enrichment_results <- list()
   enrichment_ids <- list()
+  annotation_data <- list()
   
-  for (ontology in ontologies) {
-    if (verbose) message("  - Analyzing ", ontology, " ontology...")
+  # Determine which analyses to run
+  run_go <- annotation_type %in% c("GO", "both")
+  run_kegg <- annotation_type %in% c("KEGG", "both")
+  
+  if (run_go) {
+    if (verbose) message("  - Extracting GO terms...")
+    go_data <- extract_go_terms_for_enrichment(con, candidate_import$file_id, background_file_id, 
+                                             blast_param_id = blast_param_id, verbose = verbose)
+    annotation_data[["GO"]] <- go_data
     
-    results <- perform_go_enrichment(go_data, ontology, min_genes = min_genes, 
-                                   max_genes = max_genes, significance_threshold = significance_threshold,
-                                   method = method, verbose = verbose)
+    if (length(go_data$foreground$genes) == 0) {
+      warning("No GO terms found for candidate genes.")
+      enrichment_results[["GO"]] <- list()
+    } else {
+      # Perform GO enrichment for each ontology
+      if (verbose) message("\n=== Step 3a: Performing GO Enrichment Analysis ===")
+      go_results <- list()
+      go_ids <- list()
+      
+      for (ontology in ontologies) {
+        if (verbose) message("  - Analyzing ", ontology, " ontology...")
+        
+        results <- perform_go_enrichment(go_data, ontology, min_genes = min_genes, 
+                                       max_genes = max_genes, significance_threshold = significance_threshold,
+                                       method = method, verbose = verbose)
+        
+        go_results[[ontology]] <- results
+        
+        # Store results in database if requested
+        if (store_results && nrow(results) > 0) {
+          analysis_id <- store_ora_results(
+            con, candidate_import$file_id, background_file_id,
+            results, "GO", ontology, 
+            parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
+            method = method,
+            blast_param_id = blast_param_id,
+            verbose = verbose
+          )
+          go_ids[[ontology]] <- analysis_id
+        }
+      }
+      
+      enrichment_results[["GO"]] <- go_results
+      enrichment_ids[["GO"]] <- go_ids
+    }
+  }
+  
+  if (run_kegg) {
+    if (verbose) message("  - Extracting KEGG pathways...")
+    kegg_data <- extract_kegg_terms_for_enrichment(con, candidate_import$file_id, background_file_id, 
+                                                 blast_param_id = blast_param_id, verbose = verbose)
+    annotation_data[["KEGG"]] <- kegg_data
     
-    enrichment_results[[ontology]] <- results
-    
-    # Store results in database if requested
-    if (store_results && nrow(results) > 0) {
-      enrichment_id <- store_go_enrichment_results(
-        con, candidate_import$file_id, background_file_id,
-        results, ontology, 
-        parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
-        method = method,
-        blast_param_id = blast_param_id,
-        verbose = verbose
-      )
-      enrichment_ids[[ontology]] <- enrichment_id
+    if (length(kegg_data$foreground$genes) == 0) {
+      warning("No KEGG pathways found for candidate genes.")
+      enrichment_results[["KEGG"]] <- list()
+    } else {
+      # Perform KEGG enrichment
+      if (verbose) message("\n=== Step 3b: Performing KEGG Enrichment Analysis ===")
+      
+      kegg_results <- perform_kegg_enrichment(kegg_data, min_genes = min_genes, 
+                                            max_genes = max_genes, significance_threshold = significance_threshold,
+                                            method = method, verbose = verbose)
+      
+      enrichment_results[["KEGG"]] <- list(PATHWAY = kegg_results)
+      
+      # Store results in database if requested
+      if (store_results && nrow(kegg_results) > 0) {
+        analysis_id <- store_ora_results(
+          con, candidate_import$file_id, background_file_id,
+          kegg_results, "KEGG", "PATHWAY", 
+          parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
+          method = method,
+          blast_param_id = blast_param_id,
+          verbose = verbose
+        )
+        enrichment_ids[["KEGG"]] <- list(PATHWAY = analysis_id)
+      }
     }
   }
   
@@ -147,69 +205,131 @@ run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_
   if (create_plots) {
     if (verbose) message("\n=== Step 4: Creating Visualizations ===")
     
-    for (ontology in names(enrichment_results)) {
-      results <- enrichment_results[[ontology]]
+    # Create GO plots
+    if (run_go && "GO" %in% names(enrichment_results)) {
+      go_results <- enrichment_results[["GO"]]
       
-      if (nrow(results) > 0) {
-        if (verbose) message("  - Creating plots for ", ontology, " ontology...")
+      for (ontology in names(go_results)) {
+        results <- go_results[[ontology]]
         
-        # Bubble plot
-        plots[[paste0(ontology, "_bubble")]] <- create_go_bubble_plot(results)
-        
-        # Treemap (if treemapify is available)
-        if (requireNamespace("treemapify", quietly = TRUE)) {
-          plots[[paste0(ontology, "_treemap")]] <- create_go_treemap(results)
+        if (nrow(results) > 0) {
+          if (verbose) message("  - Creating plots for GO ", ontology, " ontology...")
+          
+          # Bubble plot
+          plots[[paste0("GO_", ontology, "_bubble")]] <- create_go_bubble_plot(results)
+          
+          # Treemap (if treemapify is available)
+          if (requireNamespace("treemapify", quietly = TRUE)) {
+            plots[[paste0("GO_", ontology, "_treemap")]] <- create_go_treemap(results)
+          }
+          
+          # Summary table
+          plots[[paste0("GO_", ontology, "_table")]] <- create_go_summary_table(results)
         }
+      }
+      
+      # Multi-ontology comparison plot if multiple ontologies tested
+      if (length(go_results) > 1) {
+        bp_res <- if ("BP" %in% names(go_results)) go_results[["BP"]] else NULL
+        mf_res <- if ("MF" %in% names(go_results)) go_results[["MF"]] else NULL
+        cc_res <- if ("CC" %in% names(go_results)) go_results[["CC"]] else NULL
         
-        # Summary table
-        plots[[paste0(ontology, "_table")]] <- create_go_summary_table(results)
+        plots[["GO_comparison"]] <- create_go_comparison_plot(bp_res, mf_res, cc_res)
       }
     }
     
-    # Multi-ontology comparison plot if multiple ontologies tested
-    if (length(enrichment_results) > 1) {
-      bp_res <- if ("BP" %in% names(enrichment_results)) enrichment_results[["BP"]] else NULL
-      mf_res <- if ("MF" %in% names(enrichment_results)) enrichment_results[["MF"]] else NULL
-      cc_res <- if ("CC" %in% names(enrichment_results)) enrichment_results[["CC"]] else NULL
+    # Create KEGG plots
+    if (run_kegg && "KEGG" %in% names(enrichment_results)) {
+      kegg_results <- enrichment_results[["KEGG"]][["PATHWAY"]]
       
-      plots[["comparison"]] <- create_go_comparison_plot(bp_res, mf_res, cc_res)
+      if (nrow(kegg_results) > 0) {
+        if (verbose) message("  - Creating plots for KEGG pathways...")
+        
+        # Bubble plot (adapt GO plot for KEGG)
+        plots[["KEGG_pathway_bubble"]] <- create_kegg_bubble_plot(kegg_results)
+        
+        # Summary table
+        plots[["KEGG_pathway_table"]] <- create_kegg_summary_table(kegg_results)
+      }
     }
   }
   
   # Step 5: Create summary
   if (verbose) message("\n=== Step 5: Creating Summary ===")
   
-  summary_stats <- data.frame(
-    Ontology = names(enrichment_results),
-    Terms_Tested = sapply(enrichment_results, nrow),
-    Significant_Terms = sapply(enrichment_results, function(x) sum(x$p_adjusted < significance_threshold, na.rm = TRUE)),
-    Highly_Significant = sapply(enrichment_results, function(x) sum(x$p_adjusted < (significance_threshold / 5), na.rm = TRUE)),
-    Top_Enrichment = sapply(enrichment_results, function(x) {
-      if (nrow(x) > 0) round(max(x$fold_enrichment, na.rm = TRUE), 2) else 0
-    }),
-    stringsAsFactors = FALSE
-  )
+  # Build summary statistics for all analyses
+  summary_stats_list <- list()
+  
+  if (run_go && "GO" %in% names(enrichment_results)) {
+    go_results <- enrichment_results[["GO"]]
+    for (ontology in names(go_results)) {
+      results <- go_results[[ontology]]
+      summary_stats_list[[paste0("GO_", ontology)]] <- data.frame(
+        Analysis_Type = "GO",
+        Term_Type = ontology,
+        Terms_Tested = nrow(results),
+        Significant_Terms = sum(results$p_adjusted < significance_threshold, na.rm = TRUE),
+        Highly_Significant = sum(results$p_adjusted < (significance_threshold / 5), na.rm = TRUE),
+        Top_Enrichment = if (nrow(results) > 0) round(max(results$fold_enrichment, na.rm = TRUE), 2) else 0,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  
+  if (run_kegg && "KEGG" %in% names(enrichment_results)) {
+    kegg_results <- enrichment_results[["KEGG"]][["PATHWAY"]]
+    summary_stats_list[["KEGG_PATHWAY"]] <- data.frame(
+      Analysis_Type = "KEGG",
+      Term_Type = "PATHWAY",
+      Terms_Tested = nrow(kegg_results),
+      Significant_Terms = sum(kegg_results$p_adjusted < significance_threshold, na.rm = TRUE),
+      Highly_Significant = sum(kegg_results$p_adjusted < (significance_threshold / 5), na.rm = TRUE),
+      Top_Enrichment = if (nrow(kegg_results) > 0) round(max(kegg_results$fold_enrichment, na.rm = TRUE), 2) else 0,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  summary_stats <- do.call(rbind, summary_stats_list)
+  
+  # Calculate gene counts from annotation data
+  total_foreground <- 0
+  total_background <- 0
+  
+  if ("GO" %in% names(annotation_data)) {
+    total_foreground <- max(total_foreground, length(annotation_data[["GO"]]$foreground$genes))
+    total_background <- max(total_background, length(annotation_data[["GO"]]$background$genes))
+  }
+  
+  if ("KEGG" %in% names(annotation_data)) {
+    total_foreground <- max(total_foreground, length(annotation_data[["KEGG"]]$foreground$genes))
+    total_background <- max(total_background, length(annotation_data[["KEGG"]]$background$genes))
+  }
   
   workflow_summary <- list(
     analysis_date = Sys.time(),
     candidate_file = candidate_vcf_file,
     candidate_file_id = candidate_import$file_id,
     background_file_id = background_file_id,
-    foreground_genes = length(go_data$foreground$genes),
-    background_genes = length(go_data$background$genes),
-    ontologies_tested = ontologies,
+    annotation_type = annotation_type,
+    foreground_genes = total_foreground,
+    background_genes = total_background,
     parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
     summary_stats = summary_stats,
     stored_analysis_ids = enrichment_ids
   )
   
   if (verbose) {
-    message("=== Workflow Complete ===")
-    message("Candidate genes with annotations: ", workflow_summary$foreground_genes)
-    message("Background genes with annotations: ", workflow_summary$background_genes)
-    message("Total significant terms: ", sum(summary_stats$Significant_Terms))
+    message("=== ORA Workflow Complete ===")
+    message("Annotation types analyzed: ", annotation_type)
+    if (total_foreground > 0) {
+      message("Candidate genes with annotations: ", total_foreground)
+      message("Background genes with annotations: ", total_background)
+    }
+    if (!is.null(summary_stats)) {
+      message("Total significant terms: ", sum(summary_stats$Significant_Terms, na.rm = TRUE))
+    }
     if (store_results) {
-      message("Results stored with IDs: ", paste(unlist(enrichment_ids), collapse = ", "))
+      message("Results stored with analysis IDs: ", paste(unlist(enrichment_ids), collapse = ", "))
     }
   }
   
@@ -217,10 +337,10 @@ run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_
     status = "success",
     summary = workflow_summary,
     candidate_import = candidate_import,
-    go_data = go_data,
+    annotation_data = annotation_data,
     enrichment_results = enrichment_results,
     plots = plots,
-    enrichment_ids = enrichment_ids
+    analysis_ids = enrichment_ids
   ))
 }
 

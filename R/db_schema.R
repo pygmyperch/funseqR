@@ -205,14 +205,15 @@ create_funseq_schema <- function(con, verbose = TRUE) {
     )
   ")
 
-  if (verbose) message("Creating go_enrichment_analyses table...")
+  if (verbose) message("Creating ora_analyses table...")
   DBI::dbExecute(con, "
-    CREATE TABLE go_enrichment_analyses (
-      enrichment_id INTEGER PRIMARY KEY,
+    CREATE TABLE ora_analyses (
+      analysis_id INTEGER PRIMARY KEY,
       foreground_file_id INTEGER NOT NULL,
       background_file_id INTEGER NOT NULL,
       blast_param_id INTEGER,
-      ontology TEXT NOT NULL,
+      annotation_type TEXT NOT NULL,
+      term_type TEXT NOT NULL,
       analysis_date TEXT NOT NULL,
       total_foreground_genes INTEGER,
       total_background_genes INTEGER,
@@ -224,14 +225,15 @@ create_funseq_schema <- function(con, verbose = TRUE) {
     )
   ")
 
-  if (verbose) message("Creating go_enrichment_results table...")
+  if (verbose) message("Creating ora_results table...")
   DBI::dbExecute(con, "
-    CREATE TABLE go_enrichment_results (
+    CREATE TABLE ora_results (
       result_id INTEGER PRIMARY KEY,
-      enrichment_id INTEGER NOT NULL,
-      go_id TEXT NOT NULL,
-      go_term TEXT NOT NULL,
-      go_category TEXT NOT NULL,
+      analysis_id INTEGER NOT NULL,
+      term_id TEXT NOT NULL,
+      term_name TEXT NOT NULL,
+      annotation_type TEXT NOT NULL,
+      term_type TEXT NOT NULL,
       foreground_count INTEGER NOT NULL,
       background_count INTEGER NOT NULL,
       total_foreground INTEGER NOT NULL,
@@ -245,7 +247,7 @@ create_funseq_schema <- function(con, verbose = TRUE) {
       bg_ratio TEXT,
       qvalue REAL,
       gene_ids TEXT,
-      FOREIGN KEY (enrichment_id) REFERENCES go_enrichment_analyses (enrichment_id)
+      FOREIGN KEY (analysis_id) REFERENCES ora_analyses (analysis_id)
     )
   ")
 
@@ -295,16 +297,18 @@ create_funseq_schema <- function(con, verbose = TRUE) {
   DBI::dbExecute(con, "CREATE INDEX idx_blast_db_meta_name ON blast_database_metadata (db_name)")
   DBI::dbExecute(con, "CREATE INDEX idx_blast_db_meta_date ON blast_database_metadata (extraction_date)")
 
-  # GO enrichment indexes
-  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_fg_file ON go_enrichment_analyses (foreground_file_id)")
-  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_bg_file ON go_enrichment_analyses (background_file_id)")
-  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_blast_param ON go_enrichment_analyses (blast_param_id)")
-  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_ontology ON go_enrichment_analyses (ontology)")
-  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_method ON go_enrichment_analyses (enrichment_method)")
-  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_analysis ON go_enrichment_results (enrichment_id)")
-  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_go ON go_enrichment_results (go_id)")
-  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_category ON go_enrichment_results (go_category)")
-  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_significance ON go_enrichment_results (significance_level)")
+  # ORA enrichment indexes
+  DBI::dbExecute(con, "CREATE INDEX idx_ora_fg_file ON ora_analyses (foreground_file_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_ora_bg_file ON ora_analyses (background_file_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_ora_blast_param ON ora_analyses (blast_param_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_ora_annotation_type ON ora_analyses (annotation_type)")
+  DBI::dbExecute(con, "CREATE INDEX idx_ora_term_type ON ora_analyses (term_type)")
+  DBI::dbExecute(con, "CREATE INDEX idx_ora_method ON ora_analyses (enrichment_method)")
+  DBI::dbExecute(con, "CREATE INDEX idx_ora_results_analysis ON ora_results (analysis_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_ora_results_term ON ora_results (term_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_ora_results_annotation_type ON ora_results (annotation_type)")
+  DBI::dbExecute(con, "CREATE INDEX idx_ora_results_term_type ON ora_results (term_type)")
+  DBI::dbExecute(con, "CREATE INDEX idx_ora_results_significance ON ora_results (significance_level)")
 
   # UniProt cache indexes
   DBI::dbExecute(con, "CREATE INDEX idx_uniprot_cache_accession ON uniprot_cache (accession)")

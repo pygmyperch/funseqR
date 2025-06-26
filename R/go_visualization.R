@@ -413,3 +413,139 @@ create_interactive_go_plot <- function(enrichment_results, max_terms = 25, min_f
   
   return(interactive_plot)
 }
+
+#' Create KEGG pathway enrichment bubble plot
+#'
+#' @param enrichment_results Data frame. Output from perform_kegg_enrichment()
+#' @param max_terms Integer. Maximum number of terms to show. Default is 20
+#' @param min_fold_enrichment Numeric. Minimum fold enrichment to display. Default is 1.5
+#' @param title Character. Plot title. Default is auto-generated
+#' @param color_palette Character. Color palette for significance. Default is "plasma"
+#' @param significance_threshold Numeric. FDR threshold used for significance. Default is 0.05
+#'
+#' @return ggplot object
+#'
+#' @export
+create_kegg_bubble_plot <- function(enrichment_results, max_terms = 20, min_fold_enrichment = 1.5, 
+                                   title = NULL, color_palette = "plasma", significance_threshold = 0.05) {
+  
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("ggplot2 package is required for this function")
+  }
+  
+  if (!requireNamespace("dplyr", quietly = TRUE)) {
+    stop("dplyr package is required for this function")
+  }
+  
+  if (!requireNamespace("stringr", quietly = TRUE)) {
+    stop("stringr package is required for this function")
+  }
+  
+  if (nrow(enrichment_results) == 0) {
+    return(ggplot2::ggplot() + 
+           ggplot2::annotate("text", x = 0.5, y = 0.5, label = "No enriched pathways to display", size = 5) +
+           ggplot2::theme_void())
+  }
+  
+  # Prepare data for plotting
+  sig_results <- enrichment_results[enrichment_results$significance_level %in% c("significant", "highly_significant"), ]
+  sig_results <- sig_results[sig_results$fold_enrichment >= min_fold_enrichment, ]
+  sig_results <- sig_results[order(sig_results$p_adjusted), ]
+  
+  if (nrow(sig_results) > max_terms) {
+    sig_results <- sig_results[1:max_terms, ]
+  }
+  
+  plot_data <- sig_results
+  plot_data$pathway_name_short <- stringr::str_trunc(plot_data$pathway_name, 50)
+  plot_data$neg_log10_padj <- -log10(plot_data$p_adjusted)
+  # Ensure minimum size for very small p-values
+  plot_data$neg_log10_padj <- pmax(plot_data$neg_log10_padj, 1.3)  # -log10(0.05) = 1.3
+  
+  if (nrow(plot_data) == 0) {
+    return(ggplot2::ggplot() + 
+           ggplot2::annotate("text", x = 0.5, y = 0.5, 
+                           label = paste0("No pathways with fold enrichment >= ", min_fold_enrichment, " and FDR < 0.05"), 
+                           size = 4) +
+           ggplot2::theme_void())
+  }
+  
+  # Auto-generate title if not provided
+  if (is.null(title)) {
+    title <- "KEGG Pathway Enrichment"
+  }
+  
+  # Create the plot
+  p <- ggplot2::ggplot(plot_data, ggplot2::aes(x = fold_enrichment, y = reorder(pathway_name_short, fold_enrichment))) +
+    ggplot2::geom_point(ggplot2::aes(size = foreground_count, color = neg_log10_padj), alpha = 0.7) +
+    ggplot2::scale_color_viridis_c(name = "-log10(FDR)", option = color_palette, direction = 1) +
+    ggplot2::scale_size_continuous(name = "Gene Count", range = c(3, 15)) +
+    ggplot2::scale_x_log10(breaks = c(1, 2, 5, 10, 20, 50), 
+                          labels = c("1", "2", "5", "10", "20", "50")) +
+    ggplot2::labs(
+      title = title,
+      subtitle = paste0("Top ", nrow(plot_data), " significantly enriched pathways (FDR < ", significance_threshold, ")"),
+      x = "Fold Enrichment (log scale)",
+      y = "KEGG Pathway",
+      caption = paste0("Bubble size = gene count; Color = significance\n",
+                      "Total pathways tested: ", nrow(enrichment_results), 
+                      "; Significant: ", sum(enrichment_results$p_adjusted < significance_threshold))
+    ) +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      axis.text.y = ggplot2::element_text(size = 9),
+      axis.text.x = ggplot2::element_text(size = 10),
+      plot.title = ggplot2::element_text(size = 14, face = "bold"),
+      plot.subtitle = ggplot2::element_text(size = 11),
+      plot.caption = ggplot2::element_text(size = 9, color = "gray50"),
+      legend.position = "right",
+      panel.grid.minor = ggplot2::element_blank()
+    )
+  
+  return(p)
+}
+
+#' Create KEGG pathway enrichment summary table
+#'
+#' @param enrichment_results Data frame. Output from perform_kegg_enrichment()
+#' @param max_terms Integer. Maximum number of terms to include. Default is 15
+#' @param significance_filter Character vector. Significance levels to include. Default is c("significant", "highly_significant")
+#'
+#' @return Data frame formatted for display
+#'
+#' @export
+create_kegg_summary_table <- function(enrichment_results, max_terms = 15, 
+                                     significance_filter = c("significant", "highly_significant")) {
+  
+  if (nrow(enrichment_results) == 0) {
+    return(data.frame(Message = "No KEGG enrichment results to display"))
+  }
+  
+  # Filter by significance
+  filtered_results <- enrichment_results[enrichment_results$significance_level %in% significance_filter, ]
+  
+  # Arrange by p_adjusted
+  filtered_results <- filtered_results[order(filtered_results$p_adjusted), ]
+  
+  # Take top max_terms
+  if (nrow(filtered_results) > max_terms) {
+    filtered_results <- filtered_results[1:max_terms, ]
+  }
+  
+  # Create summary table
+  summary_table <- data.frame(
+    Pathway_ID = filtered_results$pathway_id,
+    Pathway_Name = stringr::str_trunc(filtered_results$pathway_name, 60),
+    Genes = filtered_results$foreground_count,
+    Background = filtered_results$background_count,
+    Fold_Enrichment = round(filtered_results$fold_enrichment, 2),
+    P_Value = format(filtered_results$p_value, scientific = TRUE, digits = 2),
+    FDR = format(filtered_results$p_adjusted, scientific = TRUE, digits = 2),
+    Significance = ifelse(filtered_results$significance_level == "highly_significant", "***",
+                          ifelse(filtered_results$significance_level == "significant", "**",
+                                 ifelse(filtered_results$significance_level == "trending", "*", ""))),
+    stringsAsFactors = FALSE
+  )
+  
+  return(summary_table)
+}

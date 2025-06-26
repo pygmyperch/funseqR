@@ -611,33 +611,369 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
   return(funseqr_results)
 }
 
-#' Retrieve stored GO enrichment results
+#' Extract KEGG pathways for foreground and background gene sets
 #'
 #' @param con Database connection object
-#' @param enrichment_id Integer. Analysis ID to retrieve
+#' @param foreground_file_id Integer. File ID of candidate/foreground dataset
+#' @param background_file_id Integer. File ID of background dataset
+#' @param blast_param_id Integer. Optional. Specific BLAST run ID to use for both datasets.
+#'   If NULL, uses all available annotations. Default is NULL.
+#' @param verbose Logical. Print progress information. Default is TRUE
+#'
+#' @return List containing foreground and background KEGG pathway data
+#'
+#' @export
+extract_kegg_terms_for_enrichment <- function(con, foreground_file_id, background_file_id, 
+                                            blast_param_id = NULL, verbose = TRUE) {
+
+  if (verbose) message("Extracting KEGG pathways for enrichment analysis...")
+
+  # First check if foreground file has direct annotations
+  if (is.null(blast_param_id)) {
+    foreground_direct_count <- DBI::dbGetQuery(con, "
+      SELECT COUNT(*) as count FROM vcf_data v
+      JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      WHERE v.file_id = ?
+    ", list(foreground_file_id))$count
+  } else {
+    foreground_direct_count <- DBI::dbGetQuery(con, "
+      SELECT COUNT(*) as count FROM vcf_data v
+      JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      WHERE v.file_id = ? AND br.blast_param_id = ?
+    ", list(foreground_file_id, blast_param_id))$count
+  }
+
+  if (foreground_direct_count > 0) {
+    # Standard query for datasets with their own annotations
+    if (is.null(blast_param_id)) {
+      kegg_query <- "
+        SELECT DISTINCT
+          a.uniprot_accession,
+          kr.kegg_id,
+          kr.pathway_name
+        FROM vcf_data v
+        JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
+        WHERE v.file_id = ?
+      "
+      if (verbose) message("  - Extracting foreground KEGG pathways (all BLAST runs)...")
+      foreground_kegg <- DBI::dbGetQuery(con, kegg_query, list(foreground_file_id))
+    } else {
+      kegg_query <- "
+        SELECT DISTINCT
+          a.uniprot_accession,
+          kr.kegg_id,
+          kr.pathway_name
+        FROM vcf_data v
+        JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
+        WHERE v.file_id = ? AND br.blast_param_id = ?
+      "
+      if (verbose) message("  - Extracting foreground KEGG pathways (BLAST run ID: ", blast_param_id, ")...")
+      foreground_kegg <- DBI::dbGetQuery(con, kegg_query, list(foreground_file_id, blast_param_id))
+    }
+  } else {
+    # For candidate files, use the linked annotations
+    if (is.null(blast_param_id)) {
+      if (verbose) message("  - Extracting foreground KEGG pathways via linkage (all BLAST runs)...")
+      foreground_kegg_query <- "
+        SELECT DISTINCT
+          a.uniprot_accession,
+          kr.kegg_id,
+          kr.pathway_name
+        FROM vcf_data c
+        JOIN vcf_data r ON (c.chromosome = r.chromosome
+                           AND c.position = r.position)
+        JOIN flanking_sequences fs ON r.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
+        WHERE c.file_id = ? AND r.file_id = ?
+      "
+      foreground_kegg <- DBI::dbGetQuery(con, foreground_kegg_query,
+                                       list(foreground_file_id, background_file_id))
+    } else {
+      if (verbose) message("  - Extracting foreground KEGG pathways via linkage (BLAST run ID: ", blast_param_id, ")...")
+      foreground_kegg_query <- "
+        SELECT DISTINCT
+          a.uniprot_accession,
+          kr.kegg_id,
+          kr.pathway_name
+        FROM vcf_data c
+        JOIN vcf_data r ON (c.chromosome = r.chromosome
+                           AND c.position = r.position)
+        JOIN flanking_sequences fs ON r.vcf_id = fs.vcf_id
+        JOIN blast_results br ON fs.flanking_id = br.flanking_id
+        JOIN annotations a ON br.blast_result_id = a.blast_result_id
+        JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
+        WHERE c.file_id = ? AND r.file_id = ? AND br.blast_param_id = ?
+      "
+      foreground_kegg <- DBI::dbGetQuery(con, foreground_kegg_query,
+                                       list(foreground_file_id, background_file_id, blast_param_id))
+    }
+  }
+
+  # Background query with optional blast_param_id filtering
+  if (is.null(blast_param_id)) {
+    background_kegg_query <- "
+      SELECT DISTINCT
+        a.uniprot_accession,
+        kr.kegg_id,
+        kr.pathway_name
+      FROM vcf_data v
+      JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
+      WHERE v.file_id = ?
+    "
+    if (verbose) message("  - Extracting background KEGG pathways (all BLAST runs)...")
+    background_kegg <- DBI::dbGetQuery(con, background_kegg_query, list(background_file_id))
+  } else {
+    background_kegg_query <- "
+      SELECT DISTINCT
+        a.uniprot_accession,
+        kr.kegg_id,
+        kr.pathway_name
+      FROM vcf_data v
+      JOIN flanking_sequences fs ON v.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
+      WHERE v.file_id = ? AND br.blast_param_id = ?
+    "
+    if (verbose) message("  - Extracting background KEGG pathways (BLAST run ID: ", blast_param_id, ")...")
+    background_kegg <- DBI::dbGetQuery(con, background_kegg_query, list(background_file_id, blast_param_id))
+  }
+
+  # Create gene-to-pathway mapping lists
+  foreground_gene2pathway <- split(foreground_kegg$kegg_id, foreground_kegg$uniprot_accession)
+  background_gene2pathway <- split(background_kegg$kegg_id, background_kegg$uniprot_accession)
+
+  # Get unique pathways and their details
+  all_pathways <- rbind(
+    foreground_kegg[, c("kegg_id", "pathway_name")],
+    background_kegg[, c("kegg_id", "pathway_name")]
+  )
+  all_pathways <- all_pathways[!duplicated(all_pathways), ]
+
+  if (verbose) {
+    message("KEGG pathway extraction complete:")
+    message("  - Foreground genes: ", length(unique(foreground_kegg$uniprot_accession)))
+    message("  - Background genes: ", length(unique(background_kegg$uniprot_accession)))
+    message("  - Total unique pathways: ", nrow(all_pathways))
+  }
+
+  return(list(
+    foreground = list(
+      genes = unique(foreground_kegg$uniprot_accession),
+      gene2pathway = foreground_gene2pathway,
+      pathways = foreground_kegg
+    ),
+    background = list(
+      genes = unique(background_kegg$uniprot_accession),
+      gene2pathway = background_gene2pathway,
+      pathways = background_kegg
+    ),
+    all_pathways = all_pathways
+  ))
+}
+
+#' Perform KEGG pathway enrichment analysis
+#'
+#' @param kegg_data List. Output from extract_kegg_terms_for_enrichment()
+#' @param min_genes Integer. Minimum genes required for a pathway to be tested. Default is 5
+#' @param max_genes Integer. Maximum genes for a pathway (to exclude very broad pathways). Default is 500
+#' @param significance_threshold Numeric. FDR threshold for significance classification. Default is 0.05
+#' @param method Character. Enrichment method: "clusterprofiler" or "legacy". Default is "clusterprofiler"
+#' @param verbose Logical. Print progress information. Default is TRUE
+#'
+#' @return Data frame with enrichment results, sorted by adjusted p-value
+#'
+#' @export
+perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, significance_threshold = 0.05, method = "clusterprofiler", verbose = TRUE) {
+
+  if (verbose) message("Performing KEGG pathway enrichment analysis using ", method, " method")
+
+  # Route to appropriate enrichment method
+  if (method == "clusterprofiler") {
+    return(.perform_clusterprofiler_kegg_enrichment(kegg_data, min_genes, max_genes, significance_threshold, verbose))
+  } else if (method == "legacy") {
+    return(.perform_legacy_kegg_enrichment(kegg_data, min_genes, max_genes, significance_threshold, verbose))
+  } else {
+    stop("Invalid method. Must be 'clusterprofiler' or 'legacy'")
+  }
+}
+
+#' Perform KEGG enrichment using clusterProfiler
+#' @keywords internal
+.perform_clusterprofiler_kegg_enrichment <- function(kegg_data, min_genes, max_genes, significance_threshold, verbose) {
+  
+  # Check if clusterProfiler is available
+  if (!requireNamespace("clusterProfiler", quietly = TRUE)) {
+    stop("clusterProfiler package is required. Install with: BiocManager::install('clusterProfiler')")
+  }
+  
+  # Convert kegg_data to clusterProfiler format
+  clusterprofiler_data <- .convert_kegg_data_to_clusterprofiler(kegg_data, verbose)
+  
+  if (nrow(clusterprofiler_data$term2gene) == 0) {
+    if (verbose) message("  - No KEGG pathways found for clusterProfiler analysis")
+    return(data.frame())
+  }
+  
+  # Run clusterProfiler enrichment
+  tryCatch({
+    enrichment_result <- clusterProfiler::enricher(
+      gene = kegg_data$foreground$genes,
+      universe = kegg_data$background$genes,
+      TERM2GENE = clusterprofiler_data$term2gene,
+      TERM2NAME = clusterprofiler_data$term2name,
+      pvalueCutoff = 1.0,  # Get all results, filter later
+      pAdjustMethod = "BH",
+      minGSSize = min_genes,
+      maxGSSize = max_genes
+    )
+    
+    # Convert back to funseqR format
+    return(.convert_clusterprofiler_kegg_to_funseqr(enrichment_result, significance_threshold, verbose))
+    
+  }, error = function(e) {
+    warning("clusterProfiler KEGG enrichment failed: ", e$message)
+    if (verbose) message("  - Falling back to legacy method")
+    return(.perform_legacy_kegg_enrichment(kegg_data, min_genes, max_genes, significance_threshold, verbose))
+  })
+}
+
+#' Convert kegg_data to clusterProfiler format
+#' @keywords internal
+.convert_kegg_data_to_clusterprofiler <- function(kegg_data, verbose) {
+  
+  # Filter pathways
+  pathways <- kegg_data$all_pathways
+  
+  if (nrow(pathways) == 0) {
+    return(list(term2gene = data.frame(term = character(0), gene = character(0)),
+                term2name = data.frame(term = character(0), name = character(0))))
+  }
+  
+  # Create TERM2GENE mapping (pathway -> gene)
+  term2gene_list <- list()
+  
+  for (gene in kegg_data$background$genes) {
+    if (gene %in% names(kegg_data$background$gene2pathway)) {
+      gene_pathways <- kegg_data$background$gene2pathway[[gene]]
+      pathway_gene_pathways <- intersect(gene_pathways, pathways$kegg_id)
+      
+      if (length(pathway_gene_pathways) > 0) {
+        for (pathway in pathway_gene_pathways) {
+          term2gene_list[[length(term2gene_list) + 1]] <- data.frame(
+            term = pathway,
+            gene = gene,
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+    }
+  }
+  
+  if (length(term2gene_list) > 0) {
+    term2gene <- do.call(rbind, term2gene_list)
+  } else {
+    term2gene <- data.frame(term = character(0), gene = character(0), stringsAsFactors = FALSE)
+  }
+  
+  # Create TERM2NAME mapping (pathway -> pathway name)
+  term2name <- unique(pathways[, c("kegg_id", "pathway_name")])
+  colnames(term2name) <- c("term", "name")
+  
+  if (verbose) {
+    message("  - Converted ", nrow(term2name), " KEGG pathways for clusterProfiler")
+    message("  - Total gene-pathway associations: ", nrow(term2gene))
+  }
+  
+  return(list(
+    term2gene = term2gene,
+    term2name = term2name
+  ))
+}
+
+#' Convert clusterProfiler KEGG results to funseqR format
+#' @keywords internal
+.convert_clusterprofiler_kegg_to_funseqr <- function(clusterprofiler_result, significance_threshold, verbose) {
+  
+  if (is.null(clusterprofiler_result) || nrow(clusterprofiler_result@result) == 0) {
+    if (verbose) message("  - No pathways found by clusterProfiler")
+    return(data.frame())
+  }
+  
+  cp_df <- clusterprofiler_result@result
+  
+  # Convert to funseqR format with additional clusterProfiler fields
+  funseqr_results <- data.frame(
+    pathway_id = cp_df$ID,
+    pathway_name = cp_df$Description,
+    foreground_count = cp_df$Count,
+    background_count = as.numeric(sub("/.*", "", cp_df$BgRatio)),
+    total_foreground = as.numeric(sub(".*/", "", cp_df$GeneRatio)),
+    total_background = as.numeric(sub(".*/", "", cp_df$BgRatio)),
+    expected_count = cp_df$Count / cp_df$pvalue,  # Approximate
+    fold_enrichment = cp_df$Count / (as.numeric(sub("/.*", "", cp_df$BgRatio)) / as.numeric(sub(".*/", "", cp_df$BgRatio)) * as.numeric(sub(".*/", "", cp_df$GeneRatio))),
+    p_value = cp_df$pvalue,
+    p_adjusted = cp_df$p.adjust,
+    significance_level = ifelse(cp_df$p.adjust < (significance_threshold / 5), "highly_significant",
+                               ifelse(cp_df$p.adjust < significance_threshold, "significant",
+                                     ifelse(cp_df$p.adjust < (significance_threshold * 2), "trending", "not_significant"))),
+    gene_ratio = cp_df$GeneRatio,
+    bg_ratio = cp_df$BgRatio,
+    qvalue = cp_df$qvalue,
+    gene_ids = cp_df$geneID,
+    stringsAsFactors = FALSE
+  )
+  
+  if (verbose) {
+    sig_count <- sum(funseqr_results$p_adjusted < significance_threshold, na.rm = TRUE)
+    message("  - clusterProfiler KEGG analysis complete: ", nrow(funseqr_results), " pathways tested, ", sig_count, " significantly enriched (FDR < ", significance_threshold, ")")
+  }
+  
+  return(funseqr_results)
+}
+
+#' Retrieve stored ORA results
+#'
+#' @param con Database connection object
+#' @param analysis_id Integer. Analysis ID to retrieve
 #' @param significance_filter Character. Filter by significance level. Default is NULL (no filter)
 #'
 #' @return List containing analysis metadata and results
 #'
 #' @export
-get_go_enrichment_results <- function(con, enrichment_id, significance_filter = NULL) {
+get_ora_results <- function(con, analysis_id, significance_filter = NULL) {
 
   # Get analysis metadata
-  analysis_query <- "SELECT * FROM go_enrichment_analyses WHERE enrichment_id = ?"
-  analysis_info <- DBI::dbGetQuery(con, analysis_query, list(enrichment_id))
+  analysis_query <- "SELECT * FROM ora_analyses WHERE analysis_id = ?"
+  analysis_info <- DBI::dbGetQuery(con, analysis_query, list(analysis_id))
 
   if (nrow(analysis_info) == 0) {
-    stop("No enrichment analysis found with ID: ", enrichment_id)
+    stop("No ORA analysis found with ID: ", analysis_id)
   }
 
   # Get results
   results_query <- "
-    SELECT * FROM go_enrichment_results
-    WHERE enrichment_id = ?
+    SELECT * FROM ora_results
+    WHERE analysis_id = ?
     ORDER BY p_adjusted, fold_enrichment DESC
   "
 
-  results <- DBI::dbGetQuery(con, results_query, list(enrichment_id))
+  results <- DBI::dbGetQuery(con, results_query, list(analysis_id))
 
   # Apply significance filter if requested
   if (!is.null(significance_filter)) {
@@ -654,28 +990,31 @@ get_go_enrichment_results <- function(con, enrichment_id, significance_filter = 
 
 # INTERNAL
 
-#' Store GO enrichment analysis results in the database
+#' Store ORA analysis results in the database
 #'
 #' @param con Database connection object
 #' @param foreground_file_id Integer. File ID of foreground dataset
 #' @param background_file_id Integer. File ID of background dataset
-#' @param enrichment_results Data frame. Results from perform_go_enrichment()
-#' @param ontology Character. GO ontology tested
+#' @param enrichment_results Data frame. Results from perform_go_enrichment() or perform_kegg_enrichment()
+#' @param annotation_type Character. Type of annotation: "GO" or "KEGG"
+#' @param term_type Character. Term type: "BP", "MF", "CC" for GO or "PATHWAY" for KEGG
 #' @param parameters List. Analysis parameters for reproducibility
+#' @param method Character. Enrichment method used. Default is "clusterprofiler"
+#' @param blast_param_id Integer. Optional BLAST run ID used. Default is NULL
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
-#' @return Integer. The enrichment_id of the stored analysis
+#' @return Integer. The analysis_id of the stored analysis
 #'
-store_go_enrichment_results <- function(con, foreground_file_id, background_file_id,
-                                        enrichment_results, ontology, parameters = NULL, method = "clusterprofiler", 
-                                        blast_param_id = NULL, verbose = TRUE) {
+store_ora_results <- function(con, foreground_file_id, background_file_id,
+                             enrichment_results, annotation_type, term_type, parameters = NULL, method = "clusterprofiler", 
+                             blast_param_id = NULL, verbose = TRUE) {
 
-  if (verbose) message("Storing GO enrichment results in database...")
+  if (verbose) message("Storing ", annotation_type, " ", term_type, " enrichment results in database...")
 
   # Ensure tables exist
   tables <- DBI::dbListTables(con)
-  if (!all(c("go_enrichment_analyses", "go_enrichment_results") %in% tables)) {
-    stop("GO enrichment tables not found in database. Please upgrade schema.")
+  if (!all(c("ora_analyses", "ora_results") %in% tables)) {
+    stop("ORA tables not found in database. Please upgrade schema.")
   }
 
   # Prepare analysis parameters
@@ -686,17 +1025,18 @@ store_go_enrichment_results <- function(con, foreground_file_id, background_file
 
   # Insert analysis record
   analysis_query <- "
-    INSERT INTO go_enrichment_analyses
-    (foreground_file_id, background_file_id, blast_param_id, ontology, analysis_date,
+    INSERT INTO ora_analyses
+    (foreground_file_id, background_file_id, blast_param_id, annotation_type, term_type, analysis_date,
      total_foreground_genes, total_background_genes, analysis_parameters, enrichment_method)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   "
 
   DBI::dbExecute(con, analysis_query, list(
     foreground_file_id,
     background_file_id,
     blast_param_id,
-    ontology,
+    annotation_type,
+    term_type,
     format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
     if(nrow(enrichment_results) > 0) enrichment_results$total_foreground[1] else 0,
     if(nrow(enrichment_results) > 0) enrichment_results$total_background[1] else 0,
@@ -705,43 +1045,62 @@ store_go_enrichment_results <- function(con, foreground_file_id, background_file
   ))
 
   # Get the analysis ID
-  enrichment_id <- DBI::dbGetQuery(con, "SELECT last_insert_rowid() as id")$id
+  analysis_id <- DBI::dbGetQuery(con, "SELECT last_insert_rowid() as id")$id
 
   # Insert results if any
   if (nrow(enrichment_results) > 0) {
 
     # Prepare results for insertion
     results_to_insert <- enrichment_results
-    results_to_insert$enrichment_id <- enrichment_id
+    results_to_insert$analysis_id <- analysis_id
 
     # Determine if this is clusterProfiler results (has additional columns)
     has_clusterprofiler_cols <- all(c("gene_ratio", "bg_ratio", "qvalue", "gene_ids") %in% colnames(results_to_insert))
     
+    # Map column names based on annotation type
+    if (annotation_type == "GO") {
+      term_id_col <- "go_id"
+      term_name_col <- "go_term"
+    } else {
+      term_id_col <- "pathway_id" 
+      term_name_col <- "pathway_name"
+    }
+    
     if (has_clusterprofiler_cols) {
       # clusterProfiler results with additional fields
-      results_to_insert <- results_to_insert[, c("enrichment_id", "go_id", "go_term", "go_category",
+      results_to_insert <- results_to_insert[, c("analysis_id", term_id_col, term_name_col,
                                                  "foreground_count", "background_count", "total_foreground",
                                                  "total_background", "expected_count", "fold_enrichment",
                                                  "p_value", "p_adjusted", "significance_level",
                                                  "gene_ratio", "bg_ratio", "qvalue", "gene_ids")]
       
+      # Standardize column names for database
+      colnames(results_to_insert)[2:3] <- c("term_id", "term_name")
+      results_to_insert$annotation_type <- annotation_type
+      results_to_insert$term_type <- term_type
+      
       result_query <- "
-        INSERT INTO go_enrichment_results
-        (enrichment_id, go_id, go_term, go_category, foreground_count, background_count,
+        INSERT INTO ora_results
+        (analysis_id, term_id, term_name, annotation_type, term_type, foreground_count, background_count,
          total_foreground, total_background, expected_count, fold_enrichment,
          p_value, p_adjusted, significance_level, gene_ratio, bg_ratio, qvalue, gene_ids)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       "
     } else {
       # Legacy results
-      results_to_insert <- results_to_insert[, c("enrichment_id", "go_id", "go_term", "go_category",
+      results_to_insert <- results_to_insert[, c("analysis_id", term_id_col, term_name_col,
                                                  "foreground_count", "background_count", "total_foreground",
                                                  "total_background", "expected_count", "fold_enrichment",
                                                  "p_value", "p_adjusted", "significance_level")]
       
+      # Standardize column names for database
+      colnames(results_to_insert)[2:3] <- c("term_id", "term_name")
+      results_to_insert$annotation_type <- annotation_type
+      results_to_insert$term_type <- term_type
+      
       result_query <- "
-        INSERT INTO go_enrichment_results
-        (enrichment_id, go_id, go_term, go_category, foreground_count, background_count,
+        INSERT INTO ora_results
+        (analysis_id, term_id, term_name, annotation_type, term_type, foreground_count, background_count,
          total_foreground, total_background, expected_count, fold_enrichment,
          p_value, p_adjusted, significance_level)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -757,10 +1116,10 @@ store_go_enrichment_results <- function(con, foreground_file_id, background_file
 
   if (verbose) {
     message("Storage complete:")
-    message("  - Analysis ID: ", enrichment_id)
+    message("  - Analysis ID: ", analysis_id)
     message("  - Results stored: ", nrow(enrichment_results))
   }
 
-  return(enrichment_id)
+  return(analysis_id)
 }
 
