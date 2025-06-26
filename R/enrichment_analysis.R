@@ -507,15 +507,20 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
     go_id <- size_filtered$go_id[i]
     term_loci <- go_data$term_mappings[[go_id]]$loci
     
-    # Fisher's exact test
+    # Fisher's exact test - correct contingency table setup
     candidate_with_term <- length(intersect(go_data$foreground$loci, term_loci))
     candidate_without_term <- length(go_data$foreground$loci) - candidate_with_term
-    background_with_term <- length(intersect(go_data$background$loci, term_loci)) - candidate_with_term
-    background_without_term <- length(go_data$background$loci) - length(intersect(go_data$background$loci, term_loci)) - candidate_without_term
+    
+    # Total background loci with this term (including candidates)
+    total_background_with_term <- length(intersect(go_data$background$loci, term_loci))
+    # Background-only loci with this term (excluding candidates already counted)
+    background_only_with_term <- total_background_with_term - candidate_with_term
+    # Background-only loci without this term
+    background_only_without_term <- length(go_data$background$loci) - total_background_with_term - candidate_without_term
     
     # Create contingency table
     cont_table <- matrix(c(candidate_with_term, candidate_without_term,
-                          background_with_term, background_without_term), 
+                          background_only_with_term, background_only_without_term), 
                         nrow = 2, byrow = TRUE)
     
     # Track terms with/without candidates
@@ -528,11 +533,11 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
         go_name = size_filtered$go_name[i],
         go_category = ontology,
         candidate_count = candidate_with_term,
-        background_count = length(intersect(go_data$background$loci, term_loci)),
+        background_count = total_background_with_term,
         total_candidates = length(go_data$foreground$loci),
         total_background = length(go_data$background$loci),
         fold_enrichment = (candidate_with_term / length(go_data$foreground$loci)) / 
-                         (length(intersect(go_data$background$loci, term_loci)) / length(go_data$background$loci)),
+                         (total_background_with_term / length(go_data$background$loci)),
         p_value = test_result$p.value,
         stringsAsFactors = FALSE
       ))
@@ -596,15 +601,20 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
     pathway_id <- size_filtered$pathway_id[i]
     pathway_loci <- kegg_data$pathway_mappings[[pathway_id]]$loci
     
-    # Fisher's exact test
+    # Fisher's exact test - correct contingency table setup
     candidate_with_pathway <- length(intersect(kegg_data$foreground$loci, pathway_loci))
     candidate_without_pathway <- length(kegg_data$foreground$loci) - candidate_with_pathway
-    background_with_pathway <- length(intersect(kegg_data$background$loci, pathway_loci)) - candidate_with_pathway
-    background_without_pathway <- length(kegg_data$background$loci) - length(intersect(kegg_data$background$loci, pathway_loci)) - candidate_without_pathway
+    
+    # Total background loci with this pathway (including candidates)
+    total_background_with_pathway <- length(intersect(kegg_data$background$loci, pathway_loci))
+    # Background-only loci with this pathway (excluding candidates already counted)
+    background_only_with_pathway <- total_background_with_pathway - candidate_with_pathway
+    # Background-only loci without this pathway
+    background_only_without_pathway <- length(kegg_data$background$loci) - total_background_with_pathway - candidate_without_pathway
     
     # Create contingency table
     cont_table <- matrix(c(candidate_with_pathway, candidate_without_pathway,
-                          background_with_pathway, background_without_pathway), 
+                          background_only_with_pathway, background_only_without_pathway), 
                         nrow = 2, byrow = TRUE)
     
     # Track pathways with/without candidates
@@ -616,11 +626,11 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
         pathway_id = pathway_id,
         pathway_name = size_filtered$pathway_name[i],
         candidate_count = candidate_with_pathway,
-        background_count = length(intersect(kegg_data$background$loci, pathway_loci)),
+        background_count = total_background_with_pathway,
         total_candidates = length(kegg_data$foreground$loci),
         total_background = length(kegg_data$background$loci),
         fold_enrichment = (candidate_with_pathway / length(kegg_data$foreground$loci)) / 
-                         (length(intersect(kegg_data$background$loci, pathway_loci)) / length(kegg_data$background$loci)),
+                         (total_background_with_pathway / length(kegg_data$background$loci)),
         p_value = test_result$p.value,
         stringsAsFactors = FALSE
       ))
