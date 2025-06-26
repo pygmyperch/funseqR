@@ -12,6 +12,8 @@
 #'   (inclusive approach - researchers can evaluate biological relevance of smaller terms)
 #' @param max_genes Integer. Maximum genes for GO term testing. Default is 500 
 #'   (excludes overly broad terms like 'biological process')
+#' @param max_terms_tested Integer. Maximum number of terms to test per ontology. 
+#'   Default is NULL (test all terms). Set to 20 to match legacy behavior with less stringent FDR correction.
 #' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
@@ -37,6 +39,9 @@
 #' # Using locus IDs directly
 #' go_results <- run_go_enrichment_analysis(annotations, c("1_LG1_12345", "1_LG2_67890"))
 #' 
+#' # For legacy compatibility (test only first 20 terms per ontology)
+#' go_results_legacy <- run_go_enrichment_analysis(annotations, candidates$bed_file, max_terms_tested = 20)
+#' 
 #' print(go_results$BP)
 #' }
 #'
@@ -44,6 +49,7 @@
 run_go_enrichment_analysis <- function(annotations, candidate_loci, 
                                      ontologies = c("BP", "MF", "CC"),
                                      min_genes = 3, max_genes = 500,
+                                     max_terms_tested = NULL,
                                      significance_threshold = 0.05,
                                      verbose = TRUE) {
   
@@ -158,7 +164,7 @@ run_go_enrichment_analysis <- function(annotations, candidate_loci,
     if (verbose) message("  - Analyzing ", ontology, " ontology...")
     
     ontology_results <- .perform_go_enrichment_from_data(
-      go_data, ontology, min_genes, max_genes, significance_threshold, verbose
+      go_data, ontology, min_genes, max_genes, max_terms_tested, significance_threshold, verbose
     )
     
     results[[ontology]] <- ontology_results
@@ -448,7 +454,7 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
 #' Perform GO enrichment analysis from prepared data
 #' @keywords internal
 .perform_go_enrichment_from_data <- function(go_data, ontology, min_genes, max_genes, 
-                                           significance_threshold, verbose) {
+                                           max_terms_tested, significance_threshold, verbose) {
   
   # Map ontology codes - database stores single letters, analysis uses full names
   ontology_map <- c("BP" = "P", "MF" = "F", "CC" = "C")
@@ -496,6 +502,15 @@ run_kegg_enrichment_analysis <- function(annotations, candidate_loci,
   if (nrow(size_filtered) == 0) {
     if (verbose) message("    - No ", ontology, " terms pass size filters (", min_genes, "-", max_genes, " genes)")
     return(data.frame())
+  }
+  
+  # Apply term limit if specified (for legacy compatibility)
+  if (!is.null(max_terms_tested) && nrow(size_filtered) > max_terms_tested) {
+    if (verbose) {
+      message("    - Limiting to first ", max_terms_tested, " terms (legacy compatibility)")
+      message("    - Note: Testing fewer terms results in less stringent FDR correction")
+    }
+    size_filtered <- size_filtered[1:max_terms_tested, ]
   }
   
   # Perform enrichment tests
