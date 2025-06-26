@@ -11,6 +11,8 @@ store_go_enrichment_results(
   enrichment_results,
   ontology,
   parameters = NULL,
+  method = "clusterprofiler",
+  blast_param_id = NULL,
   verbose = TRUE
 )
 }

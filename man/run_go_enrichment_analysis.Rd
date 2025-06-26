@@ -10,6 +10,7 @@ run_go_enrichment_analysis(
   ontologies = c("BP", "MF", "CC"),
   min_genes = 3,
   max_genes = 500,
+  max_terms_tested = NULL,
   significance_threshold = 0.05,
   verbose = TRUE
 )
@@ -28,6 +29,9 @@ Accepts: (1) BED format with 'chrom' (or 'chromosome'), 'start', 'end' columns,
 
 \item{max_genes}{Integer. Maximum genes for GO term testing. Default is 500
 (excludes overly broad terms like 'biological process')}
+
+\item{max_terms_tested}{Integer. Maximum number of terms to test per ontology.
+Default is NULL (test all terms). Set to 20 to match legacy behavior with less stringent FDR correction.}
 
 \item{significance_threshold}{Numeric. FDR threshold for significance. Default is 0.05}
 
@@ -59,6 +63,9 @@ go_results <- run_go_enrichment_analysis(annotations, candidates$bed_file)
 
 # Using locus IDs directly
 go_results <- run_go_enrichment_analysis(annotations, c("1_LG1_12345", "1_LG2_67890"))
+
+# For legacy compatibility (test only first 20 terms per ontology)
+go_results_legacy <- run_go_enrichment_analysis(annotations, candidates$bed_file, max_terms_tested = 20)
 
 print(go_results$BP)
 }

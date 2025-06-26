@@ -59,7 +59,7 @@
 run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_id = NULL,
                                       blast_param_id = NULL, ontologies = c("BP", "MF", "CC"), 
                                       min_genes = 5, max_genes = 500, significance_threshold = 0.05,
-                                      store_results = TRUE, create_plots = TRUE, verbose = TRUE) {
+                                      method = "clusterprofiler", store_results = TRUE, create_plots = TRUE, verbose = TRUE) {
   
   if (verbose) message("=== Starting GO Enrichment Workflow ===")
   
@@ -124,7 +124,7 @@ run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_
     
     results <- perform_go_enrichment(go_data, ontology, min_genes = min_genes, 
                                    max_genes = max_genes, significance_threshold = significance_threshold,
-                                   verbose = verbose)
+                                   method = method, verbose = verbose)
     
     enrichment_results[[ontology]] <- results
     
@@ -134,6 +134,8 @@ run_go_enrichment_workflow <- function(con, candidate_vcf_file, background_file_
         con, candidate_import$file_id, background_file_id,
         results, ontology, 
         parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
+        method = method,
+        blast_param_id = blast_param_id,
         verbose = verbose
       )
       enrichment_ids[[ontology]] <- enrichment_id

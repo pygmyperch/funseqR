@@ -10,6 +10,7 @@ perform_go_enrichment(
   min_genes = 5,
   max_genes = 500,
   significance_threshold = 0.05,
+  method = "clusterprofiler",
   verbose = TRUE
 )
 }

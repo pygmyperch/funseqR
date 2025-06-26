@@ -354,10 +354,64 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
 #' }
 #'
 #' @export
-perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_genes = 500, significance_threshold = 0.05, verbose = TRUE) {
+perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_genes = 500, significance_threshold = 0.05, method = "clusterprofiler", verbose = TRUE) {
 
-  if (verbose) message("Performing GO enrichment analysis for ontology: ", ontology)
+  if (verbose) message("Performing GO enrichment analysis for ontology: ", ontology, " using ", method, " method")
 
+  # Route to appropriate enrichment method
+  if (method == "clusterprofiler") {
+    return(.perform_clusterprofiler_enrichment(go_data, ontology, min_genes, max_genes, significance_threshold, verbose))
+  } else if (method == "legacy") {
+    return(.perform_legacy_enrichment(go_data, ontology, min_genes, max_genes, significance_threshold, verbose))
+  } else {
+    stop("Invalid method. Must be 'clusterprofiler' or 'legacy'")
+  }
+}
+
+#' Perform GO enrichment using clusterProfiler
+#' @keywords internal
+.perform_clusterprofiler_enrichment <- function(go_data, ontology, min_genes, max_genes, significance_threshold, verbose) {
+  
+  # Check if clusterProfiler is available
+  if (!requireNamespace("clusterProfiler", quietly = TRUE)) {
+    stop("clusterProfiler package is required. Install with: BiocManager::install('clusterProfiler')")
+  }
+  
+  # Convert go_data to clusterProfiler format
+  clusterprofiler_data <- .convert_go_data_to_clusterprofiler(go_data, ontology, verbose)
+  
+  if (nrow(clusterprofiler_data$term2gene) == 0) {
+    if (verbose) message("  - No ", ontology, " terms found for clusterProfiler analysis")
+    return(data.frame())
+  }
+  
+  # Run clusterProfiler enrichment
+  tryCatch({
+    enrichment_result <- clusterProfiler::enricher(
+      gene = go_data$foreground$genes,
+      universe = go_data$background$genes,
+      TERM2GENE = clusterprofiler_data$term2gene,
+      TERM2NAME = clusterprofiler_data$term2name,
+      pvalueCutoff = 1.0,  # Get all results, filter later
+      pAdjustMethod = "BH",
+      minGSSize = min_genes,
+      maxGSSize = max_genes
+    )
+    
+    # Convert back to funseqR format
+    return(.convert_clusterprofiler_to_funseqr(enrichment_result, ontology, significance_threshold, verbose))
+    
+  }, error = function(e) {
+    warning("clusterProfiler enrichment failed: ", e$message)
+    if (verbose) message("  - Falling back to legacy method")
+    return(.perform_legacy_enrichment(go_data, ontology, min_genes, max_genes, significance_threshold, verbose))
+  })
+}
+
+#' Perform GO enrichment using legacy hypergeometric method
+#' @keywords internal
+.perform_legacy_enrichment <- function(go_data, ontology, min_genes, max_genes, significance_threshold, verbose) {
+  
   # Map ontology codes
   ontology_map <- c("BP" = "P", "MF" = "F", "CC" = "C")
   category_code <- ontology_map[ontology]
@@ -457,6 +511,106 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
   return(enrichment_results)
 }
 
+#' Convert go_data to clusterProfiler format
+#' @keywords internal
+.convert_go_data_to_clusterprofiler <- function(go_data, ontology, verbose) {
+  
+  # Map ontology codes
+  ontology_map <- c("BP" = "P", "MF" = "F", "CC" = "C")
+  category_code <- ontology_map[ontology]
+  
+  # Filter GO terms by category
+  ontology_terms <- go_data$all_go_terms[go_data$all_go_terms$go_category == category_code, ]
+  
+  if (nrow(ontology_terms) == 0) {
+    return(list(term2gene = data.frame(term = character(0), gene = character(0)),
+                term2name = data.frame(term = character(0), name = character(0))))
+  }
+  
+  # Create TERM2GENE mapping (GO term -> gene)
+  # For each gene, find which GO terms it has
+  term2gene_list <- list()
+  
+  for (gene in go_data$background$genes) {
+    if (gene %in% names(go_data$background$gene2go)) {
+      gene_terms <- go_data$background$gene2go[[gene]]
+      ontology_gene_terms <- intersect(gene_terms, ontology_terms$go_id)
+      
+      if (length(ontology_gene_terms) > 0) {
+        for (term in ontology_gene_terms) {
+          term2gene_list[[length(term2gene_list) + 1]] <- data.frame(
+            term = term,
+            gene = gene,
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+    }
+  }
+  
+  if (length(term2gene_list) > 0) {
+    term2gene <- do.call(rbind, term2gene_list)
+  } else {
+    term2gene <- data.frame(term = character(0), gene = character(0), stringsAsFactors = FALSE)
+  }
+  
+  # Create TERM2NAME mapping (GO term -> term name)
+  term2name <- unique(ontology_terms[, c("go_id", "go_term")])
+  colnames(term2name) <- c("term", "name")
+  
+  if (verbose) {
+    message("  - Converted ", nrow(term2name), " ", ontology, " terms for clusterProfiler")
+    message("  - Total gene-term associations: ", nrow(term2gene))
+  }
+  
+  return(list(
+    term2gene = term2gene,
+    term2name = term2name
+  ))
+}
+
+#' Convert clusterProfiler results to funseqR format
+#' @keywords internal
+.convert_clusterprofiler_to_funseqr <- function(clusterprofiler_result, ontology, significance_threshold, verbose) {
+  
+  if (is.null(clusterprofiler_result) || nrow(clusterprofiler_result@result) == 0) {
+    if (verbose) message("  - No terms found by clusterProfiler")
+    return(data.frame())
+  }
+  
+  cp_df <- clusterprofiler_result@result
+  
+  # Convert to funseqR format with additional clusterProfiler fields
+  funseqr_results <- data.frame(
+    go_id = cp_df$ID,
+    go_term = cp_df$Description,
+    go_category = ontology,
+    foreground_count = cp_df$Count,
+    background_count = as.numeric(sub("/.*", "", cp_df$BgRatio)),
+    total_foreground = as.numeric(sub(".*/", "", cp_df$GeneRatio)),
+    total_background = as.numeric(sub(".*/", "", cp_df$BgRatio)),
+    expected_count = cp_df$Count / cp_df$pvalue,  # Approximate
+    fold_enrichment = cp_df$Count / (as.numeric(sub("/.*", "", cp_df$BgRatio)) / as.numeric(sub(".*/", "", cp_df$BgRatio)) * as.numeric(sub(".*/", "", cp_df$GeneRatio))),
+    p_value = cp_df$pvalue,
+    p_adjusted = cp_df$p.adjust,
+    significance_level = ifelse(cp_df$p.adjust < (significance_threshold / 5), "highly_significant",
+                               ifelse(cp_df$p.adjust < significance_threshold, "significant",
+                                     ifelse(cp_df$p.adjust < (significance_threshold * 2), "trending", "not_significant"))),
+    gene_ratio = cp_df$GeneRatio,
+    bg_ratio = cp_df$BgRatio,
+    qvalue = cp_df$qvalue,
+    gene_ids = cp_df$geneID,
+    stringsAsFactors = FALSE
+  )
+  
+  if (verbose) {
+    sig_count <- sum(funseqr_results$p_adjusted < significance_threshold, na.rm = TRUE)
+    message("  - clusterProfiler analysis complete: ", nrow(funseqr_results), " terms tested, ", sig_count, " significantly enriched (FDR < ", significance_threshold, ")")
+  }
+  
+  return(funseqr_results)
+}
+
 #' Retrieve stored GO enrichment results
 #'
 #' @param con Database connection object
@@ -513,7 +667,8 @@ get_go_enrichment_results <- function(con, enrichment_id, significance_filter = 
 #' @return Integer. The enrichment_id of the stored analysis
 #'
 store_go_enrichment_results <- function(con, foreground_file_id, background_file_id,
-                                        enrichment_results, ontology, parameters = NULL, verbose = TRUE) {
+                                        enrichment_results, ontology, parameters = NULL, method = "clusterprofiler", 
+                                        blast_param_id = NULL, verbose = TRUE) {
 
   if (verbose) message("Storing GO enrichment results in database...")
 
@@ -532,19 +687,21 @@ store_go_enrichment_results <- function(con, foreground_file_id, background_file
   # Insert analysis record
   analysis_query <- "
     INSERT INTO go_enrichment_analyses
-    (foreground_file_id, background_file_id, ontology, analysis_date,
-     total_foreground_genes, total_background_genes, analysis_parameters)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    (foreground_file_id, background_file_id, blast_param_id, ontology, analysis_date,
+     total_foreground_genes, total_background_genes, analysis_parameters, enrichment_method)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   "
 
   DBI::dbExecute(con, analysis_query, list(
     foreground_file_id,
     background_file_id,
+    blast_param_id,
     ontology,
     format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
     if(nrow(enrichment_results) > 0) enrichment_results$total_foreground[1] else 0,
     if(nrow(enrichment_results) > 0) enrichment_results$total_background[1] else 0,
-    params_json
+    params_json,
+    method
   ))
 
   # Get the analysis ID
@@ -557,20 +714,39 @@ store_go_enrichment_results <- function(con, foreground_file_id, background_file
     results_to_insert <- enrichment_results
     results_to_insert$enrichment_id <- enrichment_id
 
-    # Select only the columns we need in the right order
-    results_to_insert <- results_to_insert[, c("enrichment_id", "go_id", "go_term", "go_category",
-                                               "foreground_count", "background_count", "total_foreground",
-                                               "total_background", "expected_count", "fold_enrichment",
-                                               "p_value", "p_adjusted", "significance_level")]
-
-    # Insert results row by row (more reliable than batch insert)
-    result_query <- "
-      INSERT INTO go_enrichment_results
-      (enrichment_id, go_id, go_term, go_category, foreground_count, background_count,
-       total_foreground, total_background, expected_count, fold_enrichment,
-       p_value, p_adjusted, significance_level)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    "
+    # Determine if this is clusterProfiler results (has additional columns)
+    has_clusterprofiler_cols <- all(c("gene_ratio", "bg_ratio", "qvalue", "gene_ids") %in% colnames(results_to_insert))
+    
+    if (has_clusterprofiler_cols) {
+      # clusterProfiler results with additional fields
+      results_to_insert <- results_to_insert[, c("enrichment_id", "go_id", "go_term", "go_category",
+                                                 "foreground_count", "background_count", "total_foreground",
+                                                 "total_background", "expected_count", "fold_enrichment",
+                                                 "p_value", "p_adjusted", "significance_level",
+                                                 "gene_ratio", "bg_ratio", "qvalue", "gene_ids")]
+      
+      result_query <- "
+        INSERT INTO go_enrichment_results
+        (enrichment_id, go_id, go_term, go_category, foreground_count, background_count,
+         total_foreground, total_background, expected_count, fold_enrichment,
+         p_value, p_adjusted, significance_level, gene_ratio, bg_ratio, qvalue, gene_ids)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      "
+    } else {
+      # Legacy results
+      results_to_insert <- results_to_insert[, c("enrichment_id", "go_id", "go_term", "go_category",
+                                                 "foreground_count", "background_count", "total_foreground",
+                                                 "total_background", "expected_count", "fold_enrichment",
+                                                 "p_value", "p_adjusted", "significance_level")]
+      
+      result_query <- "
+        INSERT INTO go_enrichment_results
+        (enrichment_id, go_id, go_term, go_category, foreground_count, background_count,
+         total_foreground, total_background, expected_count, fold_enrichment,
+         p_value, p_adjusted, significance_level)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      "
+    }
 
     for (i in 1:nrow(results_to_insert)) {
       row_data <- as.list(results_to_insert[i, ])

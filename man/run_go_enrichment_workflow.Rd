@@ -13,6 +13,7 @@ run_go_enrichment_workflow(
   min_genes = 5,
   max_genes = 500,
   significance_threshold = 0.05,
+  method = "clusterprofiler",
   store_results = TRUE,
   create_plots = TRUE,
   verbose = TRUE

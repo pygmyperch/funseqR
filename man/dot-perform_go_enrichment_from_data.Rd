@@ -9,6 +9,7 @@
   ontology,
   min_genes,
   max_genes,
+  max_terms_tested,
   significance_threshold,
   verbose
 )

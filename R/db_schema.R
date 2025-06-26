@@ -211,13 +211,16 @@ create_funseq_schema <- function(con, verbose = TRUE) {
       enrichment_id INTEGER PRIMARY KEY,
       foreground_file_id INTEGER NOT NULL,
       background_file_id INTEGER NOT NULL,
+      blast_param_id INTEGER,
       ontology TEXT NOT NULL,
       analysis_date TEXT NOT NULL,
       total_foreground_genes INTEGER,
       total_background_genes INTEGER,
       analysis_parameters TEXT,
+      enrichment_method TEXT DEFAULT 'clusterprofiler',
       FOREIGN KEY (foreground_file_id) REFERENCES input_files (file_id),
-      FOREIGN KEY (background_file_id) REFERENCES input_files (file_id)
+      FOREIGN KEY (background_file_id) REFERENCES input_files (file_id),
+      FOREIGN KEY (blast_param_id) REFERENCES blast_parameters (blast_param_id)
     )
   ")
 
@@ -238,6 +241,10 @@ create_funseq_schema <- function(con, verbose = TRUE) {
       p_value REAL NOT NULL,
       p_adjusted REAL,
       significance_level TEXT,
+      gene_ratio TEXT,
+      bg_ratio TEXT,
+      qvalue REAL,
+      gene_ids TEXT,
       FOREIGN KEY (enrichment_id) REFERENCES go_enrichment_analyses (enrichment_id)
     )
   ")
@@ -291,7 +298,9 @@ create_funseq_schema <- function(con, verbose = TRUE) {
   # GO enrichment indexes
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_fg_file ON go_enrichment_analyses (foreground_file_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_bg_file ON go_enrichment_analyses (background_file_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_blast_param ON go_enrichment_analyses (blast_param_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_ontology ON go_enrichment_analyses (ontology)")
+  DBI::dbExecute(con, "CREATE INDEX idx_enrichment_method ON go_enrichment_analyses (enrichment_method)")
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_analysis ON go_enrichment_results (enrichment_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_go ON go_enrichment_results (go_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_enrichment_results_category ON go_enrichment_results (go_category)")
