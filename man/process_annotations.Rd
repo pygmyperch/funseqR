@@ -6,7 +6,7 @@
 \usage{
 process_annotations(
   con,
-  include = c("GO", "KEGG"),
+  include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"),
   blast_param_id = NULL,
   export_csv = NULL,
   verbose = TRUE

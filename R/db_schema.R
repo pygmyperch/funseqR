@@ -193,6 +193,40 @@ create_funseq_schema <- function(con, verbose = TRUE) {
     )
   ")
 
+  if (verbose) message("Creating pfam_domains table...")
+  DBI::dbExecute(con, "
+    CREATE TABLE pfam_domains (
+      pfam_domain_id INTEGER PRIMARY KEY,
+      annotation_id INTEGER NOT NULL,
+      pfam_id TEXT NOT NULL,
+      domain_name TEXT,
+      match_status TEXT,
+      FOREIGN KEY (annotation_id) REFERENCES annotations (annotation_id)
+    )
+  ")
+
+  if (verbose) message("Creating interpro_families table...")
+  DBI::dbExecute(con, "
+    CREATE TABLE interpro_families (
+      interpro_family_id INTEGER PRIMARY KEY,
+      annotation_id INTEGER NOT NULL,
+      interpro_id TEXT NOT NULL,
+      family_name TEXT,
+      FOREIGN KEY (annotation_id) REFERENCES annotations (annotation_id)
+    )
+  ")
+
+  if (verbose) message("Creating eggnog_categories table...")
+  DBI::dbExecute(con, "
+    CREATE TABLE eggnog_categories (
+      eggnog_category_id INTEGER PRIMARY KEY,
+      annotation_id INTEGER NOT NULL,
+      eggnog_id TEXT NOT NULL,
+      taxonomic_scope TEXT,
+      FOREIGN KEY (annotation_id) REFERENCES annotations (annotation_id)
+    )
+  ")
+
   if (verbose) message("Creating analysis_reports table...")
   DBI::dbExecute(con, "
     CREATE TABLE analysis_reports (
@@ -291,6 +325,14 @@ create_funseq_schema <- function(con, verbose = TRUE) {
   DBI::dbExecute(con, "CREATE INDEX idx_go_category ON go_terms (go_category)")
   DBI::dbExecute(con, "CREATE INDEX idx_kegg_annotation ON kegg_references (annotation_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_kegg_id ON kegg_references (kegg_id)")
+
+  # Pfam, InterPro, and eggNOG indexes
+  DBI::dbExecute(con, "CREATE INDEX idx_pfam_annotation ON pfam_domains (annotation_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_pfam_id ON pfam_domains (pfam_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_interpro_annotation ON interpro_families (annotation_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_interpro_id ON interpro_families (interpro_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_eggnog_annotation ON eggnog_categories (annotation_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_eggnog_id ON eggnog_categories (eggnog_id)")
 
   # BLAST database metadata indexes
   DBI::dbExecute(con, "CREATE INDEX idx_blast_db_meta_param ON blast_database_metadata (blast_param_id)")

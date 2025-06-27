@@ -70,13 +70,13 @@
 #' @importFrom dplyr group_by summarise first rowwise ungroup
 #' @importFrom magrittr %>%
 #' @export
-process_annotations <- function(con, include = c("GO", "KEGG"), blast_param_id = NULL, 
+process_annotations <- function(con, include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"), blast_param_id = NULL, 
                                export_csv = NULL, verbose = TRUE) {
   
   if (verbose) message("Processing functional annotations...")
   
   # Validate inputs
-  valid_types <- c("GO", "KEGG")
+  valid_types <- c("GO", "KEGG", "Pfam", "InterPro", "eggNOG")
   include <- match.arg(include, valid_types, several.ok = TRUE)
   
   if (verbose) {
@@ -168,6 +168,24 @@ process_annotations <- function(con, include = c("GO", "KEGG"), blast_param_id =
     result_data <- .process_kegg_annotations(con, result_data, base_where, params, verbose)
   }
   
+  # Process Pfam annotations if requested
+  if ("Pfam" %in% include && "pfam_domains" %in% tables) {
+    if (verbose) message("  - Processing Pfam domain annotations...")
+    result_data <- .process_pfam_annotations(con, result_data, base_where, params, verbose)
+  }
+  
+  # Process InterPro annotations if requested
+  if ("InterPro" %in% include && "interpro_families" %in% tables) {
+    if (verbose) message("  - Processing InterPro family annotations...")
+    result_data <- .process_interpro_annotations(con, result_data, base_where, params, verbose)
+  }
+  
+  # Process eggNOG annotations if requested
+  if ("eggNOG" %in% include && "eggnog_categories" %in% tables) {
+    if (verbose) message("  - Processing eggNOG category annotations...")
+    result_data <- .process_eggnog_annotations(con, result_data, base_where, params, verbose)
+  }
+  
   # Convert to regular data frame and clean up
   result_data <- as.data.frame(result_data)
   result_data$annotation_ids <- NULL  # Remove internal column
@@ -182,6 +200,18 @@ process_annotations <- function(con, include = c("GO", "KEGG"), blast_param_id =
     if ("KEGG" %in% include) {
       kegg_count <- sum(!is.na(result_data$kegg_pathways) & result_data$kegg_pathways != "", na.rm = TRUE)
       message("  - Loci with KEGG annotations: ", kegg_count)
+    }
+    if ("Pfam" %in% include) {
+      pfam_count <- sum(!is.na(result_data$pfam_domains) & result_data$pfam_domains != "", na.rm = TRUE)
+      message("  - Loci with Pfam annotations: ", pfam_count)
+    }
+    if ("InterPro" %in% include) {
+      interpro_count <- sum(!is.na(result_data$interpro_families) & result_data$interpro_families != "", na.rm = TRUE)
+      message("  - Loci with InterPro annotations: ", interpro_count)
+    }
+    if ("eggNOG" %in% include) {
+      eggnog_count <- sum(!is.na(result_data$eggnog_categories) & result_data$eggnog_categories != "", na.rm = TRUE)
+      message("  - Loci with eggNOG annotations: ", eggnog_count)
     }
   }
   
@@ -493,4 +523,221 @@ process_annotations <- function(con, include = c("GO", "KEGG"), blast_param_id =
   }
   
   return(kegg_data)
+}
+
+#' Process Pfam annotations for loci
+#' @keywords internal
+.process_pfam_annotations <- function(con, result_data, base_where, params, verbose) {
+  
+  # Get Pfam domains for each annotation
+  pfam_query <- paste0("
+    SELECT 
+      a.annotation_id,
+      pd.pfam_id,
+      pd.domain_name,
+      pd.match_status
+    FROM annotations a
+    JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+    JOIN pfam_domains pd ON a.annotation_id = pd.annotation_id
+    ", base_where
+  )
+  
+  pfam_data <- if (length(params) > 0) {
+    DBI::dbGetQuery(con, pfam_query, params)
+  } else {
+    DBI::dbGetQuery(con, pfam_query)
+  }
+  
+  if (nrow(pfam_data) > 0) {
+    # Aggregate Pfam domains by annotation
+    pfam_summary <- pfam_data %>%
+      group_by(annotation_id) %>%
+      summarise(
+        pfam_domains = paste(unique(pfam_id), collapse = ";"),
+        pfam_domain_names = paste(unique(na.omit(domain_name)), collapse = ";"),
+        .groups = "drop"
+      )
+    
+    # Join with result data through annotation IDs
+    result_data <- result_data %>%
+      rowwise() %>%
+      mutate(
+        pfam_domains = {
+          matching_pfam <- pfam_summary[pfam_summary$annotation_id %in% annotation_ids, ]
+          if (nrow(matching_pfam) > 0) {
+            paste(unique(unlist(strsplit(matching_pfam$pfam_domains, ";"))), collapse = ";")
+          } else {
+            NA_character_
+          }
+        },
+        pfam_domain_names = {
+          matching_pfam <- pfam_summary[pfam_summary$annotation_id %in% annotation_ids, ]
+          if (nrow(matching_pfam) > 0) {
+            names <- unique(unlist(strsplit(matching_pfam$pfam_domain_names, ";")))
+            names <- names[!is.na(names) & names != ""]
+            if (length(names) > 0) paste(names, collapse = ";") else NA_character_
+          } else {
+            NA_character_
+          }
+        }
+      ) %>%
+      ungroup()
+    
+    if (verbose) {
+      pfam_count <- sum(!is.na(result_data$pfam_domains) & result_data$pfam_domains != "", na.rm = TRUE)
+      message("    - ", pfam_count, " loci have Pfam annotations")
+    }
+  } else {
+    # Add empty Pfam columns
+    result_data$pfam_domains <- NA_character_
+    result_data$pfam_domain_names <- NA_character_
+    if (verbose) message("    - No Pfam annotations found")
+  }
+  
+  return(result_data)
+}
+
+#' Process InterPro annotations for loci
+#' @keywords internal
+.process_interpro_annotations <- function(con, result_data, base_where, params, verbose) {
+  
+  # Get InterPro families for each annotation
+  interpro_query <- paste0("
+    SELECT 
+      a.annotation_id,
+      if.interpro_id,
+      if.family_name
+    FROM annotations a
+    JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+    JOIN interpro_families if ON a.annotation_id = if.annotation_id
+    ", base_where
+  )
+  
+  interpro_data <- if (length(params) > 0) {
+    DBI::dbGetQuery(con, interpro_query, params)
+  } else {
+    DBI::dbGetQuery(con, interpro_query)
+  }
+  
+  if (nrow(interpro_data) > 0) {
+    # Aggregate InterPro families by annotation
+    interpro_summary <- interpro_data %>%
+      group_by(annotation_id) %>%
+      summarise(
+        interpro_families = paste(unique(interpro_id), collapse = ";"),
+        interpro_family_names = paste(unique(na.omit(family_name)), collapse = ";"),
+        .groups = "drop"
+      )
+    
+    # Join with result data through annotation IDs
+    result_data <- result_data %>%
+      rowwise() %>%
+      mutate(
+        interpro_families = {
+          matching_interpro <- interpro_summary[interpro_summary$annotation_id %in% annotation_ids, ]
+          if (nrow(matching_interpro) > 0) {
+            paste(unique(unlist(strsplit(matching_interpro$interpro_families, ";"))), collapse = ";")
+          } else {
+            NA_character_
+          }
+        },
+        interpro_family_names = {
+          matching_interpro <- interpro_summary[interpro_summary$annotation_id %in% annotation_ids, ]
+          if (nrow(matching_interpro) > 0) {
+            names <- unique(unlist(strsplit(matching_interpro$interpro_family_names, ";")))
+            names <- names[!is.na(names) & names != ""]
+            if (length(names) > 0) paste(names, collapse = ";") else NA_character_
+          } else {
+            NA_character_
+          }
+        }
+      ) %>%
+      ungroup()
+    
+    if (verbose) {
+      interpro_count <- sum(!is.na(result_data$interpro_families) & result_data$interpro_families != "", na.rm = TRUE)
+      message("    - ", interpro_count, " loci have InterPro annotations")
+    }
+  } else {
+    # Add empty InterPro columns
+    result_data$interpro_families <- NA_character_
+    result_data$interpro_family_names <- NA_character_
+    if (verbose) message("    - No InterPro annotations found")
+  }
+  
+  return(result_data)
+}
+
+#' Process eggNOG annotations for loci
+#' @keywords internal
+.process_eggnog_annotations <- function(con, result_data, base_where, params, verbose) {
+  
+  # Get eggNOG categories for each annotation
+  eggnog_query <- paste0("
+    SELECT 
+      a.annotation_id,
+      ec.eggnog_id,
+      ec.taxonomic_scope
+    FROM annotations a
+    JOIN blast_results br ON a.blast_result_id = br.blast_result_id
+    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+    JOIN eggnog_categories ec ON a.annotation_id = ec.annotation_id
+    ", base_where
+  )
+  
+  eggnog_data <- if (length(params) > 0) {
+    DBI::dbGetQuery(con, eggnog_query, params)
+  } else {
+    DBI::dbGetQuery(con, eggnog_query)
+  }
+  
+  if (nrow(eggnog_data) > 0) {
+    # Aggregate eggNOG categories by annotation
+    eggnog_summary <- eggnog_data %>%
+      group_by(annotation_id) %>%
+      summarise(
+        eggnog_categories = paste(unique(eggnog_id), collapse = ";"),
+        eggnog_taxonomic_scopes = paste(unique(na.omit(taxonomic_scope)), collapse = ";"),
+        .groups = "drop"
+      )
+    
+    # Join with result data through annotation IDs
+    result_data <- result_data %>%
+      rowwise() %>%
+      mutate(
+        eggnog_categories = {
+          matching_eggnog <- eggnog_summary[eggnog_summary$annotation_id %in% annotation_ids, ]
+          if (nrow(matching_eggnog) > 0) {
+            paste(unique(unlist(strsplit(matching_eggnog$eggnog_categories, ";"))), collapse = ";")
+          } else {
+            NA_character_
+          }
+        },
+        eggnog_taxonomic_scopes = {
+          matching_eggnog <- eggnog_summary[eggnog_summary$annotation_id %in% annotation_ids, ]
+          if (nrow(matching_eggnog) > 0) {
+            scopes <- unique(unlist(strsplit(matching_eggnog$eggnog_taxonomic_scopes, ";")))
+            scopes <- scopes[!is.na(scopes) & scopes != ""]
+            if (length(scopes) > 0) paste(scopes, collapse = ";") else NA_character_
+          } else {
+            NA_character_
+          }
+        }
+      ) %>%
+      ungroup()
+    
+    if (verbose) {
+      eggnog_count <- sum(!is.na(result_data$eggnog_categories) & result_data$eggnog_categories != "", na.rm = TRUE)
+      message("    - ", eggnog_count, " loci have eggNOG annotations")
+    }
+  } else {
+    # Add empty eggNOG columns
+    result_data$eggnog_categories <- NA_character_
+    result_data$eggnog_taxonomic_scopes <- NA_character_
+    if (verbose) message("    - No eggNOG annotations found")
+  }
+  
+  return(result_data)
 }

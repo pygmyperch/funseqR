@@ -9,7 +9,7 @@ run_ORA(
   candidate_vcf_file,
   background_file_id = NULL,
   blast_param_id = NULL,
-  annotation_type = c("both", "GO", "KEGG"),
+  annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
   ontologies = c("BP", "MF", "CC"),
   min_genes = 5,
   max_genes = 500,
@@ -30,7 +30,7 @@ run_ORA(
 \item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets.
 If NULL, uses all available annotations. Default is NULL.}
 
-\item{annotation_type}{Character. Type of annotations to analyze: "GO", "KEGG", or "both". Default is "both"}
+\item{annotation_type}{Character. Type of annotations to analyze: "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "both", or "all". Default is "both"}
 
 \item{ontologies}{Character vector. GO ontologies to test: c("BP", "MF", "CC"). Only used when GO is included. Default is c("BP", "MF", "CC")}
 

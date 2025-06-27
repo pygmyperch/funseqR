@@ -1053,6 +1053,22 @@ extract_uniprot_info <- function(uniprot_data, evidence_keep = NULL, debug = FAL
       kegg_id = character(0),
       pathway_name = character(0),
       stringsAsFactors = FALSE
+    ),
+    pfam_domains = data.frame(
+      pfam_id = character(0),
+      domain_name = character(0),
+      match_status = character(0),
+      stringsAsFactors = FALSE
+    ),
+    interpro_families = data.frame(
+      interpro_id = character(0),
+      family_name = character(0),
+      stringsAsFactors = FALSE
+    ),
+    eggnog_categories = data.frame(
+      eggnog_id = character(0),
+      taxonomic_scope = character(0),
+      stringsAsFactors = FALSE
     )
   )
 
@@ -1150,6 +1166,25 @@ extract_uniprot_info <- function(uniprot_data, evidence_keep = NULL, debug = FAL
     kegg_refs <- data.frame(
       kegg_id = character(0),
       pathway_name = character(0),
+      stringsAsFactors = FALSE
+    )
+
+    pfam_domains <- data.frame(
+      pfam_id = character(0),
+      domain_name = character(0),
+      match_status = character(0),
+      stringsAsFactors = FALSE
+    )
+
+    interpro_families <- data.frame(
+      interpro_id = character(0),
+      family_name = character(0),
+      stringsAsFactors = FALSE
+    )
+
+    eggnog_categories <- data.frame(
+      eggnog_id = character(0),
+      taxonomic_scope = character(0),
       stringsAsFactors = FALSE
     )
 
@@ -1270,14 +1305,121 @@ extract_uniprot_info <- function(uniprot_data, evidence_keep = NULL, debug = FAL
 
         if (debug) message("Added KEGG reference: ", kegg_id, " -> ", pathway_name)
       }
+
+      # Process Pfam domains
+      if (is.list(ref) && !is.null(ref$database) && ref$database == "Pfam" && !is.null(ref$id)) {
+        if (debug) message("Processing Pfam reference: ", ref$id)
+
+        pfam_id <- ref$id
+        domain_name <- NA_character_
+        match_status <- NA_character_
+
+        # Extract properties
+        if (!is.null(ref$properties) && is.list(ref$properties)) {
+          for (j in seq_along(ref$properties)) {
+            prop <- ref$properties[[j]]
+
+            if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
+              if (prop$key == "EntryName") {
+                domain_name <- prop$value
+                if (debug) message("  Found domain name: ", domain_name)
+              }
+              if (prop$key == "MatchStatus") {
+                match_status <- prop$value
+                if (debug) message("  Found match status: ", match_status)
+              }
+            }
+          }
+        }
+
+        # Add Pfam domain
+        new_row <- data.frame(
+          pfam_id = pfam_id,
+          domain_name = domain_name,
+          match_status = match_status,
+          stringsAsFactors = FALSE
+        )
+        pfam_domains <- rbind(pfam_domains, new_row)
+
+        if (debug) message("Added Pfam domain: ", pfam_id, " -> ", domain_name)
+      }
+
+      # Process InterPro families
+      if (is.list(ref) && !is.null(ref$database) && ref$database == "InterPro" && !is.null(ref$id)) {
+        if (debug) message("Processing InterPro reference: ", ref$id)
+
+        interpro_id <- ref$id
+        family_name <- NA_character_
+
+        # Extract properties
+        if (!is.null(ref$properties) && is.list(ref$properties)) {
+          for (j in seq_along(ref$properties)) {
+            prop <- ref$properties[[j]]
+
+            if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
+              if (prop$key == "EntryName") {
+                family_name <- prop$value
+                if (debug) message("  Found family name: ", family_name)
+              }
+            }
+          }
+        }
+
+        # Add InterPro family
+        new_row <- data.frame(
+          interpro_id = interpro_id,
+          family_name = family_name,
+          stringsAsFactors = FALSE
+        )
+        interpro_families <- rbind(interpro_families, new_row)
+
+        if (debug) message("Added InterPro family: ", interpro_id, " -> ", family_name)
+      }
+
+      # Process eggNOG categories
+      if (is.list(ref) && !is.null(ref$database) && ref$database == "eggNOG" && !is.null(ref$id)) {
+        if (debug) message("Processing eggNOG reference: ", ref$id)
+
+        eggnog_id <- ref$id
+        taxonomic_scope <- NA_character_
+
+        # Extract properties
+        if (!is.null(ref$properties) && is.list(ref$properties)) {
+          for (j in seq_along(ref$properties)) {
+            prop <- ref$properties[[j]]
+
+            if (is.list(prop) && !is.null(prop$key) && !is.null(prop$value)) {
+              if (prop$key == "ToxonomicScope") {
+                taxonomic_scope <- prop$value
+                if (debug) message("  Found taxonomic scope: ", taxonomic_scope)
+              }
+            }
+          }
+        }
+
+        # Add eggNOG category
+        new_row <- data.frame(
+          eggnog_id = eggnog_id,
+          taxonomic_scope = taxonomic_scope,
+          stringsAsFactors = FALSE
+        )
+        eggnog_categories <- rbind(eggnog_categories, new_row)
+
+        if (debug) message("Added eggNOG category: ", eggnog_id, " -> ", taxonomic_scope)
+      }
     }
 
     # Update result with extracted data
     result$go_terms <- go_terms
     result$kegg_refs <- kegg_refs
+    result$pfam_domains <- pfam_domains
+    result$interpro_families <- interpro_families
+    result$eggnog_categories <- eggnog_categories
 
     if (debug) {
-      message("Extracted ", nrow(go_terms), " GO terms and ", nrow(kegg_refs), " KEGG references")
+      message("Extracted ", nrow(go_terms), " GO terms, ", nrow(kegg_refs), " KEGG references, ",
+              nrow(pfam_domains), " Pfam domains, ", nrow(interpro_families), " InterPro families, ",
+              "and ", nrow(eggnog_categories), " eggNOG categories")
     }
   } else if (debug) {
     message("No cross-references found or not a list structure")
@@ -1305,6 +1447,22 @@ create_empty_annotation <- function(accession) {
     kegg_refs = data.frame(
       kegg_id = character(0),
       pathway_name = character(0),
+      stringsAsFactors = FALSE
+    ),
+    pfam_domains = data.frame(
+      pfam_id = character(0),
+      domain_name = character(0),
+      match_status = character(0),
+      stringsAsFactors = FALSE
+    ),
+    interpro_families = data.frame(
+      interpro_id = character(0),
+      family_name = character(0),
+      stringsAsFactors = FALSE
+    ),
+    eggnog_categories = data.frame(
+      eggnog_id = character(0),
+      taxonomic_scope = character(0),
       stringsAsFactors = FALSE
     )
   )
@@ -1567,6 +1725,171 @@ store_annotation <- function(con, blast_result_id, uniprot_info, verbose = TRUE,
     })
   } else if (verbose) {
     message("No KEGG references to add")
+  }
+
+  # Add Pfam domains
+  pfam_count <- 0
+  if (!is.null(annotation_id) && !is.null(uniprot_info$pfam_domains) &&
+      is.data.frame(uniprot_info$pfam_domains) && nrow(uniprot_info$pfam_domains) > 0) {
+    if (verbose) message("Adding ", nrow(uniprot_info$pfam_domains), " Pfam domains")
+
+    tryCatch({
+      for (i in 1:nrow(uniprot_info$pfam_domains)) {
+        # Get values with proper NULL handling
+        pfam_id <- uniprot_info$pfam_domains$pfam_id[i]
+        if (is.na(pfam_id)) next
+
+        # Check if Pfam domain already exists
+        pfam_exists <- DBI::dbGetQuery(
+          con,
+          "SELECT COUNT(*) AS count FROM pfam_domains WHERE annotation_id = ? AND pfam_id = ?",
+          params = list(annotation_id, pfam_id)
+        )$count > 0
+
+        if (pfam_exists) {
+          if (verbose) message("Pfam domain ", pfam_id, " already exists, skipping")
+          next
+        }
+
+        # Prepare parameters for insertion
+        domain_name <- uniprot_info$pfam_domains$domain_name[i]
+        match_status <- uniprot_info$pfam_domains$match_status[i]
+
+        # Handle NULL/NA values
+        if (is.na(domain_name)) domain_name <- NULL
+        if (is.na(match_status)) match_status <- NULL
+
+        # Build query based on what's available
+        fields <- c("annotation_id", "pfam_id")
+        values <- c("?", "?")
+        insert_params <- list(annotation_id, pfam_id)
+
+        if (!is.null(domain_name)) {
+          fields <- c(fields, "domain_name")
+          values <- c(values, "?")
+          insert_params <- c(insert_params, list(domain_name))
+        }
+
+        if (!is.null(match_status)) {
+          fields <- c(fields, "match_status")
+          values <- c(values, "?")
+          insert_params <- c(insert_params, list(match_status))
+        }
+
+        # Create and execute the insertion query
+        insert_query <- paste0(
+          "INSERT INTO pfam_domains (", paste(fields, collapse = ", "), ") ",
+          "VALUES (", paste(values, collapse = ", "), ")"
+        )
+
+        DBI::dbExecute(con, insert_query, params = insert_params)
+        pfam_count <- pfam_count + 1
+      }
+
+      if (verbose) message("Added ", pfam_count, " Pfam domains")
+    }, error = function(e) {
+      warning("Error inserting Pfam domains: ", e$message)
+    })
+  } else if (verbose) {
+    message("No Pfam domains to add")
+  }
+
+  # Add InterPro families
+  interpro_count <- 0
+  if (!is.null(annotation_id) && !is.null(uniprot_info$interpro_families) &&
+      is.data.frame(uniprot_info$interpro_families) && nrow(uniprot_info$interpro_families) > 0) {
+    if (verbose) message("Adding ", nrow(uniprot_info$interpro_families), " InterPro families")
+
+    tryCatch({
+      for (i in 1:nrow(uniprot_info$interpro_families)) {
+        # Get values with proper NULL handling
+        interpro_id <- uniprot_info$interpro_families$interpro_id[i]
+        if (is.na(interpro_id)) next
+
+        # Check if InterPro family already exists
+        interpro_exists <- DBI::dbGetQuery(
+          con,
+          "SELECT COUNT(*) AS count FROM interpro_families WHERE annotation_id = ? AND interpro_id = ?",
+          params = list(annotation_id, interpro_id)
+        )$count > 0
+
+        if (interpro_exists) {
+          if (verbose) message("InterPro family ", interpro_id, " already exists, skipping")
+          next
+        }
+
+        # Prepare parameters for insertion
+        family_name <- uniprot_info$interpro_families$family_name[i]
+        if (is.na(family_name)) family_name <- NULL
+
+        # Build query based on what's available
+        if (is.null(family_name)) {
+          insert_query <- "INSERT INTO interpro_families (annotation_id, interpro_id) VALUES (?, ?)"
+          insert_params <- list(annotation_id, interpro_id)
+        } else {
+          insert_query <- "INSERT INTO interpro_families (annotation_id, interpro_id, family_name) VALUES (?, ?, ?)"
+          insert_params <- list(annotation_id, interpro_id, family_name)
+        }
+
+        DBI::dbExecute(con, insert_query, params = insert_params)
+        interpro_count <- interpro_count + 1
+      }
+
+      if (verbose) message("Added ", interpro_count, " InterPro families")
+    }, error = function(e) {
+      warning("Error inserting InterPro families: ", e$message)
+    })
+  } else if (verbose) {
+    message("No InterPro families to add")
+  }
+
+  # Add eggNOG categories
+  eggnog_count <- 0
+  if (!is.null(annotation_id) && !is.null(uniprot_info$eggnog_categories) &&
+      is.data.frame(uniprot_info$eggnog_categories) && nrow(uniprot_info$eggnog_categories) > 0) {
+    if (verbose) message("Adding ", nrow(uniprot_info$eggnog_categories), " eggNOG categories")
+
+    tryCatch({
+      for (i in 1:nrow(uniprot_info$eggnog_categories)) {
+        # Get values with proper NULL handling
+        eggnog_id <- uniprot_info$eggnog_categories$eggnog_id[i]
+        if (is.na(eggnog_id)) next
+
+        # Check if eggNOG category already exists
+        eggnog_exists <- DBI::dbGetQuery(
+          con,
+          "SELECT COUNT(*) AS count FROM eggnog_categories WHERE annotation_id = ? AND eggnog_id = ?",
+          params = list(annotation_id, eggnog_id)
+        )$count > 0
+
+        if (eggnog_exists) {
+          if (verbose) message("eggNOG category ", eggnog_id, " already exists, skipping")
+          next
+        }
+
+        # Prepare parameters for insertion
+        taxonomic_scope <- uniprot_info$eggnog_categories$taxonomic_scope[i]
+        if (is.na(taxonomic_scope)) taxonomic_scope <- NULL
+
+        # Build query based on what's available
+        if (is.null(taxonomic_scope)) {
+          insert_query <- "INSERT INTO eggnog_categories (annotation_id, eggnog_id) VALUES (?, ?)"
+          insert_params <- list(annotation_id, eggnog_id)
+        } else {
+          insert_query <- "INSERT INTO eggnog_categories (annotation_id, eggnog_id, taxonomic_scope) VALUES (?, ?, ?)"
+          insert_params <- list(annotation_id, eggnog_id, taxonomic_scope)
+        }
+
+        DBI::dbExecute(con, insert_query, params = insert_params)
+        eggnog_count <- eggnog_count + 1
+      }
+
+      if (verbose) message("Added ", eggnog_count, " eggNOG categories")
+    }, error = function(e) {
+      warning("Error inserting eggNOG categories: ", e$message)
+    })
+  } else if (verbose) {
+    message("No eggNOG categories to add")
   }
 
   return(annotation_id)

@@ -10,7 +10,7 @@
 #' @param background_file_id Integer. File ID of background dataset (or NULL to auto-detect)
 #' @param blast_param_id Integer. Optional. Specific BLAST run ID to use for both datasets.
 #'   If NULL, uses all available annotations. Default is NULL.
-#' @param annotation_type Character. Type of annotations to analyze: "GO", "KEGG", or "both". Default is "both"
+#' @param annotation_type Character. Type of annotations to analyze: "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "both", or "all". Default is "both"
 #' @param ontologies Character vector. GO ontologies to test: c("BP", "MF", "CC"). Only used when GO is included. Default is c("BP", "MF", "CC")
 #' @param min_genes Integer. Minimum genes for term/pathway testing. Default is 5
 #' @param max_genes Integer. Maximum genes for term/pathway testing. Default is 500
@@ -64,7 +64,7 @@
 #'
 #' @export
 run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
-                   blast_param_id = NULL, annotation_type = c("both", "GO", "KEGG"),
+                   blast_param_id = NULL, annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
                    ontologies = c("BP", "MF", "CC"), 
                    min_genes = 5, max_genes = 500, significance_threshold = 0.05,
                    method = "clusterprofiler", store_results = TRUE, create_plots = TRUE, verbose = TRUE) {
@@ -120,8 +120,11 @@ run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
   annotation_data <- list()
   
   # Determine which analyses to run
-  run_go <- annotation_type %in% c("GO", "both")
-  run_kegg <- annotation_type %in% c("KEGG", "both")
+  run_go <- annotation_type %in% c("GO", "both", "all")
+  run_kegg <- annotation_type %in% c("KEGG", "both", "all")
+  run_pfam <- annotation_type %in% c("Pfam", "all")
+  run_interpro <- annotation_type %in% c("InterPro", "all")
+  run_eggnog <- annotation_type %in% c("eggNOG", "all")
   
   if (run_go) {
     if (verbose) message("  - Extracting GO terms...")
