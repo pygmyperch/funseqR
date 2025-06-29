@@ -20,7 +20,17 @@
 #' @param create_plots Logical. Generate visualization plots. Default is TRUE
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
-#' @return List containing all analysis results, plots, locus information, and summary tables:\n#' \\itemize{\n#'   \\item status: Analysis completion status\n#'   \\item summary: Workflow summary with parameters and statistics\n#'   \\item candidate_import: Information about imported candidate file\n#'   \\item annotation_data: Raw annotation data used for enrichment\n#'   \\item enrichment_results: Enrichment test results for each annotation type\n#'   \\item locus_info: Detailed table of loci with annotations and dataset membership\n#'   \\item plots: Generated visualization plots\n#'   \\item analysis_ids: Database IDs of stored enrichment analyses\n#' }
+#' @return List containing all analysis results, plots, locus information, and summary tables:
+#' \\itemize{
+#'   \\item status: Analysis completion status
+#'   \\item summary: Workflow summary with parameters and statistics
+#'   \\item candidate_import: Information about imported candidate file
+#'   \\item annotation_data: Raw annotation data used for enrichment
+#'   \\item enrichment_results: Enrichment test results for each annotation type
+#'   \\item locus_info: Detailed table of loci with annotations and dataset membership
+#'   \\item plots: Generated visualization plots
+#'   \\item analysis_ids: Database IDs of stored enrichment analyses
+#' }
 #'
 #' @details
 #' This function performs complete Over-Representation Analysis (ORA) workflow:
