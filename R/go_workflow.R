@@ -332,7 +332,7 @@ run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
   )
   
   # Step 6: Create locus information table
-  if (verbose) message("\\n=== Step 6: Creating Locus Information Table ===")
+  if (verbose) message("\n=== Step 6: Creating Locus Information Table ===")
   
   locus_info <- .create_locus_info_table(con, candidate_import$file_id, background_file_id, 
                                          blast_param_id, annotation_type, verbose)

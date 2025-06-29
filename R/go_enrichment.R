@@ -47,7 +47,7 @@ import_candidate_loci <- function(con, candidate_vcf_file, background_file_id, v
   if (verbose) {
     message("Import complete:")
     message("  - Candidate file ID: ", candidate_import$file_id)
-    message("  - BED file created: ", candidate_bed)
+    message("  - BED file created: ", length(candidate_bed), " genomic regions")
     message("  - Linked annotations: ", nrow(candidate_annotations))
   }
 
