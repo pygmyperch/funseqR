@@ -526,37 +526,43 @@ generate_go_enrichment_report_section <- function(con, project_id,
   }
   
   # Get candidate and background loci information with annotations
-  locus_query <- paste0("
-    SELECT DISTINCT
-      vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id,
-      vd.chromosome,
-      vd.position,
-      vd.ref,
-      vd.alt,
-      CASE 
-        WHEN vd.file_id = ? THEN 'candidate'
-        WHEN vd.file_id = ? THEN 'background'
-        ELSE 'other'
-      END as dataset_type,
-      a.uniprot_accession,
-      a.entry_name,
-      a.gene_names,
-      br.e_value,
-      br.bit_score,
-      br.percent_identity
-    FROM vcf_data vd
-    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
-    JOIN blast_results br ON fs.flanking_id = br.flanking_id
-    JOIN annotations a ON br.blast_result_id = a.blast_result_id
-    WHERE (vd.file_id = ? OR vd.file_id = ?)
-    ", where_clause, "
-    ORDER BY vd.chromosome, vd.position
-  ")
+  locus_query <- paste0(
+    "SELECT DISTINCT ",
+    "vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id, ",
+    "vd.chromosome, ",
+    "vd.position, ",
+    "vd.ref, ",
+    "vd.alt, ",
+    "CASE ",
+    "  WHEN vd.file_id = ? THEN 'candidate' ",
+    "  WHEN vd.file_id = ? THEN 'background' ",
+    "  ELSE 'other' ",
+    "END as dataset_type, ",
+    "a.uniprot_accession, ",
+    "a.entry_name, ",
+    "a.gene_names, ",
+    "br.e_value, ",
+    "br.bit_score, ",
+    "br.percent_identity ",
+    "FROM vcf_data vd ",
+    "JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id ",
+    "JOIN blast_results br ON fs.flanking_id = br.flanking_id ",
+    "JOIN annotations a ON br.blast_result_id = a.blast_result_id ",
+    "WHERE (vd.file_id = ? OR vd.file_id = ?) ",
+    where_clause, " ",
+    "ORDER BY vd.chromosome, vd.position"
+  )
   
   # Parameters: candidate_file_id, background_file_id, candidate_file_id, background_file_id, [blast_param_id]
   query_params <- c(list(candidate_file_id, background_file_id, candidate_file_id, background_file_id), params)
   
-  locus_data <- DBI::dbGetQuery(con, locus_query, query_params)
+  # Execute query with error handling
+  locus_data <- tryCatch({
+    DBI::dbGetQuery(con, locus_query, query_params)
+  }, error = function(e) {
+    if (verbose) message("    - Error executing locus query: ", e$message)
+    return(data.frame())
+  })
   
   if (nrow(locus_data) == 0) {
     if (verbose) message("    - No loci found with annotations")
@@ -565,40 +571,54 @@ generate_go_enrichment_report_section <- function(con, project_id,
   
   if (verbose) message("    - Found ", nrow(locus_data), " annotated loci")
   
-  # Add annotation details based on annotation_type
-  if (annotation_type %in% c("GO", "both", "all")) {
+  # Check which annotation tables exist
+  available_tables <- DBI::dbListTables(con)
+  
+  # Add annotation details based on annotation_type and table availability
+  if (annotation_type %in% c("GO", "both", "all") && "go_terms" %in% available_tables) {
     locus_data <- .add_go_annotations_to_locus_table(con, locus_data, where_clause, params, verbose)
   }
   
-  if (annotation_type %in% c("KEGG", "both", "all")) {
+  if (annotation_type %in% c("KEGG", "both", "all") && "kegg_references" %in% available_tables) {
     locus_data <- .add_kegg_annotations_to_locus_table(con, locus_data, where_clause, params, verbose)
   }
   
-  if (annotation_type %in% c("Pfam", "all")) {
+  if (annotation_type %in% c("Pfam", "all") && "pfam_domains" %in% available_tables) {
     locus_data <- .add_pfam_annotations_to_locus_table(con, locus_data, where_clause, params, verbose)
+  } else if (annotation_type %in% c("Pfam", "all") && verbose) {
+    message("    - Pfam table not found, skipping Pfam annotations")
   }
   
-  if (annotation_type %in% c("InterPro", "all")) {
+  if (annotation_type %in% c("InterPro", "all") && "interpro_families" %in% available_tables) {
     locus_data <- .add_interpro_annotations_to_locus_table(con, locus_data, where_clause, params, verbose)
+  } else if (annotation_type %in% c("InterPro", "all") && verbose) {
+    message("    - InterPro table not found, skipping InterPro annotations")
   }
   
-  if (annotation_type %in% c("eggNOG", "all")) {
+  if (annotation_type %in% c("eggNOG", "all") && "eggnog_categories" %in% available_tables) {
     locus_data <- .add_eggnog_annotations_to_locus_table(con, locus_data, where_clause, params, verbose)
+  } else if (annotation_type %in% c("eggNOG", "all") && verbose) {
+    message("    - eggNOG table not found, skipping eggNOG annotations")
   }
   
   # Create summary by locus (aggregate multiple annotations per locus)
-  summary_data <- locus_data %>%
-    dplyr::group_by(locus_id, chromosome, position, ref, alt, dataset_type) %>%
-    dplyr::summarise(
-      uniprot_accessions = paste(unique(uniprot_accession), collapse = ";"),
-      gene_names = paste(unique(na.omit(gene_names)), collapse = ";"),
-      entry_names = paste(unique(na.omit(entry_name)), collapse = ";"),
-      best_e_value = min(e_value, na.rm = TRUE),
-      best_bit_score = max(bit_score, na.rm = TRUE),
-      avg_percent_identity = round(mean(percent_identity, na.rm = TRUE), 2),
-      annotation_count = dplyr::n(),
-      .groups = "drop"
-    )
+  summary_data <- tryCatch({
+    locus_data %>%
+      dplyr::group_by(locus_id, chromosome, position, ref, alt, dataset_type) %>%
+      dplyr::summarise(
+        uniprot_accessions = paste(unique(uniprot_accession), collapse = ";"),
+        gene_names = paste(unique(na.omit(gene_names)), collapse = ";"),
+        entry_names = paste(unique(na.omit(entry_name)), collapse = ";"),
+        best_e_value = min(e_value, na.rm = TRUE),
+        best_bit_score = max(bit_score, na.rm = TRUE),
+        avg_percent_identity = round(mean(percent_identity, na.rm = TRUE), 2),
+        annotation_count = dplyr::n(),
+        .groups = "drop"
+      )
+  }, error = function(e) {
+    if (verbose) message("    - Error processing locus data: ", e$message)
+    return(data.frame())
+  })
   
   # Add aggregated annotation information if present
   if ("go_terms" %in% names(locus_data)) {
@@ -634,21 +654,22 @@ generate_go_enrichment_report_section <- function(con, project_id,
 .add_go_annotations_to_locus_table <- function(con, locus_data, where_clause, params, verbose) {
   
   # Get GO terms for the loci
-  go_query <- paste0("
-    SELECT DISTINCT
-      vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id,
-      gt.go_id,
-      gt.go_term,
-      gt.go_category
-    FROM vcf_data vd
-    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
-    JOIN blast_results br ON fs.flanking_id = br.flanking_id
-    JOIN annotations a ON br.blast_result_id = a.blast_result_id
-    JOIN go_terms gt ON a.annotation_id = gt.annotation_id
-    WHERE vd.vcf_id || '_' || vd.chromosome || '_' || vd.position IN (", 
-    paste0("'", paste(unique(locus_data$locus_id), collapse = "', '"), "'"),
-    if (nchar(where_clause) > 0) paste(" ", where_clause) else "", "
-  ")
+  locus_ids_str <- paste0("'", paste(unique(locus_data$locus_id), collapse = "', '"), "'")
+  
+  go_query <- paste0(
+    "SELECT DISTINCT ",
+    "vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id, ",
+    "gt.go_id, ",
+    "gt.go_term, ",
+    "gt.go_category ",
+    "FROM vcf_data vd ",
+    "JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id ",
+    "JOIN blast_results br ON fs.flanking_id = br.flanking_id ",
+    "JOIN annotations a ON br.blast_result_id = a.blast_result_id ",
+    "JOIN go_terms gt ON a.annotation_id = gt.annotation_id ",
+    "WHERE vd.vcf_id || '_' || vd.chromosome || '_' || vd.position IN (", locus_ids_str, ") ",
+    if (nchar(where_clause) > 0) paste(" ", where_clause) else ""
+  )
   
   go_data <- if (length(params) > 0) {
     DBI::dbGetQuery(con, go_query, params)
@@ -683,20 +704,21 @@ generate_go_enrichment_report_section <- function(con, project_id,
 .add_kegg_annotations_to_locus_table <- function(con, locus_data, where_clause, params, verbose) {
   
   # Get KEGG pathways for the loci
-  kegg_query <- paste0("
-    SELECT DISTINCT
-      vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id,
-      kr.kegg_id,
-      kr.pathway_name
-    FROM vcf_data vd
-    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
-    JOIN blast_results br ON fs.flanking_id = br.flanking_id
-    JOIN annotations a ON br.blast_result_id = a.blast_result_id
-    JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
-    WHERE vd.vcf_id || '_' || vd.chromosome || '_' || vd.position IN (", 
-    paste0("'", paste(unique(locus_data$locus_id), collapse = "', '"), "'"),
-    if (nchar(where_clause) > 0) paste(" ", where_clause) else "", "
-  ")
+  locus_ids_str <- paste0("'", paste(unique(locus_data$locus_id), collapse = "', '"), "'")
+  
+  kegg_query <- paste0(
+    "SELECT DISTINCT ",
+    "vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id, ",
+    "kr.kegg_id, ",
+    "kr.pathway_name ",
+    "FROM vcf_data vd ",
+    "JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id ",
+    "JOIN blast_results br ON fs.flanking_id = br.flanking_id ",
+    "JOIN annotations a ON br.blast_result_id = a.blast_result_id ",
+    "JOIN kegg_references kr ON a.annotation_id = kr.annotation_id ",
+    "WHERE vd.vcf_id || '_' || vd.chromosome || '_' || vd.position IN (", locus_ids_str, ") ",
+    if (nchar(where_clause) > 0) paste(" ", where_clause) else ""
+  )
   
   kegg_data <- if (length(params) > 0) {
     DBI::dbGetQuery(con, kegg_query, params)
