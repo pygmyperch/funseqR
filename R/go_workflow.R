@@ -772,21 +772,28 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
   if (verbose) message("  - Creating comprehensive locus information table...")
   
   # Build base query conditions
-  where_conditions <- c()
-  params <- list()
-  
-  if (!is.null(blast_param_id)) {
-    where_conditions <- c(where_conditions, "br.blast_param_id = ?")
-    params <- c(params, list(blast_param_id))
+  # For LEFT JOINs, blast_param_id filtering goes in the JOIN condition
+  blast_param_condition <- if (!is.null(blast_param_id)) {
+    paste("AND br.blast_param_id = ?")
+  } else {
+    ""
   }
   
-  where_clause <- if (length(where_conditions) > 0) {
-    paste("AND", paste(where_conditions, collapse = " AND "))
+  params <- if (!is.null(blast_param_id)) {
+    list(blast_param_id)
+  } else {
+    list()
+  }
+  
+  # Build where clause for annotation subqueries
+  where_clause <- if (!is.null(blast_param_id)) {
+    "AND br.blast_param_id = ?"
   } else {
     ""
   }
   
   # Get candidate and background loci information with annotations
+  # Use LEFT JOINs to include all loci, even those without annotations
   locus_query <- paste0(
     "SELECT DISTINCT ",
     "vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id, ",
@@ -806,11 +813,10 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
     "br.bit_score, ",
     "br.percent_identity ",
     "FROM vcf_data vd ",
-    "JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id ",
-    "JOIN blast_results br ON fs.flanking_id = br.flanking_id ",
-    "JOIN annotations a ON br.blast_result_id = a.blast_result_id ",
+    "LEFT JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id ",
+    "LEFT JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_param_condition, " ",
+    "LEFT JOIN annotations a ON br.blast_result_id = a.blast_result_id ",
     "WHERE (vd.file_id = ? OR vd.file_id = ?) ",
-    where_clause, " ",
     "ORDER BY vd.chromosome, vd.position"
   )
   
@@ -826,11 +832,27 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
   })
   
   if (nrow(locus_data) == 0) {
-    if (verbose) message("    - No loci found with annotations")
+    if (verbose) message("    - No loci found")
     return(data.frame())
   }
   
-  if (verbose) message("    - Found ", nrow(locus_data), " annotated loci")
+  if (verbose) {
+    message("    - Found ", nrow(locus_data), " total loci entries")
+    
+    # Count loci by dataset type for debugging
+    if ("dataset_type" %in% names(locus_data)) {
+      dataset_counts <- table(locus_data$dataset_type)
+      for (dt in names(dataset_counts)) {
+        message("      - ", dt, " loci: ", dataset_counts[dt])
+      }
+    }
+    
+    # Count loci with/without annotations
+    annotated_count <- sum(!is.na(locus_data$uniprot_accession))
+    unannotated_count <- sum(is.na(locus_data$uniprot_accession))
+    message("      - With annotations: ", annotated_count)
+    message("      - Without annotations: ", unannotated_count)
+  }
   
   # Check which annotation tables exist
   available_tables <- DBI::dbListTables(con)
