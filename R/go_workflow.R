@@ -504,6 +504,267 @@ generate_go_enrichment_report_section <- function(con, project_id,
   return(rmd_code)
 }
 
+#' Filter locus information for significantly enriched terms
+#'
+#' Extracts loci that are associated with significantly enriched functional terms
+#' from ORA (Over-Representation Analysis) results.
+#'
+#' @param ora_results List. Results from run_ORA() function
+#' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
+#' @param annotation_types Character vector. Which annotation types to consider: "GO", "KEGG", "Pfam", "InterPro", "eggNOG", or "all". Default is "all"
+#' @param dataset_type Character. Filter by dataset type: "candidate", "background", or "both". Default is "both"
+#' @param return_summary Logical. Include summary statistics. Default is TRUE
+#' @param verbose Logical. Print progress information. Default is TRUE
+#'
+#' @return List containing:
+#' \itemize{
+#'   \item enriched_loci: Data frame of loci associated with enriched terms
+#'   \item enriched_terms: List of significantly enriched terms by annotation type
+#'   \item summary: Summary statistics (if return_summary = TRUE)
+#' }
+#'
+#' @details
+#' This function processes ORA results to identify which genomic loci are
+#' associated with significantly enriched functional terms. It works across
+#' all annotation types and provides flexible filtering options.
+#'
+#' The function:
+#' \enumerate{
+#'   \item Extracts significantly enriched terms from each annotation type
+#'   \item Maps these terms back to their associated genes/proteins
+#'   \item Filters the locus_info table to include only enriched loci
+#'   \item Provides summary statistics and enriched term lists
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' # Run ORA analysis
+#' ora_results <- run_ORA(con, "candidates.vcf", annotation_type = "both")
+#' 
+#' # Get all enriched loci
+#' enriched <- filter_enriched_loci(ora_results)
+#' head(enriched$enriched_loci)
+#' 
+#' # Get only GO-enriched candidate loci
+#' go_candidates <- filter_enriched_loci(
+#'   ora_results, 
+#'   annotation_types = "GO",
+#'   dataset_type = "candidate",
+#'   significance_threshold = 0.1
+#' )
+#' 
+#' # View summary
+#' print(enriched$summary)
+#' }
+#'
+#' @export
+filter_enriched_loci <- function(ora_results, significance_threshold = 0.05, 
+                                 annotation_types = "all", dataset_type = "both",
+                                 return_summary = TRUE, verbose = TRUE) {
+  
+  if (verbose) message("Filtering loci for significantly enriched terms...")
+  
+  # Validate inputs
+  if (!"locus_info" %in% names(ora_results)) {
+    stop("ORA results must contain locus_info table")
+  }
+  
+  if (!"enrichment_results" %in% names(ora_results)) {
+    stop("ORA results must contain enrichment_results")
+  }
+  
+  locus_info <- ora_results$locus_info
+  enrichment_results <- ora_results$enrichment_results
+  
+  # Determine which annotation types to process
+  available_types <- names(enrichment_results)
+  if (annotation_types[1] == "all") {
+    annotation_types <- available_types
+  } else {
+    annotation_types <- intersect(annotation_types, available_types)
+  }
+  
+  if (verbose) message("  - Processing annotation types: ", paste(annotation_types, collapse = ", "))
+  
+  # Extract enriched terms and associated genes
+  enriched_genes <- c()
+  enriched_terms_list <- list()
+  
+  for (ann_type in annotation_types) {
+    if (verbose) message("    - Processing ", ann_type, " enrichment results...")
+    
+    type_results <- enrichment_results[[ann_type]]
+    
+    if (ann_type == "GO") {
+      # GO has multiple ontologies
+      for (ontology in names(type_results)) {
+        results_df <- type_results[[ontology]]
+        if (nrow(results_df) > 0) {
+          significant <- results_df[results_df$p_adjusted < significance_threshold, ]
+          if (nrow(significant) > 0) {
+            # Extract gene IDs from gene_ids column
+            genes <- unique(unlist(strsplit(significant$gene_ids, "/")))
+            enriched_genes <- c(enriched_genes, genes)
+            enriched_terms_list[[paste0(ann_type, "_", ontology)]] <- significant
+            if (verbose) message("      - Found ", nrow(significant), " enriched ", ontology, " terms")
+          }
+        }
+      }
+    } else {
+      # Other annotation types (KEGG, Pfam, etc.)
+      if (is.list(type_results) && length(type_results) > 0) {
+        # Handle case where results are nested (like KEGG$PATHWAY)
+        results_df <- if ("PATHWAY" %in% names(type_results)) {
+          type_results$PATHWAY
+        } else {
+          type_results[[1]]
+        }
+        
+        if (is.data.frame(results_df) && nrow(results_df) > 0) {
+          significant <- results_df[results_df$p_adjusted < significance_threshold, ]
+          if (nrow(significant) > 0) {
+            genes <- unique(unlist(strsplit(significant$gene_ids, "/")))
+            enriched_genes <- c(enriched_genes, genes)
+            enriched_terms_list[[ann_type]] <- significant
+            if (verbose) message("      - Found ", nrow(significant), " enriched ", ann_type, " terms")
+          }
+        }
+      }
+    }
+  }
+  
+  # Remove duplicates and clean gene IDs
+  enriched_genes <- unique(enriched_genes)
+  enriched_genes <- enriched_genes[!is.na(enriched_genes) & enriched_genes != ""]
+  
+  if (verbose) message("  - Total unique genes in enriched terms: ", length(enriched_genes))
+  
+  if (length(enriched_genes) == 0) {
+    warning("No significantly enriched terms found")
+    return(list(
+      enriched_loci = data.frame(),
+      enriched_terms = enriched_terms_list,
+      summary = data.frame()
+    ))
+  }
+  
+  # Filter locus_info for enriched genes
+  enriched_loci <- .filter_loci_by_genes(locus_info, enriched_genes, verbose)
+  
+  # Filter by dataset type if requested
+  if (dataset_type != "both") {
+    enriched_loci <- enriched_loci[enriched_loci$dataset_type == dataset_type, ]
+    if (verbose) message("  - Filtered to ", dataset_type, " loci: ", nrow(enriched_loci))
+  }
+  
+  # Create summary statistics
+  summary_stats <- NULL
+  if (return_summary) {
+    summary_stats <- .create_enriched_loci_summary(enriched_loci, enriched_terms_list, locus_info)
+  }
+  
+  if (verbose) {
+    message("Filtering complete:")
+    message("  - Enriched loci found: ", nrow(enriched_loci))
+    message("  - Candidate loci: ", sum(enriched_loci$dataset_type == "candidate", na.rm = TRUE))
+    message("  - Background loci: ", sum(enriched_loci$dataset_type == "background", na.rm = TRUE))
+  }
+  
+  return(list(
+    enriched_loci = enriched_loci,
+    enriched_terms = enriched_terms_list,
+    summary = summary_stats
+  ))
+}
+
+#' Filter loci by gene IDs
+#' @keywords internal
+.filter_loci_by_genes <- function(locus_info, enriched_genes, verbose) {
+  
+  if (nrow(locus_info) == 0 || length(enriched_genes) == 0) {
+    return(data.frame())
+  }
+  
+  # Create a logical vector for matching loci
+  matches <- rep(FALSE, nrow(locus_info))
+  
+  for (i in 1:nrow(locus_info)) {
+    # Check uniprot_accessions column
+    if (!is.na(locus_info$uniprot_accessions[i])) {
+      accessions <- strsplit(locus_info$uniprot_accessions[i], ";")[[1]]
+      if (any(accessions %in% enriched_genes)) {
+        matches[i] <- TRUE
+        next
+      }
+    }
+    
+    # Check gene_names column if available
+    if ("gene_names" %in% names(locus_info) && !is.na(locus_info$gene_names[i])) {
+      gene_names <- strsplit(locus_info$gene_names[i], ";")[[1]]
+      if (any(gene_names %in% enriched_genes)) {
+        matches[i] <- TRUE
+      }
+    }
+  }
+  
+  filtered_loci <- locus_info[matches, ]
+  
+  if (verbose) message("  - Matched ", nrow(filtered_loci), " loci to enriched genes")
+  
+  return(filtered_loci)
+}
+
+#' Create summary statistics for enriched loci
+#' @keywords internal
+.create_enriched_loci_summary <- function(enriched_loci, enriched_terms_list, all_loci) {
+  
+  if (nrow(enriched_loci) == 0) {
+    return(data.frame())
+  }
+  
+  # Basic statistics
+  total_loci <- nrow(all_loci)
+  enriched_count <- nrow(enriched_loci)
+  enriched_percentage <- round((enriched_count / total_loci) * 100, 2)
+  
+  candidate_enriched <- sum(enriched_loci$dataset_type == "candidate", na.rm = TRUE)
+  background_enriched <- sum(enriched_loci$dataset_type == "background", na.rm = TRUE)
+  
+  total_candidates <- sum(all_loci$dataset_type == "candidate", na.rm = TRUE)
+  total_background <- sum(all_loci$dataset_type == "background", na.rm = TRUE)
+  
+  candidate_enriched_pct <- if (total_candidates > 0) {
+    round((candidate_enriched / total_candidates) * 100, 2)
+  } else 0
+  
+  background_enriched_pct <- if (total_background > 0) {
+    round((background_enriched / total_background) * 100, 2)
+  } else 0
+  
+  # Count enriched terms by type
+  term_counts <- data.frame(
+    annotation_type = names(enriched_terms_list),
+    enriched_terms = sapply(enriched_terms_list, nrow),
+    stringsAsFactors = FALSE
+  )
+  
+  # Create overall summary
+  overall_summary <- data.frame(
+    metric = c("Total loci", "Enriched loci", "Enriched percentage", 
+               "Candidate loci (total)", "Candidate loci (enriched)", "Candidate enriched %",
+               "Background loci (total)", "Background loci (enriched)", "Background enriched %"),
+    value = c(total_loci, enriched_count, enriched_percentage,
+              total_candidates, candidate_enriched, candidate_enriched_pct,
+              total_background, background_enriched, background_enriched_pct),
+    stringsAsFactors = FALSE
+  )
+  
+  return(list(
+    overall = overall_summary,
+    by_annotation_type = term_counts
+  ))
+}
+
 #' Create locus information table for ORA results
 #' @keywords internal
 .create_locus_info_table <- function(con, candidate_file_id, background_file_id, blast_param_id, annotation_type, verbose) {
