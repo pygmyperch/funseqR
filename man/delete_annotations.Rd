@@ -2,9 +2,7 @@
 % Please edit documentation in R/database_management.R
 \name{delete_annotations}
 \alias{delete_annotations}
-\title{==========================ANNOTATIONS DELETION
-
-Delete annotations from the database}
+\title{Delete annotations from the database}
 \usage{
 delete_annotations(con, blast_param_id, confirm = TRUE, verbose = TRUE)
 }

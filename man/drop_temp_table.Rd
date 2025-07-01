@@ -2,9 +2,7 @@
 % Please edit documentation in R/database_management.R
 \name{drop_temp_table}
 \alias{drop_temp_table}
-\title{==========================UTILITY FUNCTIONS
-
-Drop temporary table if it exists}
+\title{Drop temporary table if it exists}
 \usage{
 drop_temp_table(con, table_name, verbose = FALSE)
 }

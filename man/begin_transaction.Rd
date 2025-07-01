@@ -16,11 +16,9 @@ Invisible NULL.
 Centralized functions for database deletion, transaction management, and cleanup operations.
 These functions provide safe, consistent interfaces for managing funseqR database contents.
 }
-\section{==========================
-TRANSACTION MANAGEMENT}{
+\details{
 Begin a transaction in the database
 }
-
 \examples{
 \dontrun{
 con <- connect_funseq_db("analysis.db")

@@ -2,9 +2,7 @@
 % Please edit documentation in R/database_management.R
 \name{delete_vcf_data}
 \alias{delete_vcf_data}
-\title{==========================VCF DATA DELETION
-
-Delete VCF data and associated sequences from the database}
+\title{Delete VCF data and associated sequences from the database}
 \usage{
 delete_vcf_data(con, file_id, confirm = TRUE, verbose = TRUE)
 }

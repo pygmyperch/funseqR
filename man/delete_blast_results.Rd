@@ -2,9 +2,7 @@
 % Please edit documentation in R/database_management.R
 \name{delete_blast_results}
 \alias{delete_blast_results}
-\title{==========================BLAST RESULTS DELETION
-
-Delete BLAST results from the database}
+\title{Delete BLAST results from the database}
 \usage{
 delete_blast_results(con, blast_param_id, confirm = TRUE, verbose = TRUE)
 }

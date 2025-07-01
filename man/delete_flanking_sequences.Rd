@@ -2,9 +2,7 @@
 % Please edit documentation in R/database_management.R
 \name{delete_flanking_sequences}
 \alias{delete_flanking_sequences}
-\title{==========================FLANKING SEQUENCES DELETION
-
-Delete flanking sequences from the database}
+\title{Delete flanking sequences from the database}
 \usage{
 delete_flanking_sequences(con, vcf_file_id, confirm = TRUE, verbose = TRUE)
 }

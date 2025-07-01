@@ -2,9 +2,7 @@
 % Please edit documentation in R/database_management.R
 \name{delete_ora_results}
 \alias{delete_ora_results}
-\title{==========================ORA RESULTS DELETION
-
-Delete Over-Representation Analysis (ORA) results from the database}
+\title{Delete Over-Representation Analysis (ORA) results from the database}
 \usage{
 delete_ora_results(con, analysis_id, confirm = TRUE, verbose = TRUE)
 }
