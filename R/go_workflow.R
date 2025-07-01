@@ -893,7 +893,7 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
     locus_data %>%
       dplyr::group_by(locus_id, chromosome, position, ref, alt, dataset_type) %>%
       dplyr::summarise(
-        uniprot_accessions = paste(unique(uniprot_accession), collapse = ";"),
+        uniprot_accessions = paste(unique(na.omit(uniprot_accession)), collapse = ";"),
         gene_names = paste(unique(na.omit(gene_names)), collapse = ";"),
         entry_names = paste(unique(na.omit(entry_name)), collapse = ";"),
         best_e_value = ifelse(all(is.na(e_value)), NA_real_, min(e_value, na.rm = TRUE)),
