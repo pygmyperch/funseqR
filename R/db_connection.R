@@ -165,41 +165,5 @@ get_db_path <- function(con) {
 
 # INTERNAL
 
-#' Begin a transaction in the database
-#'
-#' @param con A database connection object.
-#'
-#' @return Invisible NULL.
-#'
-#' @importFrom DBI dbExecute
-#'
-begin_transaction <- function(con) {
-  DBI::dbExecute(con, "BEGIN TRANSACTION")
-  return(invisible(NULL))
-}
-
-#' Commit a transaction in the database
-#'
-#' @param con A database connection object.
-#'
-#' @return Invisible NULL.
-#'
-#' @importFrom DBI dbExecute
-#'
-commit_transaction <- function(con) {
-  DBI::dbExecute(con, "COMMIT")
-  return(invisible(NULL))
-}
-
-#' Rollback a transaction in the database
-#'
-#' @param con A database connection object.
-#'
-#' @return Invisible NULL.
-#'
-#' @importFrom DBI dbExecute
-#'
-rollback_transaction <- function(con) {
-  DBI::dbExecute(con, "ROLLBACK")
-  return(invisible(NULL))
-}
+# NOTE: begin_transaction(), commit_transaction(), and rollback_transaction() have been moved to database_management.R
+# This consolidates all database transaction management functions in a single location.

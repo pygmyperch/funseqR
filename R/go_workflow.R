@@ -892,9 +892,10 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
         uniprot_accessions = paste(unique(uniprot_accession), collapse = ";"),
         gene_names = paste(unique(na.omit(gene_names)), collapse = ";"),
         entry_names = paste(unique(na.omit(entry_name)), collapse = ";"),
-        best_e_value = min(e_value, na.rm = TRUE),
-        best_bit_score = max(bit_score, na.rm = TRUE),
-        avg_percent_identity = round(mean(percent_identity, na.rm = TRUE), 2),
+        best_e_value = ifelse(all(is.na(e_value)), NA_real_, min(e_value, na.rm = TRUE)),
+        best_bit_score = ifelse(all(is.na(bit_score)), NA_real_, max(bit_score, na.rm = TRUE)),
+        avg_percent_identity = ifelse(all(is.na(percent_identity)), NA_real_, 
+                                      round(mean(percent_identity, na.rm = TRUE), 2)),
         annotation_count = dplyr::n(),
         .groups = "drop"
       )

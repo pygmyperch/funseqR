@@ -696,76 +696,8 @@ count_blast_results <- function(con, blast_param_id = NULL) {
   }
 }
 
-#' Delete BLAST results from the database
-#'
-#' @param con A database connection object.
-#' @param blast_param_id The ID of the BLAST parameters.
-#' @param confirm Logical. If TRUE, user confirmation will be required. Default is TRUE.
-#' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
-#'
-#' @return Logical. TRUE if the deletion was successful.
-#'
-#' @importFrom DBI dbExecute dbGetQuery
-#' @export
-delete_blast_results <- function(con, blast_param_id, confirm = TRUE, verbose = TRUE) {
-  # Check if BLAST parameters exist
-  params <- DBI::dbGetQuery(
-    con,
-    "SELECT * FROM blast_parameters WHERE blast_param_id = ?",
-    params = list(blast_param_id)
-  )
-
-  if (nrow(params) == 0) {
-    stop("BLAST parameters with ID ", blast_param_id, " not found.")
-  }
-
-  # Count results
-  count <- DBI::dbGetQuery(
-    con,
-    "SELECT COUNT(*) AS count FROM blast_results WHERE blast_param_id = ?",
-    params = list(blast_param_id)
-  )$count
-
-  if (count == 0) {
-    if (verbose) message("No BLAST results found for parameter ID ", blast_param_id)
-    return(TRUE)
-  }
-
-  # Confirm deletion
-  if (confirm) {
-    answer <- readline(paste0("Are you sure you want to delete ", count,
-                             " BLAST results for parameter ID ", blast_param_id,
-                             "? (y/n): "))
-
-    if (tolower(answer) != "y") {
-      message("BLAST results deletion cancelled.")
-      return(FALSE)
-    }
-  }
-
-  # Start transaction
-  DBI::dbExecute(con, "BEGIN TRANSACTION")
-
-  tryCatch({
-    # Delete BLAST results
-    deleted <- DBI::dbExecute(
-      con,
-      "DELETE FROM blast_results WHERE blast_param_id = ?",
-      params = list(blast_param_id)
-    )
-
-    # Commit transaction
-    DBI::dbExecute(con, "COMMIT")
-
-    if (verbose) message("Deleted ", deleted, " BLAST results.")
-
-    return(TRUE)
-  }, error = function(e) {
-    # Rollback transaction on error
-    DBI::dbExecute(con, "ROLLBACK")
-    stop("Error deleting BLAST results: ", e$message)
-  })
-}
+# NOTE: delete_blast_results() function has been moved to database_management.R
+# This consolidates all database deletion functions in a single location.
 
 
 # INTERNAL
