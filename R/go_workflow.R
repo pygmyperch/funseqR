@@ -820,8 +820,12 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
     "ORDER BY vd.chromosome, vd.position"
   )
   
-  # Parameters: candidate_file_id, background_file_id, candidate_file_id, background_file_id, [blast_param_id]
-  query_params <- c(list(candidate_file_id, background_file_id, candidate_file_id, background_file_id), params)
+  # Parameters: candidate_file_id, background_file_id, [blast_param_id], candidate_file_id, background_file_id
+  if (!is.null(blast_param_id)) {
+    query_params <- list(candidate_file_id, background_file_id, blast_param_id, candidate_file_id, background_file_id)
+  } else {
+    query_params <- list(candidate_file_id, background_file_id, candidate_file_id, background_file_id)
+  }
   
   # Execute query with error handling
   locus_data <- tryCatch({
