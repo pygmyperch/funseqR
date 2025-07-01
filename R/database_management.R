@@ -4,9 +4,9 @@
 #' These functions provide safe, consistent interfaces for managing funseqR database contents.
 #'
 
-#' ==========================
-#' TRANSACTION MANAGEMENT
-#' ==========================
+# ==========================
+# TRANSACTION MANAGEMENT  
+# ==========================
 
 #' Begin a transaction in the database
 #'
@@ -68,9 +68,9 @@ rollback_transaction <- function(con) {
   return(invisible(NULL))
 }
 
-#' ==========================
-#' ORA RESULTS DELETION
-#' ==========================
+# ==========================
+# ORA RESULTS DELETION
+# ==========================
 
 #' Delete Over-Representation Analysis (ORA) results from the database
 #'
@@ -222,9 +222,9 @@ delete_ora_results <- function(con, analysis_id, confirm = TRUE, verbose = TRUE)
   })
 }
 
-#' ==========================
-#' BLAST RESULTS DELETION
-#' ==========================
+# ==========================
+# BLAST RESULTS DELETION
+# ==========================
 
 #' Delete BLAST results from the database
 #'
@@ -305,9 +305,9 @@ delete_blast_results <- function(con, blast_param_id, confirm = TRUE, verbose = 
   })
 }
 
-#' ==========================
-#' VCF DATA DELETION
-#' ==========================
+# ==========================
+# VCF DATA DELETION
+# ==========================
 
 #' Delete VCF data and associated sequences from the database
 #'
@@ -408,9 +408,9 @@ delete_vcf_data <- function(con, file_id, confirm = TRUE, verbose = TRUE) {
   })
 }
 
-#' ==========================
-#' FLANKING SEQUENCES DELETION
-#' ==========================
+# ==========================
+# FLANKING SEQUENCES DELETION
+# ==========================
 
 #' Delete flanking sequences from the database
 #'
@@ -493,9 +493,9 @@ delete_flanking_sequences <- function(con, vcf_file_id, confirm = TRUE, verbose 
   })
 }
 
-#' ==========================
-#' ANNOTATIONS DELETION
-#' ==========================
+# ==========================
+# ANNOTATIONS DELETION
+# ==========================
 
 #' Delete annotations from the database
 #'
@@ -629,9 +629,9 @@ delete_annotations <- function(con, blast_param_id, confirm = TRUE, verbose = TR
   })
 }
 
-#' ==========================
-#' UTILITY FUNCTIONS
-#' ==========================
+# ==========================
+# UTILITY FUNCTIONS
+# ==========================
 
 #' Drop temporary table if it exists
 #'
