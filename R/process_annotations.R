@@ -197,8 +197,8 @@ compile_funseq_results <- function(con,
       a.uniprot_accession,
       GROUP_CONCAT(DISTINCT a.annotation_id) as annotation_ids
     FROM vcf_data vd
-    JOIN flanking_sequences fs ON vd.flanking_seq_id = fs.flanking_seq_id
-    JOIN blast_results br ON fs.flanking_seq_id = br.flanking_seq_id
+    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id
     JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     ", base_where, "
