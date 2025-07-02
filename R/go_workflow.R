@@ -47,6 +47,9 @@
 #' When blast_param_id is specified, only annotations from that specific BLAST run
 #' are used for both candidate and background datasets, ensuring methodological 
 #' consistency and enabling comparison of different annotation strategies.
+#' 
+#' The locus_info table contains one row per unique genomic locus from the background
+#' dataset, with proper labeling of candidate vs. background loci (no duplicates).
 #'
 #' @examples
 #' \dontrun{
@@ -792,7 +795,7 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
     ""
   }
   
-  # Get candidate and background loci information with annotations
+  # Get all loci from background file with annotations
   # Use LEFT JOINs to include all loci, even those without annotations
   locus_query <- paste0(
     "SELECT DISTINCT ",
@@ -801,11 +804,6 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
     "vd.position, ",
     "vd.ref, ",
     "vd.alt, ",
-    "CASE ",
-    "  WHEN vd.file_id = ? THEN 'candidate' ",
-    "  WHEN vd.file_id = ? THEN 'background' ",
-    "  ELSE 'other' ",
-    "END as dataset_type, ",
     "a.uniprot_accession, ",
     "a.entry_name, ",
     "a.gene_names, ",
@@ -816,15 +814,15 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
     "LEFT JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id ",
     "LEFT JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_param_condition, " ",
     "LEFT JOIN annotations a ON br.blast_result_id = a.blast_result_id ",
-    "WHERE (vd.file_id = ? OR vd.file_id = ?) ",
+    "WHERE vd.file_id = ? ",
     "ORDER BY vd.chromosome, vd.position"
   )
   
-  # Parameters: candidate_file_id, background_file_id, [blast_param_id], candidate_file_id, background_file_id
+  # Parameters: background_file_id, [blast_param_id]
   if (!is.null(blast_param_id)) {
-    query_params <- list(candidate_file_id, background_file_id, blast_param_id, candidate_file_id, background_file_id)
+    query_params <- list(background_file_id, blast_param_id)
   } else {
-    query_params <- list(candidate_file_id, background_file_id, candidate_file_id, background_file_id)
+    query_params <- list(background_file_id)
   }
   
   # Execute query with error handling
@@ -888,10 +886,19 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
     message("    - eggNOG table not found, skipping eggNOG annotations")
   }
   
+  # Identify candidate loci from the candidate file using helper function
+  if (verbose) message("    - Identifying candidate loci...")
+  candidate_file_query <- "SELECT file_name FROM input_files WHERE file_id = ?"
+  candidate_file_name <- DBI::dbGetQuery(con, candidate_file_query, list(candidate_file_id))$file_name[1]
+  candidate_locus_ids <- .identify_candidate_loci(con, candidate_file_name, verbose = verbose)
+  
+  if (verbose) message("    - Found ", length(candidate_locus_ids), " candidate loci out of ", 
+                       length(unique(locus_data$locus_id)), " total loci")
+  
   # Create summary by locus (aggregate multiple annotations per locus)
   summary_data <- tryCatch({
     locus_data %>%
-      dplyr::group_by(locus_id, chromosome, position, ref, alt, dataset_type) %>%
+      dplyr::group_by(locus_id, chromosome, position, ref, alt) %>%
       dplyr::summarise(
         uniprot_accessions = paste(unique(na.omit(uniprot_accession)), collapse = ";"),
         gene_names = paste(unique(na.omit(gene_names)), collapse = ";"),
@@ -902,6 +909,9 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
                                       round(mean(percent_identity, na.rm = TRUE), 2)),
         annotation_count = dplyr::n(),
         .groups = "drop"
+      ) %>%
+      dplyr::mutate(
+        dataset_type = ifelse(locus_id %in% candidate_locus_ids, "candidate", "background")
       )
   }, error = function(e) {
     if (verbose) message("    - Error processing locus data: ", e$message)

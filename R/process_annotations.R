@@ -8,6 +8,13 @@
 #' @param con Database connection object from annotate_blast_results()
 #' @param include Character vector. Types of annotations to include: "GO", "KEGG", or both. Default is c("GO", "KEGG")
 #' @param blast_param_id Integer. Optional. Specific BLAST parameter set to use. If NULL, uses all available annotations
+#' @param candidate_loci Character or data.frame. Optional. Candidate loci specification:
+#'   \itemize{
+#'     \item VCF file path (e.g., "candidates.vcf") - file must be registered in database
+#'     \item Data frame with 'chromosome' and 'position' columns
+#'     \item Vector of locus_ids in format "vcf_id_chromosome_position"
+#'     \item NULL (default) - all loci labeled as "background"
+#'   }
 #' @param export_csv Character. Optional. File path to export results as CSV
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
@@ -19,6 +26,7 @@
 #'   \item gene_name: Primary gene name (from UniProt)
 #'   \item protein_name: Protein description
 #'   \item uniprot_accession: UniProt accession number
+#'   \item dataset_type: "candidate" or "background" (based on candidate_loci parameter)
 #'   \item go_terms: Semi-colon separated GO term IDs (if "GO" included)
 #'   \item go_names: Semi-colon separated GO term names (if "GO" included)
 #'   \item go_categories: Semi-colon separated GO categories (BP/MF/CC) (if "GO" included)
@@ -49,18 +57,27 @@
 #' blast_results <- run_blast(sequences, database)
 #' con <- annotate_blast_results(blast_results)
 #' 
-#' # Process all annotations
+#' # Process all annotations (all labeled as "background")
 #' annotations <- process_annotations(con, include = c("GO", "KEGG"))
 #' 
-#' # Process only KEGG annotations
-#' kegg_only <- process_annotations(con, include = "KEGG")
-#' 
-#' # Export to CSV for external analysis
+#' # Process annotations with candidate loci flagging from VCF file
 #' annotations <- process_annotations(
 #'   con, 
 #'   include = c("GO", "KEGG"),
-#'   export_csv = "functional_annotations.csv"
+#'   candidate_loci = "candidates.vcf",
+#'   export_csv = "functional_annotations_with_candidates.csv"
 #' )
+#' 
+#' # Use coordinate data frame for candidate specification
+#' candidates_df <- data.frame(
+#'   chromosome = c("LG1", "LG2", "LG3"),
+#'   position = c(12345, 67890, 54321)
+#' )
+#' annotations <- process_annotations(con, candidate_loci = candidates_df)
+#' 
+#' # Easy filtering for downstream analysis
+#' candidate_annotations <- annotations[annotations$dataset_type == "candidate", ]
+#' background_annotations <- annotations[annotations$dataset_type == "background", ]
 #' 
 #' # Use with enrichment analysis
 #' go_enrichment <- run_go_enrichment_analysis(annotations, candidate_loci)
@@ -71,7 +88,7 @@
 #' @importFrom magrittr %>%
 #' @export
 process_annotations <- function(con, include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"), blast_param_id = NULL, 
-                               export_csv = NULL, verbose = TRUE) {
+                               candidate_loci = NULL, export_csv = NULL, verbose = TRUE) {
   
   if (verbose) message("Processing functional annotations...")
   
@@ -145,6 +162,14 @@ process_annotations <- function(con, include = c("GO", "KEGG", "Pfam", "InterPro
   
   if (verbose) message("    - Found ", nrow(base_data), " annotated loci")
   
+  # Identify candidate loci if specified
+  candidate_locus_ids <- character(0)
+  if (!is.null(candidate_loci)) {
+    if (verbose) message("  - Identifying candidate loci...")
+    candidate_locus_ids <- .identify_candidate_loci(con, candidate_loci, verbose)
+    if (verbose) message("    - Identified ", length(candidate_locus_ids), " candidate loci")
+  }
+  
   # Process basic information
   result_data <- base_data %>%
     group_by(locus_id, chromosome, position) %>%
@@ -154,6 +179,9 @@ process_annotations <- function(con, include = c("GO", "KEGG", "Pfam", "InterPro
       uniprot_accession = paste(unique(uniprot_accession), collapse = ";"),
       annotation_ids = list(unique(annotation_id)),
       .groups = "drop"
+    ) %>%
+    mutate(
+      dataset_type = ifelse(locus_id %in% candidate_locus_ids, "candidate", "background")
     )
   
   # Process GO annotations if requested
@@ -668,6 +696,142 @@ process_annotations <- function(con, include = c("GO", "KEGG", "Pfam", "InterPro
   }
   
   return(result_data)
+}
+
+#' Identify candidate loci from various input formats
+#' @keywords internal
+.identify_candidate_loci <- function(con, candidate_input, verbose = FALSE) {
+  
+  if (is.null(candidate_input)) {
+    return(character(0))
+  }
+  
+  candidate_loci <- character(0)
+  
+  # Handle different input types
+  if (is.character(candidate_input) && length(candidate_input) == 1) {
+    # Assume it's a file path
+    if (file.exists(candidate_input)) {
+      # Check file extension
+      if (grepl("\\.vcf$", candidate_input, ignore.case = TRUE)) {
+        # VCF file - get file_id and extract loci
+        if (verbose) message("    - Processing VCF file: ", basename(candidate_input))
+        
+        # Check if file is already registered
+        file_check <- DBI::dbGetQuery(con, 
+          "SELECT file_id FROM input_files WHERE file_name = ? AND file_type = 'vcf'",
+          list(basename(candidate_input)))
+        
+        if (nrow(file_check) > 0) {
+          file_id <- file_check$file_id[1]
+          
+          # Extract locus_ids for this file
+          loci_query <- "SELECT DISTINCT vcf_id || '_' || chromosome || '_' || position as locus_id 
+                         FROM vcf_data WHERE file_id = ?"
+          
+          loci_result <- DBI::dbGetQuery(con, loci_query, list(file_id))
+          candidate_loci <- loci_result$locus_id
+          
+          if (verbose) message("    - Found ", length(candidate_loci), " candidate loci from VCF")
+          
+        } else {
+          warning("VCF file '", basename(candidate_input), "' not found in database. Use import_vcf_to_db() first.")
+        }
+        
+      } else if (grepl("\\.(bed|txt|csv)$", candidate_input, ignore.case = TRUE)) {
+        # BED/coordinate file
+        if (verbose) message("    - Processing coordinate file: ", basename(candidate_input))
+        
+        coords <- read.table(candidate_input, header = FALSE, sep = "\t", stringsAsFactors = FALSE)
+        
+        if (ncol(coords) >= 3) {
+          # BED format: chr, start, end
+          coords_df <- data.frame(
+            chromosome = coords[, 1],
+            position = coords[, 2],  # Use start position
+            stringsAsFactors = FALSE
+          )
+        } else if (ncol(coords) >= 2) {
+          # Simple format: chr, position
+          coords_df <- data.frame(
+            chromosome = coords[, 1],
+            position = coords[, 2],
+            stringsAsFactors = FALSE
+          )
+        } else {
+          stop("Coordinate file must have at least 2 columns (chromosome, position)")
+        }
+        
+        candidate_loci <- .match_coordinates_to_loci(con, coords_df, verbose)
+      }
+    } else {
+      stop("File not found: ", candidate_input)
+    }
+    
+  } else if (is.data.frame(candidate_input)) {
+    # Data frame with coordinates
+    if (verbose) message("    - Processing coordinate data frame")
+    
+    required_cols <- c("chromosome", "position")
+    if (!all(required_cols %in% names(candidate_input))) {
+      stop("Data frame must contain 'chromosome' and 'position' columns")
+    }
+    
+    candidate_loci <- .match_coordinates_to_loci(con, candidate_input, verbose)
+    
+  } else if (is.character(candidate_input) && length(candidate_input) > 1) {
+    # Vector of locus_ids already in correct format
+    if (verbose) message("    - Using provided locus_id vector")
+    candidate_loci <- candidate_input
+    
+  } else {
+    stop("Unsupported candidate_input format. Use VCF file path, coordinate data frame, or locus_id vector.")
+  }
+  
+  return(unique(candidate_loci))
+}
+
+#' Match coordinate data frame to database loci
+#' @keywords internal
+.match_coordinates_to_loci <- function(con, coords_df, verbose = FALSE) {
+  
+  if (nrow(coords_df) == 0) {
+    return(character(0))
+  }
+  
+  # Create a temporary table for efficient matching
+  temp_table <- paste0("temp_candidates_", sample(1000:9999, 1))
+  
+  # Create temporary table
+  create_temp_sql <- paste0("CREATE TEMP TABLE ", temp_table, " (
+    chromosome TEXT,
+    position INTEGER
+  )")
+  
+  DBI::dbExecute(con, create_temp_sql)
+  
+  # Insert coordinates
+  insert_sql <- paste0("INSERT INTO ", temp_table, " (chromosome, position) VALUES (?, ?)")
+  
+  for (i in 1:nrow(coords_df)) {
+    DBI::dbExecute(con, insert_sql, list(coords_df$chromosome[i], coords_df$position[i]))
+  }
+  
+  # Match to existing loci
+  match_query <- paste0("
+    SELECT DISTINCT vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id
+    FROM vcf_data vd
+    JOIN ", temp_table, " tc ON vd.chromosome = tc.chromosome AND vd.position = tc.position
+  ")
+  
+  loci_result <- DBI::dbGetQuery(con, match_query)
+  
+  # Clean up temporary table
+  DBI::dbExecute(con, paste0("DROP TABLE ", temp_table))
+  
+  if (verbose) message("    - Matched ", nrow(loci_result), " coordinates to database loci")
+  
+  return(loci_result$locus_id)
 }
 
 #' Process eggNOG annotations for loci
