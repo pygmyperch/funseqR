@@ -85,6 +85,9 @@ This function performs complete Over-Representation Analysis (ORA) workflow:
 When blast_param_id is specified, only annotations from that specific BLAST run
 are used for both candidate and background datasets, ensuring methodological
 consistency and enabling comparison of different annotation strategies.
+
+The locus_info table contains one row per unique genomic locus from the background
+dataset, with proper labeling of candidate vs. background loci (no duplicates).
 }
 \examples{
 \dontrun{

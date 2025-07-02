@@ -8,6 +8,7 @@ process_annotations(
   con,
   include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"),
   blast_param_id = NULL,
+  candidate_loci = NULL,
   export_csv = NULL,
   verbose = TRUE
 )
@@ -18,6 +19,14 @@ process_annotations(
 \item{include}{Character vector. Types of annotations to include: "GO", "KEGG", or both. Default is c("GO", "KEGG")}
 
 \item{blast_param_id}{Integer. Optional. Specific BLAST parameter set to use. If NULL, uses all available annotations}
+
+\item{candidate_loci}{Character or data.frame. Optional. Candidate loci specification:
+\itemize{
+\item VCF file path (e.g., "candidates.vcf") - file must be registered in database
+\item Data frame with 'chromosome' and 'position' columns
+\item Vector of locus_ids in format "vcf_id_chromosome_position"
+\item NULL (default) - all loci labeled as "background"
+}}
 
 \item{export_csv}{Character. Optional. File path to export results as CSV}
 
@@ -32,6 +41,7 @@ Data frame with standardized functional annotations:
 \item gene_name: Primary gene name (from UniProt)
 \item protein_name: Protein description
 \item uniprot_accession: UniProt accession number
+\item dataset_type: "candidate" or "background" (based on candidate_loci parameter)
 \item go_terms: Semi-colon separated GO term IDs (if "GO" included)
 \item go_names: Semi-colon separated GO term names (if "GO" included)
 \item go_categories: Semi-colon separated GO categories (BP/MF/CC) (if "GO" included)
@@ -68,18 +78,27 @@ or exported for external analysis tools.
 blast_results <- run_blast(sequences, database)
 con <- annotate_blast_results(blast_results)
 
-# Process all annotations
+# Process all annotations (all labeled as "background")
 annotations <- process_annotations(con, include = c("GO", "KEGG"))
 
-# Process only KEGG annotations
-kegg_only <- process_annotations(con, include = "KEGG")
-
-# Export to CSV for external analysis
+# Process annotations with candidate loci flagging from VCF file
 annotations <- process_annotations(
   con, 
   include = c("GO", "KEGG"),
-  export_csv = "functional_annotations.csv"
+  candidate_loci = "candidates.vcf",
+  export_csv = "functional_annotations_with_candidates.csv"
 )
+
+# Use coordinate data frame for candidate specification
+candidates_df <- data.frame(
+  chromosome = c("LG1", "LG2", "LG3"),
+  position = c(12345, 67890, 54321)
+)
+annotations <- process_annotations(con, candidate_loci = candidates_df)
+
+# Easy filtering for downstream analysis
+candidate_annotations <- annotations[annotations$dataset_type == "candidate", ]
+background_annotations <- annotations[annotations$dataset_type == "background", ]
 
 # Use with enrichment analysis
 go_enrichment <- run_go_enrichment_analysis(annotations, candidate_loci)
