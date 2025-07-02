@@ -366,9 +366,30 @@ compile_funseq_results <- function(con,
   
   if (verbose) message("    - Retrieving enrichment results from database...")
   
-  # Get all significant enrichment results for the analysis IDs
+  # First check if analysis_ids exist
   analysis_ids_str <- paste(analysis_ids, collapse = ", ")
   
+  check_query <- paste0("
+    SELECT analysis_id FROM ora_analyses 
+    WHERE analysis_id IN (", analysis_ids_str, ")
+  ")
+  
+  existing_ids <- DBI::dbGetQuery(con, check_query)$analysis_id
+  
+  if (length(existing_ids) == 0) {
+    if (verbose) message("    - No analyses found for IDs: ", analysis_ids_str)
+    return(data.frame())
+  }
+  
+  if (length(existing_ids) < length(analysis_ids)) {
+    missing_ids <- setdiff(analysis_ids, existing_ids)
+    if (verbose) message("    - Warning: Analysis IDs not found: ", paste(missing_ids, collapse = ", "))
+  }
+  
+  # Use only existing IDs
+  analysis_ids_str <- paste(existing_ids, collapse = ", ")
+  
+  # Improved query with data type handling to fix potential data type issues
   enrichment_query <- paste0("
     SELECT DISTINCT
       ora.analysis_id,
@@ -383,8 +404,10 @@ compile_funseq_results <- function(con,
     FROM ora_analyses ora
     JOIN ora_results res ON ora.analysis_id = res.analysis_id
     WHERE ora.analysis_id IN (", analysis_ids_str, ")
-      AND res.p_adjusted <= ?
-    ORDER BY res.p_adjusted
+      AND res.p_adjusted IS NOT NULL
+      AND res.p_adjusted != ''
+      AND CAST(res.p_adjusted AS REAL) <= ?
+    ORDER BY CAST(res.p_adjusted AS REAL)
   ")
   
   enrichment_data <- DBI::dbGetQuery(con, enrichment_query, list(significance_threshold))
@@ -395,6 +418,34 @@ compile_funseq_results <- function(con,
       by_analysis <- table(enrichment_data$analysis_id)
       for (i in names(by_analysis)) {
         message("      - Analysis ID ", i, ": ", by_analysis[i], " terms")
+      }
+    } else {
+      # Debug output when no results found
+      debug_query <- paste0("
+        SELECT 
+          ora.analysis_id,
+          COUNT(*) as total_results,
+          MIN(CAST(res.p_adjusted AS REAL)) as min_padj,
+          MAX(CAST(res.p_adjusted AS REAL)) as max_padj,
+          SUM(CASE WHEN CAST(res.p_adjusted AS REAL) <= ? THEN 1 ELSE 0 END) as significant_count
+        FROM ora_analyses ora
+        JOIN ora_results res ON ora.analysis_id = res.analysis_id
+        WHERE ora.analysis_id IN (", analysis_ids_str, ")
+          AND res.p_adjusted IS NOT NULL
+          AND res.p_adjusted != ''
+        GROUP BY ora.analysis_id
+      ")
+      debug_info <- DBI::dbGetQuery(con, debug_query, list(significance_threshold))
+      if (nrow(debug_info) > 0) {
+        message("    - Debug: Results by analysis ID:")
+        for (i in 1:nrow(debug_info)) {
+          row <- debug_info[i, ]
+          message("      - Analysis ID ", row$analysis_id, ": ", row$total_results, " total, ", 
+                  row$significant_count, " significant (p_adj <= ", significance_threshold, ")")
+          message("        Min p_adjusted: ", round(row$min_padj, 6), ", Max p_adjusted: ", round(row$max_padj, 6))
+        }
+      } else {
+        message("    - No results found in ora_results table for these analysis IDs")
       }
     }
   }
