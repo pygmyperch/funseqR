@@ -149,18 +149,152 @@ compile_funseq_results <- function(con,
   
   if (verbose) message("  - Compiling functional annotations...")
   
-  # Call the existing process_annotations logic
-  # This maintains all existing functionality
-  result <- process_annotations(
-    con = con,
-    include = include,
-    blast_param_id = blast_param_id,
-    candidate_loci = candidate_loci,
-    export_csv = NULL,  # Handle export at main function level
-    verbose = verbose
-  )
+  # Validate inputs
+  valid_types <- c("GO", "KEGG", "Pfam", "InterPro", "eggNOG")
+  include <- match.arg(include, valid_types, several.ok = TRUE)
   
-  return(result)
+  if (verbose) {
+    message("    - Including annotations: ", paste(include, collapse = ", "))
+    if (!is.null(blast_param_id)) {
+      message("    - Using BLAST parameter set: ", blast_param_id)
+    }
+  }
+  
+  # Check database tables
+  tables <- DBI::dbListTables(con)
+  required_base_tables <- c("vcf_data", "flanking_sequences", "blast_results", "annotations")
+  missing_tables <- required_base_tables[!required_base_tables %in% tables]
+  
+  if (length(missing_tables) > 0) {
+    stop("Missing required tables: ", paste(missing_tables, collapse = ", "))
+  }
+  
+  # Build base query for loci with annotations
+  base_conditions <- c()
+  params <- list()
+  
+  if (!is.null(blast_param_id)) {
+    base_conditions <- c(base_conditions, "bp.blast_param_id = ?")
+    params <- append(params, blast_param_id)
+  }
+  
+  base_where <- if (length(base_conditions) > 0) {
+    paste0("WHERE ", paste(base_conditions, collapse = " AND "))
+  } else {
+    ""
+  }
+  
+  if (verbose) message("    - Extracting loci with annotations...")
+  
+  # Build comprehensive query for all required data
+  query <- paste0("
+    SELECT DISTINCT
+      vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id,
+      vd.chromosome,
+      vd.position,
+      a.gene_name,
+      a.protein_name,
+      a.uniprot_accession,
+      GROUP_CONCAT(DISTINCT a.annotation_id) as annotation_ids
+    FROM vcf_data vd
+    JOIN flanking_sequences fs ON vd.flanking_seq_id = fs.flanking_seq_id
+    JOIN blast_results br ON fs.flanking_seq_id = br.flanking_seq_id
+    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
+    JOIN annotations a ON br.blast_result_id = a.blast_result_id
+    ", base_where, "
+    GROUP BY vd.vcf_id, vd.chromosome, vd.position, a.gene_name, a.protein_name, a.uniprot_accession
+    ORDER BY vd.chromosome, vd.position
+  ")
+  
+  # Execute query with parameters
+  result_data <- if (length(params) > 0) {
+    DBI::dbGetQuery(con, query, params)
+  } else {
+    DBI::dbGetQuery(con, query)
+  }
+  
+  if (nrow(result_data) == 0) {
+    if (verbose) message("    - No annotated loci found")
+    return(data.frame())
+  }
+  
+  if (verbose) message("    - Found ", nrow(result_data), " annotated loci")
+  
+  # Convert annotation_ids to lists for processing
+  result_data$annotation_ids <- lapply(strsplit(result_data$annotation_ids, ","), as.integer)
+  
+  # Process each annotation type
+  if ("GO" %in% include) {
+    if (verbose) message("    - Processing GO annotations...")
+    result_data <- .process_go_annotations(con, result_data, base_where, params, verbose)
+  }
+  
+  if ("KEGG" %in% include) {
+    if (verbose) message("    - Processing KEGG annotations...")
+    result_data <- .process_kegg_annotations(con, result_data, base_where, params, verbose)
+  }
+  
+  if ("Pfam" %in% include) {
+    if (verbose) message("    - Processing Pfam annotations...")
+    result_data <- .process_pfam_annotations(con, result_data, base_where, params, verbose)
+  }
+  
+  if ("InterPro" %in% include) {
+    if (verbose) message("    - Processing InterPro annotations...")
+    result_data <- .process_interpro_annotations(con, result_data, base_where, params, verbose)
+  }
+  
+  if ("eggNOG" %in% include) {
+    if (verbose) message("    - Processing eggNOG annotations...")
+    result_data <- .process_eggnog_annotations(con, result_data, base_where, params, verbose)
+  }
+  
+  # Add candidate loci flagging if requested
+  if (!is.null(candidate_loci)) {
+    if (verbose) message("    - Identifying candidate loci...")
+    candidate_locus_ids <- .identify_candidate_loci(con, candidate_loci, verbose)
+    result_data$dataset_type <- ifelse(result_data$locus_id %in% candidate_locus_ids, "candidate", "background")
+    
+    if (verbose) {
+      candidate_count <- sum(result_data$dataset_type == "candidate")
+      background_count <- sum(result_data$dataset_type == "background")
+      message("    - Candidates: ", candidate_count, ", Background: ", background_count)
+    }
+  } else {
+    result_data$dataset_type <- "background"
+  }
+  
+  # Remove the annotation_ids helper column
+  result_data$annotation_ids <- NULL
+  
+  # Summary message
+  if (verbose) {
+    message("    - Processing completed!")
+    message("    - Total loci: ", nrow(result_data))
+    
+    if ("GO" %in% include) {
+      go_count <- sum(!is.na(result_data$go_terms) & result_data$go_terms != "", na.rm = TRUE)
+      message("    - Loci with GO annotations: ", go_count)
+    }
+    if ("KEGG" %in% include) {
+      kegg_count <- sum(!is.na(result_data$kegg_pathways) & result_data$kegg_pathways != "", na.rm = TRUE)
+      message("    - Loci with KEGG annotations: ", kegg_count)
+    }
+    if ("Pfam" %in% include) {
+      pfam_count <- sum(!is.na(result_data$pfam_domains) & result_data$pfam_domains != "", na.rm = TRUE)
+      message("    - Loci with Pfam annotations: ", pfam_count)
+    }
+    if ("InterPro" %in% include) {
+      interpro_count <- sum(!is.na(result_data$interpro_domains) & result_data$interpro_domains != "", na.rm = TRUE)
+      message("    - Loci with InterPro annotations: ", interpro_count)
+    }
+    if ("eggNOG" %in% include) {
+      eggnog_count <- sum(!is.na(result_data$eggnog_categories) & result_data$eggnog_categories != "", na.rm = TRUE)
+      message("    - Loci with eggNOG annotations: ", eggnog_count)
+    }
+  }
+  
+  return(result_data)
 }
 
 #' Handle enrichment stage
@@ -378,58 +512,6 @@ compile_funseq_results <- function(con,
   return(result)
 }
 
-#' Process Functional Annotations (DEPRECATED)
-#'
-#' @description 
-#' \strong{DEPRECATED:} This function is deprecated and will be removed in a future version.
-#' Please use \code{compile_funseq_results(stage = "annotations")} instead.
-#'
-#' @param con Database connection object from annotate_blast_results()
-#' @param include Character vector. Types of annotations to include
-#' @param blast_param_id Integer. Optional. Specific BLAST parameter set to use
-#' @param candidate_loci Character or data.frame. Optional. Candidate loci specification
-#' @param export_csv Character. Optional. File path to export results as CSV
-#' @param verbose Logical. Print progress information. Default is TRUE
-#'
-#' @return Data frame with standardized functional annotations (same as compile_funseq_results stage = "annotations")
-#'
-#' @details
-#' \strong{Migration Notice:} This function has been replaced by \code{compile_funseq_results()}
-#' which provides a unified interface for progressive analysis building. 
-#' 
-#' Use \code{compile_funseq_results(stage = "annotations")} for equivalent functionality.
-#'
-#' @examples
-#' \dontrun{
-#' # OLD (deprecated):
-#' annotations <- process_annotations(con, include = c("GO", "KEGG"))
-#' 
-#' # NEW (recommended):
-#' annotations <- compile_funseq_results(con, stage = "annotations", include = c("GO", "KEGG"))
-#' }
-#'
-#' @importFrom dplyr group_by summarise first rowwise ungroup
-#' @importFrom magrittr %>%
-#' @export
-process_annotations <- function(con, include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"), 
-                               blast_param_id = NULL, candidate_loci = NULL, 
-                               export_csv = NULL, verbose = TRUE) {
-  
-  # Deprecation warning
-  warning("process_annotations() is deprecated. Please use compile_funseq_results(stage = 'annotations') instead. ",
-          "This function will be removed in a future version.")
-  
-  # Call the new unified function
-  return(compile_funseq_results(
-    con = con,
-    stage = "annotations", 
-    include = include,
-    blast_param_id = blast_param_id,
-    candidate_loci = candidate_loci,
-    export_csv = export_csv,
-    verbose = verbose
-  ))
-}
 
 #' Process GO annotations for loci
 #' @keywords internal
