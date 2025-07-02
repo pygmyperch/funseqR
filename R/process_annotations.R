@@ -1,255 +1,434 @@
-#' Process Functional Annotations into Standardized Summary Table
+#' Compile FunseqR Results into Unified Data Frame
 #'
-#' Processes functional annotation results from annotate_blast_results() into a
-#' comprehensive, standardized data frame linking each locus to functional annotations.
-#' Automatically applies name standardization using KEGGREST and includes KEGG BRITE
-#' hierarchy and module classifications.
+#' Progressive function to compile and enhance analysis results throughout the funseqR workflow.
+#' Supports multiple stages: annotations, enrichment, and descriptive analyses, building a 
+#' comprehensive results data frame that grows with your analysis.
 #'
-#' @param con Database connection object from annotate_blast_results()
-#' @param include Character vector. Types of annotations to include: "GO", "KEGG", or both. Default is c("GO", "KEGG")
-#' @param blast_param_id Integer. Optional. Specific BLAST parameter set to use. If NULL, uses all available annotations
-#' @param candidate_loci Character or data.frame. Optional. Candidate loci specification:
-#'   \itemize{
-#'     \item VCF file path (e.g., "candidates.vcf") - file must be registered in database
-#'     \item Data frame with 'chromosome' and 'position' columns
-#'     \item Vector of locus_ids in format "vcf_id_chromosome_position"
-#'     \item NULL (default) - all loci labeled as "background"
-#'   }
+#' @param con Database connection object
+#' @param stage Character. Analysis stage: "annotations", "enrichment", or "descriptive"
+#' @param data Data.frame. Existing results to enhance (required for "enrichment" and "descriptive" stages)
+#' @param include Character vector. Types of annotations to include: "GO", "KEGG", "Pfam", "InterPro", "eggNOG"
+#' @param candidate_loci Character or data.frame. Candidate loci specification (same as process_annotations)
+#' @param blast_param_id Integer. Optional. Specific BLAST parameter set to use
+#' @param analysis_ids Integer vector. ORA analysis IDs to retrieve (for "enrichment" stage)
+#' @param significance_threshold Numeric. FDR threshold for enrichment (default 0.05)
 #' @param export_csv Character. Optional. File path to export results as CSV
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
-#' @return Data frame with standardized functional annotations:
+#' @return Data frame with results from the specified stage:
 #' \itemize{
-#'   \item locus_id: Unique identifier for each genomic locus
-#'   \item chromosome: Chromosome name
-#'   \item position: Genomic position
-#'   \item gene_name: Primary gene name (from UniProt)
-#'   \item protein_name: Protein description
-#'   \item uniprot_accession: UniProt accession number
-#'   \item dataset_type: "candidate" or "background" (based on candidate_loci parameter)
-#'   \item go_terms: Semi-colon separated GO term IDs (if "GO" included)
-#'   \item go_names: Semi-colon separated GO term names (if "GO" included)
-#'   \item go_categories: Semi-colon separated GO categories (BP/MF/CC) (if "GO" included)
-#'   \item kegg_pathways: Semi-colon separated KEGG pathway IDs (if "KEGG" included)
-#'   \item kegg_pathway_names: Semi-colon separated KEGG pathway names (if "KEGG" included)
-#'   \item kegg_brite_categories: Semi-colon separated KEGG BRITE classifications (if "KEGG" included)
-#'   \item kegg_modules: Semi-colon separated KEGG module assignments (if "KEGG" included)
+#'   \item \strong{annotations stage}: Base annotation data (locus_id, annotations, dataset_type, etc.)
+#'   \item \strong{enrichment stage}: Adds enrichment columns (enriched, enrichment_fdr, enriched_terms, etc.)
+#'   \item \strong{descriptive stage}: Adds descriptive analysis columns (future implementation)
 #' }
 #'
 #' @details
-#' This function streamlines the functional annotation workflow by:
+#' This unified function enables transparent, progressive analysis:
 #' 
+#' \strong{Stage 1 - Annotations:} Extract and process functional annotations
 #' \enumerate{
-#'   \item \strong{Data Integration}: Combines genomic positions with functional annotations
-#'   \item \strong{GO Processing}: Extracts GO terms, names, and ontology categories
-#'   \item \strong{KEGG Enhancement}: Uses KEGGREST API to improve pathway names and classifications
-#'   \item \strong{KEGG BRITE Classification}: Maps pathways to official KEGG BRITE hierarchy
-#'   \item \strong{Module Assignment}: Assigns pathways to functional modules
-#'   \item \strong{Standardized Output}: Creates one comprehensive table for all downstream analyses
+#'   \item Links genomic loci to functional annotations
+#'   \item Processes GO, KEGG, and other annotation types
+#'   \item Adds candidate/background labeling
+#'   \item Creates comprehensive annotation summary
 #' }
 #' 
-#' The resulting data frame can be used directly with enrichment analysis functions
-#' or exported for external analysis tools.
+#' \strong{Stage 2 - Enrichment:} Add over-representation analysis results
+#' \enumerate{
+#'   \item Retrieves ORA results from database using analysis_ids
+#'   \item Maps enriched terms back to individual loci
+#'   \item Adds enrichment status and statistics to each locus
+#'   \item Preserves all existing annotation data
+#' }
+#' 
+#' \strong{Stage 3 - Descriptive:} Add descriptive analysis results (future)
+#' \enumerate{
+#'   \item Framework for additional descriptive statistics
+#'   \item Functional category summaries
+#'   \item Pathway coverage analysis
+#' }
 #'
 #' @examples
 #' \dontrun{
-#' # Complete workflow
-#' blast_results <- run_blast(sequences, database)
-#' con <- annotate_blast_results(blast_results)
+#' # Progressive workflow - build results step by step
 #' 
-#' # Process all annotations (all labeled as "background")
-#' annotations <- process_annotations(con, include = c("GO", "KEGG"))
-#' 
-#' # Process annotations with candidate loci flagging from VCF file
-#' annotations <- process_annotations(
+#' # Stage 1: Generate base annotation data
+#' results <- compile_funseq_results(
 #'   con, 
+#'   stage = "annotations",
 #'   include = c("GO", "KEGG"),
 #'   candidate_loci = "candidates.vcf",
-#'   export_csv = "functional_annotations_with_candidates.csv"
+#'   export_csv = "step1_annotations.csv"
 #' )
 #' 
-#' # Use coordinate data frame for candidate specification
-#' candidates_df <- data.frame(
-#'   chromosome = c("LG1", "LG2", "LG3"),
-#'   position = c(12345, 67890, 54321)
+#' # Stage 2: Add enrichment results (after running run_ORA)
+#' results <- compile_funseq_results(
+#'   con,
+#'   stage = "enrichment", 
+#'   data = results,                    # Build on existing data
+#'   analysis_ids = c(1, 2, 3),        # From run_ORA() output
+#'   export_csv = "step2_with_enrichment.csv"
 #' )
-#' annotations <- process_annotations(con, candidate_loci = candidates_df)
 #' 
-#' # Easy filtering for downstream analysis
-#' candidate_annotations <- annotations[annotations$dataset_type == "candidate", ]
-#' background_annotations <- annotations[annotations$dataset_type == "background", ]
+#' # Now you have comprehensive results in one data frame
+#' # Easy filtering for analysis
+#' enriched_candidates <- results[results$dataset_type == "candidate" & 
+#'                               results$enriched == TRUE, ]
 #' 
-#' # Use with enrichment analysis
-#' go_enrichment <- run_go_enrichment_analysis(annotations, candidate_loci)
-#' kegg_enrichment <- run_kegg_enrichment_analysis(annotations, candidate_loci)
+#' # View enrichment summary
+#' table(results$dataset_type, results$enriched)
+#' }
+#'
+#' @importFrom dplyr group_by summarise first rowwise ungroup mutate left_join
+#' @importFrom magrittr %>%
+#' @export
+compile_funseq_results <- function(con, 
+                                  stage = c("annotations", "enrichment", "descriptive"),
+                                  data = NULL,
+                                  include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"),
+                                  candidate_loci = NULL,
+                                  blast_param_id = NULL,
+                                  analysis_ids = NULL,
+                                  significance_threshold = 0.05,
+                                  export_csv = NULL,
+                                  verbose = TRUE) {
+  
+  # Validate stage parameter
+  stage <- match.arg(stage)
+  
+  if (verbose) message("=== Compiling FunseqR Results: ", stage, " stage ===")
+  
+  # Route to appropriate stage handler
+  if (stage == "annotations") {
+    result <- .compile_annotations_stage(con, include, candidate_loci, blast_param_id, verbose)
+    
+  } else if (stage == "enrichment") {
+    if (is.null(data)) {
+      stop("'data' parameter is required for enrichment stage. Provide results from annotations stage.")
+    }
+    if (is.null(analysis_ids)) {
+      stop("'analysis_ids' parameter is required for enrichment stage. Provide ORA analysis IDs from run_ORA().")
+    }
+    result <- .compile_enrichment_stage(con, data, analysis_ids, significance_threshold, verbose)
+    
+  } else if (stage == "descriptive") {
+    if (is.null(data)) {
+      stop("'data' parameter is required for descriptive stage. Provide results from previous stages.")
+    }
+    result <- .compile_descriptive_stage(con, data, verbose)
+    
+  } else {
+    stop("Unknown stage: ", stage)
+  }
+  
+  # Export if requested
+  if (!is.null(export_csv)) {
+    if (verbose) message("  - Exporting results to: ", export_csv)
+    write.csv(result, export_csv, row.names = FALSE)
+  }
+  
+  if (verbose) {
+    message("=== ", stage, " stage complete ===")
+    message("  - Resulting data frame: ", nrow(result), " rows × ", ncol(result), " columns")
+    if (stage == "enrichment" && "enriched" %in% names(result)) {
+      enriched_count <- sum(result$enriched, na.rm = TRUE)
+      message("  - Loci with enriched terms: ", enriched_count)
+    }
+  }
+  
+  return(result)
+}
+
+# ==========================
+# STAGE HANDLER FUNCTIONS
+# ==========================
+
+#' Handle annotations stage
+#' @keywords internal
+.compile_annotations_stage <- function(con, include, candidate_loci, blast_param_id, verbose) {
+  
+  if (verbose) message("  - Compiling functional annotations...")
+  
+  # Call the existing process_annotations logic
+  # This maintains all existing functionality
+  result <- process_annotations(
+    con = con,
+    include = include,
+    blast_param_id = blast_param_id,
+    candidate_loci = candidate_loci,
+    export_csv = NULL,  # Handle export at main function level
+    verbose = verbose
+  )
+  
+  return(result)
+}
+
+#' Handle enrichment stage
+#' @keywords internal
+.compile_enrichment_stage <- function(con, data, analysis_ids, significance_threshold, verbose) {
+  
+  if (verbose) message("  - Adding over-representation analysis results...")
+  
+  # Validate input data
+  required_cols <- c("locus_id", "uniprot_accession")
+  missing_cols <- required_cols[!required_cols %in% names(data)]
+  if (length(missing_cols) > 0) {
+    stop("Input data missing required columns: ", paste(missing_cols, collapse = ", "))
+  }
+  
+  # Get enrichment data for all analysis IDs
+  enrichment_data <- .extract_enrichment_data(con, analysis_ids, significance_threshold, verbose)
+  
+  if (nrow(enrichment_data) == 0) {
+    if (verbose) message("    - No enriched terms found for provided analysis IDs")
+    # Add empty enrichment columns
+    data$enriched <- FALSE
+    data$enrichment_fdr <- NA_real_
+    data$enrichment_pvalue <- NA_real_
+    data$enriched_terms <- ""
+    data$enrichment_analysis_ids <- ""
+    return(data)
+  }
+  
+  # Map enriched terms to loci
+  enriched_loci_data <- .map_enriched_terms_to_loci(con, data, enrichment_data, verbose)
+  
+  # Merge enrichment information with original data
+  result <- .merge_enrichment_with_data(data, enriched_loci_data, verbose)
+  
+  return(result)
+}
+
+#' Handle descriptive stage (placeholder)
+#' @keywords internal
+.compile_descriptive_stage <- function(con, data, verbose) {
+  
+  if (verbose) message("  - Adding descriptive analysis results...")
+  
+  # Placeholder for future descriptive analysis functionality
+  # Could include:
+  # - Functional category summaries
+  # - Pathway coverage statistics  
+  # - Annotation confidence scores
+  # - Comparative analysis results
+  
+  if (verbose) message("    - Descriptive stage not yet implemented")
+  
+  # For now, just return the data unchanged
+  return(data)
+}
+
+# ==========================
+# ENRICHMENT HELPER FUNCTIONS
+# ==========================
+
+#' Extract enrichment data from database
+#' @keywords internal
+.extract_enrichment_data <- function(con, analysis_ids, significance_threshold, verbose) {
+  
+  if (verbose) message("    - Retrieving enrichment results from database...")
+  
+  # Get all significant enrichment results for the analysis IDs
+  analysis_ids_str <- paste(analysis_ids, collapse = ", ")
+  
+  enrichment_query <- paste0("
+    SELECT DISTINCT
+      ora.analysis_id,
+      ora.annotation_type,
+      ora.term_type,
+      res.term_id,
+      res.term_name,
+      res.p_value,
+      res.p_adjusted as fdr,
+      res.gene_ids,
+      res.fold_enrichment
+    FROM ora_analyses ora
+    JOIN ora_results res ON ora.analysis_id = res.analysis_id
+    WHERE ora.analysis_id IN (", analysis_ids_str, ")
+      AND res.p_adjusted <= ?
+    ORDER BY res.p_adjusted
+  ")
+  
+  enrichment_data <- DBI::dbGetQuery(con, enrichment_query, list(significance_threshold))
+  
+  if (verbose) {
+    message("    - Found ", nrow(enrichment_data), " significantly enriched terms")
+    if (nrow(enrichment_data) > 0) {
+      by_analysis <- table(enrichment_data$analysis_id)
+      for (i in names(by_analysis)) {
+        message("      - Analysis ID ", i, ": ", by_analysis[i], " terms")
+      }
+    }
+  }
+  
+  return(enrichment_data)
+}
+
+#' Map enriched terms to individual loci
+#' @keywords internal
+.map_enriched_terms_to_loci <- function(con, data, enrichment_data, verbose) {
+  
+  if (verbose) message("    - Mapping enriched terms to individual loci...")
+  
+  # Create a data frame to store locus-level enrichment information
+  locus_enrichment <- data.frame(
+    locus_id = character(0),
+    enriched = logical(0),
+    enrichment_fdr = numeric(0),
+    enrichment_pvalue = numeric(0),
+    enriched_terms = character(0),
+    enrichment_analysis_ids = character(0),
+    stringsAsFactors = FALSE
+  )
+  
+  # Extract all unique genes from enriched terms
+  all_enriched_genes <- unique(unlist(strsplit(enrichment_data$gene_ids, "/")))
+  all_enriched_genes <- all_enriched_genes[!is.na(all_enriched_genes) & all_enriched_genes != ""]
+  
+  if (length(all_enriched_genes) == 0) {
+    if (verbose) message("    - No genes found in enriched terms")
+    return(locus_enrichment)
+  }
+  
+  if (verbose) message("    - Found ", length(all_enriched_genes), " unique genes in enriched terms")
+  
+  # For each locus in the data, check if it's associated with enriched genes
+  for (i in 1:nrow(data)) {
+    locus_id <- data$locus_id[i]
+    uniprot_acc <- data$uniprot_accession[i]
+    
+    # Check if this locus has genes that appear in enriched terms
+    is_enriched <- FALSE
+    matched_terms <- character(0)
+    matched_analyses <- character(0)
+    best_fdr <- NA_real_
+    best_pvalue <- NA_real_
+    
+    if (!is.na(uniprot_acc) && uniprot_acc != "") {
+      # Split uniprot accessions (can be multiple, separated by ;)
+      locus_genes <- strsplit(uniprot_acc, ";")[[1]]
+      
+      # Check if any of the locus genes appear in enriched terms
+      for (gene in locus_genes) {
+        if (gene %in% all_enriched_genes) {
+          is_enriched <- TRUE
+          
+          # Find which terms contain this gene
+          matching_rows <- enrichment_data[grepl(paste0("(^|/)", gene, "(/|$)"), 
+                                               enrichment_data$gene_ids), ]
+          
+          if (nrow(matching_rows) > 0) {
+            matched_terms <- c(matched_terms, matching_rows$term_name)
+            matched_analyses <- c(matched_analyses, matching_rows$analysis_id)
+            
+            # Track best (lowest) FDR and p-value
+            if (is.na(best_fdr) || min(matching_rows$fdr) < best_fdr) {
+              best_fdr <- min(matching_rows$fdr)
+            }
+            if (is.na(best_pvalue) || min(matching_rows$p_value) < best_pvalue) {
+              best_pvalue <- min(matching_rows$p_value)
+            }
+          }
+        }
+      }
+    }
+    
+    # Add to results
+    locus_enrichment <- rbind(locus_enrichment, data.frame(
+      locus_id = locus_id,
+      enriched = is_enriched,
+      enrichment_fdr = if (is_enriched) best_fdr else NA_real_,
+      enrichment_pvalue = if (is_enriched) best_pvalue else NA_real_,
+      enriched_terms = if (is_enriched) paste(unique(matched_terms), collapse = ";") else "",
+      enrichment_analysis_ids = if (is_enriched) paste(unique(matched_analyses), collapse = ";") else "",
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  if (verbose) {
+    enriched_count <- sum(locus_enrichment$enriched)
+    message("    - ", enriched_count, " out of ", nrow(data), " loci are associated with enriched terms")
+  }
+  
+  return(locus_enrichment)
+}
+
+#' Merge enrichment data with original data frame
+#' @keywords internal
+.merge_enrichment_with_data <- function(data, enriched_loci_data, verbose) {
+  
+  if (verbose) message("    - Merging enrichment results with annotation data...")
+  
+  # Merge by locus_id
+  result <- merge(data, enriched_loci_data, by = "locus_id", all.x = TRUE)
+  
+  # Fill missing enrichment values for loci not in enriched_loci_data
+  result$enriched[is.na(result$enriched)] <- FALSE
+  result$enrichment_fdr[is.na(result$enrichment_fdr) & !result$enriched] <- NA_real_
+  result$enrichment_pvalue[is.na(result$enrichment_pvalue) & !result$enriched] <- NA_real_
+  result$enriched_terms[is.na(result$enriched_terms)] <- ""
+  result$enrichment_analysis_ids[is.na(result$enrichment_analysis_ids)] <- ""
+  
+  # Reorder columns to put enrichment columns at the end
+  base_cols <- names(data)
+  enrichment_cols <- c("enriched", "enrichment_fdr", "enrichment_pvalue", 
+                      "enriched_terms", "enrichment_analysis_ids")
+  result <- result[, c(base_cols, enrichment_cols)]
+  
+  return(result)
+}
+
+#' Process Functional Annotations (DEPRECATED)
+#'
+#' @description 
+#' \strong{DEPRECATED:} This function is deprecated and will be removed in a future version.
+#' Please use \code{compile_funseq_results(stage = "annotations")} instead.
+#'
+#' @param con Database connection object from annotate_blast_results()
+#' @param include Character vector. Types of annotations to include
+#' @param blast_param_id Integer. Optional. Specific BLAST parameter set to use
+#' @param candidate_loci Character or data.frame. Optional. Candidate loci specification
+#' @param export_csv Character. Optional. File path to export results as CSV
+#' @param verbose Logical. Print progress information. Default is TRUE
+#'
+#' @return Data frame with standardized functional annotations (same as compile_funseq_results stage = "annotations")
+#'
+#' @details
+#' \strong{Migration Notice:} This function has been replaced by \code{compile_funseq_results()}
+#' which provides a unified interface for progressive analysis building. 
+#' 
+#' Use \code{compile_funseq_results(stage = "annotations")} for equivalent functionality.
+#'
+#' @examples
+#' \dontrun{
+#' # OLD (deprecated):
+#' annotations <- process_annotations(con, include = c("GO", "KEGG"))
+#' 
+#' # NEW (recommended):
+#' annotations <- compile_funseq_results(con, stage = "annotations", include = c("GO", "KEGG"))
 #' }
 #'
 #' @importFrom dplyr group_by summarise first rowwise ungroup
 #' @importFrom magrittr %>%
 #' @export
-process_annotations <- function(con, include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"), blast_param_id = NULL, 
-                               candidate_loci = NULL, export_csv = NULL, verbose = TRUE) {
+process_annotations <- function(con, include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"), 
+                               blast_param_id = NULL, candidate_loci = NULL, 
+                               export_csv = NULL, verbose = TRUE) {
   
-  if (verbose) message("Processing functional annotations...")
+  # Deprecation warning
+  warning("process_annotations() is deprecated. Please use compile_funseq_results(stage = 'annotations') instead. ",
+          "This function will be removed in a future version.")
   
-  # Validate inputs
-  valid_types <- c("GO", "KEGG", "Pfam", "InterPro", "eggNOG")
-  include <- match.arg(include, valid_types, several.ok = TRUE)
-  
-  if (verbose) {
-    message("  - Including annotations: ", paste(include, collapse = ", "))
-    if (!is.null(blast_param_id)) {
-      message("  - Using BLAST parameter set: ", blast_param_id)
-    }
-  }
-  
-  # Check database tables
-  tables <- DBI::dbListTables(con)
-  required_base_tables <- c("vcf_data", "flanking_sequences", "blast_results", "annotations")
-  missing_tables <- required_base_tables[!required_base_tables %in% tables]
-  
-  if (length(missing_tables) > 0) {
-    stop("Missing required tables: ", paste(missing_tables, collapse = ", "))
-  }
-  
-  # Build base query for loci with annotations
-  base_conditions <- c()
-  params <- list()
-  
-  if (!is.null(blast_param_id)) {
-    base_conditions <- c(base_conditions, "bp.blast_param_id = ?")
-    params <- c(params, list(blast_param_id))
-  }
-  
-  base_where <- if (length(base_conditions) > 0) {
-    paste("WHERE", paste(base_conditions, collapse = " AND "))
-  } else {
-    ""
-  }
-  
-  # Start with base loci and annotation information
-  if (verbose) message("  - Extracting basic annotation data...")
-  
-  base_query <- paste0("
-    SELECT DISTINCT
-      vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id,
-      vd.chromosome,
-      vd.position,
-      a.annotation_id,
-      a.uniprot_accession,
-      a.entry_name,
-      a.gene_names,
-      br.blast_result_id
-    FROM vcf_data vd
-    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
-    JOIN blast_results br ON fs.flanking_id = br.flanking_id
-    JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
-    JOIN annotations a ON br.blast_result_id = a.blast_result_id
-    ", base_where, "
-    ORDER BY vd.chromosome, vd.position
-  ")
-  
-  base_data <- if (length(params) > 0) {
-    DBI::dbGetQuery(con, base_query, params)
-  } else {
-    DBI::dbGetQuery(con, base_query)
-  }
-  
-  if (nrow(base_data) == 0) {
-    warning("No annotation data found with current filters")
-    return(data.frame())
-  }
-  
-  if (verbose) message("    - Found ", nrow(base_data), " annotated loci")
-  
-  # Identify candidate loci if specified
-  candidate_locus_ids <- character(0)
-  if (!is.null(candidate_loci)) {
-    if (verbose) message("  - Identifying candidate loci...")
-    candidate_locus_ids <- .identify_candidate_loci(con, candidate_loci, verbose)
-    if (verbose) message("    - Identified ", length(candidate_locus_ids), " candidate loci")
-  }
-  
-  # Process basic information
-  result_data <- base_data %>%
-    group_by(locus_id, chromosome, position) %>%
-    summarise(
-      gene_name = first(na.omit(gene_names))[1],
-      protein_name = first(na.omit(entry_name))[1],  # Use entry_name as protein description
-      uniprot_accession = paste(unique(uniprot_accession), collapse = ";"),
-      annotation_ids = list(unique(annotation_id)),
-      .groups = "drop"
-    ) %>%
-    mutate(
-      dataset_type = ifelse(locus_id %in% candidate_locus_ids, "candidate", "background")
-    )
-  
-  # Process GO annotations if requested
-  if ("GO" %in% include && "go_terms" %in% tables) {
-    if (verbose) message("  - Processing GO annotations...")
-    result_data <- .process_go_annotations(con, result_data, base_where, params, verbose)
-  }
-  
-  # Process KEGG annotations if requested  
-  if ("KEGG" %in% include && "kegg_references" %in% tables) {
-    if (verbose) message("  - Processing KEGG annotations with enhancements...")
-    result_data <- .process_kegg_annotations(con, result_data, base_where, params, verbose)
-  }
-  
-  # Process Pfam annotations if requested
-  if ("Pfam" %in% include && "pfam_domains" %in% tables) {
-    if (verbose) message("  - Processing Pfam domain annotations...")
-    result_data <- .process_pfam_annotations(con, result_data, base_where, params, verbose)
-  }
-  
-  # Process InterPro annotations if requested
-  if ("InterPro" %in% include && "interpro_families" %in% tables) {
-    if (verbose) message("  - Processing InterPro family annotations...")
-    result_data <- .process_interpro_annotations(con, result_data, base_where, params, verbose)
-  }
-  
-  # Process eggNOG annotations if requested
-  if ("eggNOG" %in% include && "eggnog_categories" %in% tables) {
-    if (verbose) message("  - Processing eggNOG category annotations...")
-    result_data <- .process_eggnog_annotations(con, result_data, base_where, params, verbose)
-  }
-  
-  # Convert to regular data frame and clean up
-  result_data <- as.data.frame(result_data)
-  result_data$annotation_ids <- NULL  # Remove internal column
-  
-  if (verbose) {
-    message("Processing complete:")
-    message("  - Total annotated loci: ", nrow(result_data))
-    if ("GO" %in% include) {
-      go_count <- sum(!is.na(result_data$go_terms) & result_data$go_terms != "", na.rm = TRUE)
-      message("  - Loci with GO annotations: ", go_count)
-    }
-    if ("KEGG" %in% include) {
-      kegg_count <- sum(!is.na(result_data$kegg_pathways) & result_data$kegg_pathways != "", na.rm = TRUE)
-      message("  - Loci with KEGG annotations: ", kegg_count)
-    }
-    if ("Pfam" %in% include) {
-      pfam_count <- sum(!is.na(result_data$pfam_domains) & result_data$pfam_domains != "", na.rm = TRUE)
-      message("  - Loci with Pfam annotations: ", pfam_count)
-    }
-    if ("InterPro" %in% include) {
-      interpro_count <- sum(!is.na(result_data$interpro_families) & result_data$interpro_families != "", na.rm = TRUE)
-      message("  - Loci with InterPro annotations: ", interpro_count)
-    }
-    if ("eggNOG" %in% include) {
-      eggnog_count <- sum(!is.na(result_data$eggnog_categories) & result_data$eggnog_categories != "", na.rm = TRUE)
-      message("  - Loci with eggNOG annotations: ", eggnog_count)
-    }
-  }
-  
-  # Export CSV if requested
-  if (!is.null(export_csv)) {
-    if (verbose) message("  - Exporting to CSV: ", export_csv)
-    write.csv(result_data, export_csv, row.names = FALSE)
-  }
-  
-  return(result_data)
+  # Call the new unified function
+  return(compile_funseq_results(
+    con = con,
+    stage = "annotations", 
+    include = include,
+    blast_param_id = blast_param_id,
+    candidate_loci = candidate_loci,
+    export_csv = export_csv,
+    verbose = verbose
+  ))
 }
 
 #' Process GO annotations for loci
@@ -905,3 +1084,5 @@ process_annotations <- function(con, include = c("GO", "KEGG", "Pfam", "InterPro
   
   return(result_data)
 }
+
+

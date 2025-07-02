@@ -2,7 +2,7 @@
 % Please edit documentation in R/process_annotations.R
 \name{process_annotations}
 \alias{process_annotations}
-\title{Process Functional Annotations into Standardized Summary Table}
+\title{Process Functional Annotations (DEPRECATED)}
 \usage{
 process_annotations(
   con,
@@ -16,93 +16,36 @@ process_annotations(
 \arguments{
 \item{con}{Database connection object from annotate_blast_results()}
 
-\item{include}{Character vector. Types of annotations to include: "GO", "KEGG", or both. Default is c("GO", "KEGG")}
+\item{include}{Character vector. Types of annotations to include}
 
-\item{blast_param_id}{Integer. Optional. Specific BLAST parameter set to use. If NULL, uses all available annotations}
+\item{blast_param_id}{Integer. Optional. Specific BLAST parameter set to use}
 
-\item{candidate_loci}{Character or data.frame. Optional. Candidate loci specification:
-\itemize{
-\item VCF file path (e.g., "candidates.vcf") - file must be registered in database
-\item Data frame with 'chromosome' and 'position' columns
-\item Vector of locus_ids in format "vcf_id_chromosome_position"
-\item NULL (default) - all loci labeled as "background"
-}}
+\item{candidate_loci}{Character or data.frame. Optional. Candidate loci specification}
 
 \item{export_csv}{Character. Optional. File path to export results as CSV}
 
 \item{verbose}{Logical. Print progress information. Default is TRUE}
 }
 \value{
-Data frame with standardized functional annotations:
-\itemize{
-\item locus_id: Unique identifier for each genomic locus
-\item chromosome: Chromosome name
-\item position: Genomic position
-\item gene_name: Primary gene name (from UniProt)
-\item protein_name: Protein description
-\item uniprot_accession: UniProt accession number
-\item dataset_type: "candidate" or "background" (based on candidate_loci parameter)
-\item go_terms: Semi-colon separated GO term IDs (if "GO" included)
-\item go_names: Semi-colon separated GO term names (if "GO" included)
-\item go_categories: Semi-colon separated GO categories (BP/MF/CC) (if "GO" included)
-\item kegg_pathways: Semi-colon separated KEGG pathway IDs (if "KEGG" included)
-\item kegg_pathway_names: Semi-colon separated KEGG pathway names (if "KEGG" included)
-\item kegg_brite_categories: Semi-colon separated KEGG BRITE classifications (if "KEGG" included)
-\item kegg_modules: Semi-colon separated KEGG module assignments (if "KEGG" included)
-}
+Data frame with standardized functional annotations (same as compile_funseq_results stage = "annotations")
 }
 \description{
-Processes functional annotation results from annotate_blast_results() into a
-comprehensive, standardized data frame linking each locus to functional annotations.
-Automatically applies name standardization using KEGGREST and includes KEGG BRITE
-hierarchy and module classifications.
+\strong{DEPRECATED:} This function is deprecated and will be removed in a future version.
+Please use \code{compile_funseq_results(stage = "annotations")} instead.
 }
 \details{
-This function streamlines the functional annotation workflow by:
+\strong{Migration Notice:} This function has been replaced by \code{compile_funseq_results()}
+which provides a unified interface for progressive analysis building.
 
-\enumerate{
-\item \strong{Data Integration}: Combines genomic positions with functional annotations
-\item \strong{GO Processing}: Extracts GO terms, names, and ontology categories
-\item \strong{KEGG Enhancement}: Uses KEGGREST API to improve pathway names and classifications
-\item \strong{KEGG BRITE Classification}: Maps pathways to official KEGG BRITE hierarchy
-\item \strong{Module Assignment}: Assigns pathways to functional modules
-\item \strong{Standardized Output}: Creates one comprehensive table for all downstream analyses
-}
-
-The resulting data frame can be used directly with enrichment analysis functions
-or exported for external analysis tools.
+Use \code{compile_funseq_results(stage = "annotations")} for equivalent functionality.
 }
 \examples{
 \dontrun{
-# Complete workflow
-blast_results <- run_blast(sequences, database)
-con <- annotate_blast_results(blast_results)
-
-# Process all annotations (all labeled as "background")
+# OLD (deprecated):
 annotations <- process_annotations(con, include = c("GO", "KEGG"))
 
-# Process annotations with candidate loci flagging from VCF file
-annotations <- process_annotations(
-  con, 
-  include = c("GO", "KEGG"),
-  candidate_loci = "candidates.vcf",
-  export_csv = "functional_annotations_with_candidates.csv"
-)
-
-# Use coordinate data frame for candidate specification
-candidates_df <- data.frame(
-  chromosome = c("LG1", "LG2", "LG3"),
-  position = c(12345, 67890, 54321)
-)
-annotations <- process_annotations(con, candidate_loci = candidates_df)
-
-# Easy filtering for downstream analysis
-candidate_annotations <- annotations[annotations$dataset_type == "candidate", ]
-background_annotations <- annotations[annotations$dataset_type == "background", ]
-
-# Use with enrichment analysis
-go_enrichment <- run_go_enrichment_analysis(annotations, candidate_loci)
-kegg_enrichment <- run_kegg_enrichment_analysis(annotations, candidate_loci)
+# NEW (recommended):
+annotations <- compile_funseq_results(con, stage = "annotations", include = c("GO", "KEGG"))
 }
 
 }
