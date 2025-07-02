@@ -192,8 +192,8 @@ compile_funseq_results <- function(con,
       vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id,
       vd.chromosome,
       vd.position,
-      a.gene_name,
-      a.protein_name,
+      a.gene_names,
+      a.entry_name,
       a.uniprot_accession,
       GROUP_CONCAT(DISTINCT a.annotation_id) as annotation_ids
     FROM vcf_data vd
@@ -202,7 +202,7 @@ compile_funseq_results <- function(con,
     JOIN blast_parameters bp ON br.blast_param_id = bp.blast_param_id
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     ", base_where, "
-    GROUP BY vd.vcf_id, vd.chromosome, vd.position, a.gene_name, a.protein_name, a.uniprot_accession
+    GROUP BY vd.vcf_id, vd.chromosome, vd.position, a.gene_names, a.entry_name, a.uniprot_accession
     ORDER BY vd.chromosome, vd.position
   ")
   
@@ -219,6 +219,10 @@ compile_funseq_results <- function(con,
   }
   
   if (verbose) message("    - Found ", nrow(result_data), " annotated loci")
+  
+  # Rename columns to match expected output format
+  names(result_data)[names(result_data) == "gene_names"] <- "gene_name"
+  names(result_data)[names(result_data) == "entry_name"] <- "protein_name"
   
   # Convert annotation_ids to lists for processing
   result_data$annotation_ids <- lapply(strsplit(result_data$annotation_ids, ","), as.integer)
