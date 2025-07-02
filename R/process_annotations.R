@@ -289,7 +289,7 @@ compile_funseq_results <- function(con,
       message("    - Loci with Pfam annotations: ", pfam_count)
     }
     if ("InterPro" %in% include) {
-      interpro_count <- sum(!is.na(result_data$interpro_domains) & result_data$interpro_domains != "", na.rm = TRUE)
+      interpro_count <- sum(!is.na(result_data$interpro_families) & result_data$interpro_families != "", na.rm = TRUE)
       message("    - Loci with InterPro annotations: ", interpro_count)
     }
     if ("eggNOG" %in% include) {
@@ -990,14 +990,14 @@ compile_funseq_results <- function(con,
         if (nrow(file_check) > 0) {
           file_id <- file_check$file_id[1]
           
-          # Extract locus_ids for this file
-          loci_query <- "SELECT DISTINCT vcf_id || '_' || chromosome || '_' || position as locus_id 
-                         FROM vcf_data WHERE file_id = ?"
+          # Extract coordinates for this file
+          coords_query <- "SELECT DISTINCT chromosome, position FROM vcf_data WHERE file_id = ?"
+          coords_result <- DBI::dbGetQuery(con, coords_query, list(file_id))
           
-          loci_result <- DBI::dbGetQuery(con, loci_query, list(file_id))
-          candidate_loci <- loci_result$locus_id
+          if (verbose) message("    - Found ", nrow(coords_result), " candidate loci from VCF")
           
-          if (verbose) message("    - Found ", length(candidate_loci), " candidate loci from VCF")
+          # Use coordinate-based matching to find corresponding loci in database
+          candidate_loci <- .match_coordinates_to_loci(con, coords_result, verbose)
           
         } else {
           warning("VCF file '", basename(candidate_input), "' not found in database. Use import_vcf_to_db() first.")
