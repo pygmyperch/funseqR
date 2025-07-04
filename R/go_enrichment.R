@@ -1117,8 +1117,35 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
       "
     }
 
+    # Debug: Check data types before storage
+    if (verbose && nrow(results_to_insert) > 0) {
+      sample_row <- results_to_insert[1, ]
+      message("DEBUG: Storage data types - p_value: ", class(sample_row$p_value), 
+              ", p_adjusted: ", class(sample_row$p_adjusted))
+      message("DEBUG: Sample p_adjusted value: ", sample_row$p_adjusted)
+    }
+    
     for (i in 1:nrow(results_to_insert)) {
       row_data <- as.list(results_to_insert[i, ])
+      
+      # Fix: Ensure numeric columns remain numeric (as.list converts to character)
+      numeric_cols <- c("p_value", "p_adjusted", "expected_count", "fold_enrichment", "qvalue")
+      for (col in numeric_cols) {
+        col_index <- which(names(results_to_insert) == col)
+        if (length(col_index) > 0 && col_index <= length(row_data)) {
+          row_data[[col_index]] <- as.numeric(row_data[[col_index]])
+        }
+      }
+      
+      # Debug: Check what happens to p_adjusted after fix
+      if (verbose && i == 1) {
+        p_adj_index <- which(names(results_to_insert) == "p_adjusted")
+        if (length(p_adj_index) > 0) {
+          message("DEBUG: p_adjusted before storage: ", row_data[[p_adj_index]])
+          message("DEBUG: p_adjusted class before storage: ", class(row_data[[p_adj_index]]))
+        }
+      }
+      
       names(row_data) <- NULL  # Remove names to use with anonymous placeholders
       DBI::dbExecute(con, result_query, row_data)
     }
