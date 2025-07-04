@@ -70,6 +70,23 @@ This unified function enables transparent, progressive analysis:
 \item Preserves all existing annotation data
 }
 
+\strong{Enrichment Results Interpretation:}
+
+The enrichment stage marks loci as \code{enriched = TRUE} if they contain genes
+appearing in significantly enriched GO terms. This includes both candidate and
+background loci, providing two important perspectives:
+
+\itemize{
+\item \strong{All enriched loci} (\code{results[results$enriched == TRUE, ]}):
+All genomic positions harboring genes involved in overrepresented biological processes
+\item \strong{Candidate enriched loci} (\code{enriched_loci[enriched_loci$dataset_type == "candidate", ]}):
+Specific candidate variants contributing to the enrichment signal
+}
+
+This distinction is important because candidate loci drove the enrichment signal
+(higher proportion vs background), while background loci provide biological context
+(these genes/processes exist in the broader dataset too).
+
 \strong{Stage 3 - Descriptive:} Add descriptive analysis results (future)
 \enumerate{
 \item Framework for additional descriptive statistics
@@ -94,15 +111,16 @@ results <- compile_funseq_results(
 results <- compile_funseq_results(
   con,
   stage = "enrichment", 
-  data = results,                    # Build on existing data
-  analysis_ids = c(1, 2, 3),        # From run_ORA() output
+  data = results,
+  analysis_ids = c(1, 2, 3),
   export_csv = "step2_with_enrichment.csv"
 )
 
-# Now you have comprehensive results in one data frame
-# Easy filtering for analysis
-enriched_candidates <- results[results$dataset_type == "candidate" & 
-                              results$enriched == TRUE, ]
+# Extract loci associated with enriched genes
+enriched_results <- results[results$enriched == TRUE, ]
+
+# Extract only candidate loci associated with enriched genes  
+candidate_enriched <- enriched_results[enriched_results$dataset_type == "candidate", ]
 
 # View enrichment summary
 table(results$dataset_type, results$enriched)
