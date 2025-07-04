@@ -3,6 +3,10 @@
 .RData
 .Ruserdata
 .DS_Store
+CLAUDE.md
+
+# Development directory
+dev/
 
 # Database files
 *.db
