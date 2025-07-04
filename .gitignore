@@ -3,3 +3,8 @@
 .RData
 .Ruserdata
 .DS_Store
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3

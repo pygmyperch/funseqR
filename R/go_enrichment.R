@@ -580,6 +580,13 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
   
   cp_df <- clusterprofiler_result@result
   
+  # Simple validation: check required clusterProfiler columns exist
+  required_cols <- c("ID", "Description", "pvalue", "p.adjust")
+  missing <- setdiff(required_cols, colnames(cp_df))
+  if (length(missing) > 0) {
+    stop("Missing clusterProfiler columns: ", paste(missing, collapse = ", "))
+  }
+  
   # Extract numeric values from ratios for calculations
   fg_count <- cp_df$Count
   bg_count <- as.numeric(sub("/.*", "", cp_df$BgRatio))
@@ -1060,12 +1067,8 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
   # Insert results if any
   if (nrow(enrichment_results) > 0) {
 
-    # Prepare results for insertion
-    results_to_insert <- enrichment_results
-    results_to_insert$analysis_id <- analysis_id
-
     # Determine if this is clusterProfiler results (has additional columns)
-    has_clusterprofiler_cols <- all(c("gene_ratio", "bg_ratio", "qvalue", "gene_ids") %in% colnames(results_to_insert))
+    has_clusterprofiler_cols <- all(c("gene_ratio", "bg_ratio", "qvalue", "gene_ids") %in% colnames(enrichment_results))
     
     # Map column names based on annotation type
     if (annotation_type == "GO") {
@@ -1076,78 +1079,74 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
       term_name_col <- "pathway_name"
     }
     
-    if (has_clusterprofiler_cols) {
-      # clusterProfiler results with additional fields
-      results_to_insert <- results_to_insert[, c("analysis_id", term_id_col, term_name_col,
-                                                 "foreground_count", "background_count", "total_foreground",
-                                                 "total_background", "expected_count", "fold_enrichment",
-                                                 "p_value", "p_adjusted", "significance_level",
-                                                 "gene_ratio", "bg_ratio", "qvalue", "gene_ids")]
-      
-      # Standardize column names for database
-      colnames(results_to_insert)[2:3] <- c("term_id", "term_name")
-      results_to_insert$annotation_type <- annotation_type
-      results_to_insert$term_type <- term_type
-      
-      result_query <- "
-        INSERT INTO ora_results
-        (analysis_id, term_id, term_name, annotation_type, term_type, foreground_count, background_count,
-         total_foreground, total_background, expected_count, fold_enrichment,
-         p_value, p_adjusted, significance_level, gene_ratio, bg_ratio, qvalue, gene_ids)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      "
-    } else {
-      # Legacy results
-      results_to_insert <- results_to_insert[, c("analysis_id", term_id_col, term_name_col,
-                                                 "foreground_count", "background_count", "total_foreground",
-                                                 "total_background", "expected_count", "fold_enrichment",
-                                                 "p_value", "p_adjusted", "significance_level")]
-      
-      # Standardize column names for database
-      colnames(results_to_insert)[2:3] <- c("term_id", "term_name")
-      results_to_insert$annotation_type <- annotation_type
-      results_to_insert$term_type <- term_type
-      
-      result_query <- "
-        INSERT INTO ora_results
-        (analysis_id, term_id, term_name, annotation_type, term_type, foreground_count, background_count,
-         total_foreground, total_background, expected_count, fold_enrichment,
-         p_value, p_adjusted, significance_level)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      "
-    }
-
     # Debug: Check data types before storage
-    if (verbose && nrow(results_to_insert) > 0) {
-      sample_row <- results_to_insert[1, ]
+    if (verbose && nrow(enrichment_results) > 0) {
+      sample_row <- enrichment_results[1, ]
       message("DEBUG: Storage data types - p_value: ", class(sample_row$p_value), 
               ", p_adjusted: ", class(sample_row$p_adjusted))
       message("DEBUG: Sample p_adjusted value: ", sample_row$p_adjusted)
     }
     
-    for (i in 1:nrow(results_to_insert)) {
-      row_data <- as.list(results_to_insert[i, ])
+    # Simple row-by-row insertion with explicit column names
+    for (i in 1:nrow(enrichment_results)) {
+      row <- enrichment_results[i, ]
       
-      # Fix: Ensure numeric columns remain numeric (as.list converts to character)
-      numeric_cols <- c("p_value", "p_adjusted", "expected_count", "fold_enrichment", "qvalue")
-      for (col in numeric_cols) {
-        col_index <- which(names(results_to_insert) == col)
-        if (length(col_index) > 0 && col_index <= length(row_data)) {
-          row_data[[col_index]] <- as.numeric(row_data[[col_index]])
-        }
+      if (has_clusterprofiler_cols) {
+        # Insert with all clusterProfiler fields using explicit column names
+        DBI::dbExecute(con, "
+          INSERT INTO ora_results 
+          (analysis_id, term_id, term_name, annotation_type, term_type,
+           foreground_count, background_count, total_foreground, total_background,
+           expected_count, fold_enrichment, p_value, p_adjusted, significance_level,
+           gene_ratio, bg_ratio, qvalue, gene_ids)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          list(
+            analysis_id,
+            as.character(row[[term_id_col]]),
+            as.character(row[[term_name_col]]),
+            annotation_type,
+            term_type,
+            as.integer(row$foreground_count),
+            as.integer(row$background_count),
+            as.integer(row$total_foreground),
+            as.integer(row$total_background),
+            as.numeric(row$expected_count),
+            as.numeric(row$fold_enrichment),
+            as.numeric(row$p_value),
+            as.numeric(row$p_adjusted),    # Explicit numeric conversion
+            as.character(row$significance_level),
+            as.character(row$gene_ratio),
+            as.character(row$bg_ratio),
+            as.numeric(row$qvalue),
+            as.character(row$gene_ids)
+          )
+        )
+      } else {
+        # Legacy format without clusterProfiler extra fields
+        DBI::dbExecute(con, "
+          INSERT INTO ora_results 
+          (analysis_id, term_id, term_name, annotation_type, term_type,
+           foreground_count, background_count, total_foreground, total_background,
+           expected_count, fold_enrichment, p_value, p_adjusted, significance_level)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          list(
+            analysis_id,
+            as.character(row[[term_id_col]]),
+            as.character(row[[term_name_col]]),
+            annotation_type,
+            term_type,
+            as.integer(row$foreground_count),
+            as.integer(row$background_count),
+            as.integer(row$total_foreground),
+            as.integer(row$total_background),
+            as.numeric(row$expected_count),
+            as.numeric(row$fold_enrichment),
+            as.numeric(row$p_value),
+            as.numeric(row$p_adjusted),    # Explicit numeric conversion
+            as.character(row$significance_level)
+          )
+        )
       }
-      
-      # Debug: Check what happens to p_adjusted after fix
-      if (verbose && i == 1) {
-        p_adj_index <- which(names(results_to_insert) == "p_adjusted")
-        if (length(p_adj_index) > 0) {
-          message("DEBUG: p_adjusted before storage: ", row_data[[p_adj_index]])
-          message("DEBUG: p_adjusted class before storage: ", class(row_data[[p_adj_index]]))
-        }
-      }
-      
-      names(row_data) <- NULL  # Remove names to use with anonymous placeholders
-      DBI::dbExecute(con, result_query, row_data)
     }
   }
 
