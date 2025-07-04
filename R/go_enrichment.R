@@ -580,25 +580,35 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
   
   cp_df <- clusterprofiler_result@result
   
+  # Extract numeric values from ratios for calculations
+  fg_count <- cp_df$Count
+  bg_count <- as.numeric(sub("/.*", "", cp_df$BgRatio))
+  total_fg <- as.numeric(sub(".*/", "", cp_df$GeneRatio))
+  total_bg <- as.numeric(sub(".*/", "", cp_df$BgRatio))
+  
+  # Calculate expected count and fold enrichment correctly
+  expected_count <- (bg_count / total_bg) * total_fg
+  fold_enrichment <- ifelse(expected_count > 0, fg_count / expected_count, Inf)
+  
   # Convert to funseqR format with additional clusterProfiler fields
   funseqr_results <- data.frame(
     go_id = cp_df$ID,
     go_term = cp_df$Description,
     go_category = ontology,
-    foreground_count = cp_df$Count,
-    background_count = as.numeric(sub("/.*", "", cp_df$BgRatio)),
-    total_foreground = as.numeric(sub(".*/", "", cp_df$GeneRatio)),
-    total_background = as.numeric(sub(".*/", "", cp_df$BgRatio)),
-    expected_count = cp_df$Count / cp_df$pvalue,  # Approximate
-    fold_enrichment = cp_df$Count / (as.numeric(sub("/.*", "", cp_df$BgRatio)) / as.numeric(sub(".*/", "", cp_df$BgRatio)) * as.numeric(sub(".*/", "", cp_df$GeneRatio))),
-    p_value = cp_df$pvalue,
-    p_adjusted = cp_df$p.adjust,
+    foreground_count = fg_count,
+    background_count = bg_count,
+    total_foreground = total_fg,
+    total_background = total_bg,
+    expected_count = expected_count,
+    fold_enrichment = fold_enrichment,
+    p_value = as.numeric(cp_df$pvalue),
+    p_adjusted = as.numeric(cp_df$p.adjust),
     significance_level = ifelse(cp_df$p.adjust < (significance_threshold / 5), "highly_significant",
                                ifelse(cp_df$p.adjust < significance_threshold, "significant",
                                      ifelse(cp_df$p.adjust < (significance_threshold * 2), "trending", "not_significant"))),
     gene_ratio = cp_df$GeneRatio,
     bg_ratio = cp_df$BgRatio,
-    qvalue = cp_df$qvalue,
+    qvalue = as.numeric(cp_df$qvalue),
     gene_ids = cp_df$geneID,
     stringsAsFactors = FALSE
   )
