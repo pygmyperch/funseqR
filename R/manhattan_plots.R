@@ -11,7 +11,8 @@
 #' @param con Database connection object
 #' @param y_values Numeric vector of values to plot on y-axis (same order as VCF file variants)
 #' @param vcf_file_id Integer. File ID of the VCF file used in the analysis
-#' @param functional_summary List. Output from summarize_functional_loci() containing loci_summary
+#' @param enrichment_data Data.frame. Output from compile_funseq_results() with enrichment stage
+#' @param dataset_type Character. Filter enriched loci by dataset type: "candidate", "background", or "all". Default is "candidate"
 #' @param y_label Character. Label for y-axis. Default is "Statistical Value"
 #' @param plot_title Character. Title for the plot. Default is "Functional Manhattan Plot"
 #' @param signif_threshold Numeric. Significance threshold line to draw. Default is 0.01
@@ -39,8 +40,9 @@
 #' Main chromosomes (e.g., LG1-LG24) are displayed separately, while scaffolds are grouped as "U".
 #'
 #' \\strong{Functional Highlighting:}
-#' Points corresponding to functionally enriched loci (from functional_summary$loci_summary)
-#' are highlighted in a different color and automatically labeled.
+#' Points corresponding to functionally enriched loci (from enrichment_data with enriched = TRUE)
+#' are highlighted in a different color and automatically labeled. Use dataset_type to control
+#' whether to highlight candidate loci, background loci, or both.
 #'
 #' \\strong{Labeling Options:}
 #' Functional loci can be labeled with GO terms, gene names, UniProt accessions, or positions
@@ -61,56 +63,55 @@
 #' \dontrun{
 #' con <- connect_funseq_db("analysis.db")
 #'
-#' # Define main chromosomes for consolidation
-#' define_chromosomes(con, c("LG1", "LG2", "LG3", "LG4", "LG5", "LG6", "LG7", "LG8",
-#'                          "LG9", "LG10", "LG11", "LG12", "LG13", "LG14", "LG15",
-#'                          "LG16", "LG17", "LG18", "LG19", "LG20", "LG21", "LG22",
-#'                          "LG23", "LG24"))
+#' # Complete workflow: annotations -> enrichment -> manhattan plot
+#' 
+#' # Step 1: Generate annotation data
+#' results <- compile_funseq_results(
+#'   con, 
+#'   stage = "annotations",
+#'   include = c("GO", "KEGG"),
+#'   candidate_loci = "candidates.vcf"
+#' )
+#' 
+#' # Step 2: Run ORA analysis
+#' ORA_results <- run_ORA(con, "candidates.vcf", annotation_type = "GO")
+#' 
+#' # Step 3: Add enrichment results
+#' enrichment_results <- compile_funseq_results(
+#'   con,
+#'   stage = "enrichment", 
+#'   data = results,
+#'   analysis_ids = c(1, 2, 3)
+#' )
 #'
-#' # Get functional summary from enrichment analysis
-#' enrich_summary <- summarize_functional_loci(con,
-#'                                           enrichment_results,
-#'                                           candidate_file_id,
-#'                                           blast_param_id = 1)
-#'
-#' # Create Manhattan plot with GO term labels (default)
+#' # Create Manhattan plot with enriched loci highlighted (candidate loci only)
 #' manhattan_plot <- create_functional_manhattan_plot(
 #'   con,
-#'   y_values = rda.simple.pq$q.values,
+#'   y_values = my_statistical_values,  # Your p-values, q-values, etc.
 #'   vcf_file_id = 1,
-#'   functional_summary = enrich_summary,
-#'   y_label = "RDA q-value",
-#'   plot_title = "RDA Analysis with Functional Annotation"
+#'   enrichment_data = enrichment_results,
+#'   dataset_type = "candidate",
+#'   y_label = "Statistical Value",
+#'   plot_title = "Analysis with Functional Annotation"
 #' )
 #'
-#' # Create Manhattan plot with gene name labels and numeric x-axis
-#' manhattan_plot_genes <- create_functional_manhattan_plot(
+#' # Create Manhattan plot showing all enriched loci (candidate + background)
+#' manhattan_plot_all <- create_functional_manhattan_plot(
 #'   con,
-#'   y_values = rda.simple.pq$q.values,
+#'   y_values = my_statistical_values,
 #'   vcf_file_id = 1,
-#'   functional_summary = enrich_summary,
+#'   enrichment_data = enrichment_results,
+#'   dataset_type = "all",
 #'   label_type = "gene_name",
-#'   numeric_x_labels = TRUE,
-#'   y_label = "RDA q-value"
-#' )
-#'
-#' # Create Manhattan plot with custom enriched point styling
-#' manhattan_plot_custom <- create_functional_manhattan_plot(
-#'   con,
-#'   y_values = rda.simple.pq$q.values,
-#'   vcf_file_id = 1,
-#'   functional_summary = enrich_summary,
-#'   enriched_point_size = 3,
-#'   enriched_point_shape = 17,  # Triangle
-#'   enriched_point_color = "red",
-#'   use_label_lines = TRUE
+#'   numeric_x_labels = TRUE
 #' )
 #'
 #' print(manhattan_plot)
 #' }
 #'
 #' @export
-create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functional_summary,
+create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichment_data,
+                                           dataset_type = "candidate",
                                            y_label = "Statistical Value",
                                            plot_title = "Functional Manhattan Plot",
                                            signif_threshold = 0.01,
@@ -223,25 +224,33 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
   manhattan_data$functional <- FALSE
   manhattan_data$enriched_terms <- ""
 
-  if (!is.null(functional_summary) && !is.null(functional_summary$loci_summary)) {
-    loci_summary <- functional_summary$loci_summary
+  if (!is.null(enrichment_data)) {
+    # Filter enriched loci by dataset type
+    if (dataset_type == "all") {
+      enriched_loci <- enrichment_data[enrichment_data$enriched == TRUE, ]
+    } else {
+      enriched_loci <- enrichment_data[enrichment_data$enriched == TRUE & 
+                                     enrichment_data$dataset_type == dataset_type, ]
+    }
 
-    if (nrow(loci_summary) > 0) {
-      if (verbose) message("  - Highlighting ", nrow(loci_summary), " functionally enriched loci")
+    if (nrow(enriched_loci) > 0) {
+      if (verbose) message("  - Highlighting ", nrow(enriched_loci), " functionally enriched loci (", dataset_type, " dataset)")
 
-      # Match functional loci to Manhattan data
-      for (i in 1:nrow(loci_summary)) {
-        matches <- which(manhattan_data$chromosome == loci_summary$chromosome[i] &
-                        manhattan_data$position == loci_summary$position[i])
+      # Match enriched loci to Manhattan data
+      for (i in 1:nrow(enriched_loci)) {
+        matches <- which(manhattan_data$chromosome == enriched_loci$chromosome[i] &
+                        manhattan_data$position == enriched_loci$position[i])
 
         if (length(matches) > 0) {
           manhattan_data$functional[matches] <- TRUE
-          # Truncate long term lists for labeling
-          terms <- loci_summary$enriched_terms[i]
-          if (nchar(terms) > 100) {
-            terms <- paste0(substr(terms, 1, 97), "...")
+          # Use go_names for labeling (truncate if long)
+          terms <- enriched_loci$go_names[i]
+          if (!is.na(terms) && terms != "") {
+            if (nchar(terms) > 100) {
+              terms <- paste0(substr(terms, 1, 97), "...")
+            }
+            manhattan_data$enriched_terms[matches] <- terms
           }
-          manhattan_data$enriched_terms[matches] <- terms
         }
       }
 
@@ -337,22 +346,32 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, functio
     for (idx in functional_loci) {
       label_text <- ""
 
-      # Find corresponding loci_summary entry for this position
-      if (!is.null(functional_summary) && !is.null(functional_summary$loci_summary)) {
-        loci_match <- which(functional_summary$loci_summary$chromosome == manhattan_data$chromosome[idx] &
-                           functional_summary$loci_summary$position == manhattan_data$position[idx])
+      # Find corresponding enrichment data entry for this position
+      if (!is.null(enrichment_data)) {
+        # Filter by dataset type first
+        if (dataset_type == "all") {
+          loci_data <- enrichment_data[enrichment_data$enriched == TRUE, ]
+        } else {
+          loci_data <- enrichment_data[enrichment_data$enriched == TRUE & 
+                                     enrichment_data$dataset_type == dataset_type, ]
+        }
+        
+        loci_match <- which(loci_data$chromosome == manhattan_data$chromosome[idx] &
+                           loci_data$position == manhattan_data$position[idx])
 
         if (length(loci_match) > 0) {
-          loci_info <- functional_summary$loci_summary[loci_match[1], ]
+          loci_info <- loci_data[loci_match[1], ]
 
           if (label_type == "go_term") {
-            # Use first enriched term
-            terms <- strsplit(manhattan_data$enriched_terms[idx], ";")[[1]]
-            if (length(terms) > 0) {
-              label_text <- trimws(terms[1])
-              # Truncate if too long
-              if (nchar(label_text) > 30) {
-                label_text <- paste0(substr(label_text, 1, 27), "...")
+            # Use first GO term from go_names
+            if (!is.na(loci_info$go_names) && loci_info$go_names != "") {
+              terms <- strsplit(loci_info$go_names, ";")[[1]]
+              if (length(terms) > 0) {
+                label_text <- trimws(terms[1])
+                # Truncate if too long
+                if (nchar(label_text) > 30) {
+                  label_text <- paste0(substr(label_text, 1, 27), "...")
+                }
               }
             }
           } else if (label_type == "gene_name" && !is.null(loci_info$gene_names) && !is.na(loci_info$gene_names) && loci_info$gene_names != "") {
@@ -564,12 +583,13 @@ create_manhattan_plot <- function(con, y_values, vcf_file_id,
                                  signif_line_color = "red",
                                  verbose = TRUE) {
 
-  # Call the functional version with NULL functional summary
+  # Call the functional version with NULL enrichment data
   create_functional_manhattan_plot(
     con = con,
     y_values = y_values,
     vcf_file_id = vcf_file_id,
-    functional_summary = NULL,
+    enrichment_data = NULL,
+    dataset_type = "candidate",
     y_label = y_label,
     plot_title = plot_title,
     signif_threshold = signif_threshold,

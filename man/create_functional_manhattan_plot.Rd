@@ -8,7 +8,8 @@ create_functional_manhattan_plot(
   con,
   y_values,
   vcf_file_id,
-  functional_summary,
+  enrichment_data,
+  dataset_type = "candidate",
   y_label = "Statistical Value",
   plot_title = "Functional Manhattan Plot",
   signif_threshold = 0.01,
@@ -31,7 +32,8 @@ create_functional_manhattan_plot(
   con,
   y_values,
   vcf_file_id,
-  functional_summary,
+  enrichment_data,
+  dataset_type = "candidate",
   y_label = "Statistical Value",
   plot_title = "Functional Manhattan Plot",
   signif_threshold = 0.01,
@@ -57,7 +59,9 @@ create_functional_manhattan_plot(
 
 \item{vcf_file_id}{Integer. File ID of the VCF file used in the analysis}
 
-\item{functional_summary}{List. Output from summarize_functional_loci() containing loci_summary}
+\item{enrichment_data}{Data.frame. Output from compile_funseq_results() with enrichment stage}
+
+\item{dataset_type}{Character. Filter enriched loci by dataset type: "candidate", "background", or "all". Default is "candidate"}
 
 \item{y_label}{Character. Label for y-axis. Default is "Statistical Value"}
 
@@ -159,8 +163,9 @@ Uses consolidated chromosome names from the database metadata (set via define_ch
 Main chromosomes (e.g., LG1-LG24) are displayed separately, while scaffolds are grouped as "U".
 
 \\strong{Functional Highlighting:}
-Points corresponding to functionally enriched loci (from functional_summary$loci_summary)
-are highlighted in a different color and automatically labeled.
+Points corresponding to functionally enriched loci (from enrichment_data with enriched = TRUE)
+are highlighted in a different color and automatically labeled. Use dataset_type to control
+whether to highlight candidate loci, background loci, or both.
 
 \\strong{Labeling Options:}
 Functional loci can be labeled with GO terms, gene names, UniProt accessions, or positions
@@ -215,49 +220,47 @@ custom_plot <- create_functional_manhattan_plot(
 \dontrun{
 con <- connect_funseq_db("analysis.db")
 
-# Define main chromosomes for consolidation
-define_chromosomes(con, c("LG1", "LG2", "LG3", "LG4", "LG5", "LG6", "LG7", "LG8",
-                         "LG9", "LG10", "LG11", "LG12", "LG13", "LG14", "LG15",
-                         "LG16", "LG17", "LG18", "LG19", "LG20", "LG21", "LG22",
-                         "LG23", "LG24"))
+# Complete workflow: annotations -> enrichment -> manhattan plot
 
-# Get functional summary from enrichment analysis
-enrich_summary <- summarize_functional_loci(con,
-                                          enrichment_results,
-                                          candidate_file_id,
-                                          blast_param_id = 1)
+# Step 1: Generate annotation data
+results <- compile_funseq_results(
+  con, 
+  stage = "annotations",
+  include = c("GO", "KEGG"),
+  candidate_loci = "candidates.vcf"
+)
 
-# Create Manhattan plot with GO term labels (default)
+# Step 2: Run ORA analysis
+ORA_results <- run_ORA(con, "candidates.vcf", annotation_type = "GO")
+
+# Step 3: Add enrichment results
+enrichment_results <- compile_funseq_results(
+  con,
+  stage = "enrichment", 
+  data = results,
+  analysis_ids = c(1, 2, 3)
+)
+
+# Create Manhattan plot with enriched loci highlighted (candidate loci only)
 manhattan_plot <- create_functional_manhattan_plot(
   con,
-  y_values = rda.simple.pq$q.values,
+  y_values = my_statistical_values,  # Your p-values, q-values, etc.
   vcf_file_id = 1,
-  functional_summary = enrich_summary,
-  y_label = "RDA q-value",
-  plot_title = "RDA Analysis with Functional Annotation"
+  enrichment_data = enrichment_results,
+  dataset_type = "candidate",
+  y_label = "Statistical Value",
+  plot_title = "Analysis with Functional Annotation"
 )
 
-# Create Manhattan plot with gene name labels and numeric x-axis
-manhattan_plot_genes <- create_functional_manhattan_plot(
+# Create Manhattan plot showing all enriched loci (candidate + background)
+manhattan_plot_all <- create_functional_manhattan_plot(
   con,
-  y_values = rda.simple.pq$q.values,
+  y_values = my_statistical_values,
   vcf_file_id = 1,
-  functional_summary = enrich_summary,
+  enrichment_data = enrichment_results,
+  dataset_type = "all",
   label_type = "gene_name",
-  numeric_x_labels = TRUE,
-  y_label = "RDA q-value"
-)
-
-# Create Manhattan plot with custom enriched point styling
-manhattan_plot_custom <- create_functional_manhattan_plot(
-  con,
-  y_values = rda.simple.pq$q.values,
-  vcf_file_id = 1,
-  functional_summary = enrich_summary,
-  enriched_point_size = 3,
-  enriched_point_shape = 17,  # Triangle
-  enriched_point_color = "red",
-  use_label_lines = TRUE
+  numeric_x_labels = TRUE
 )
 
 print(manhattan_plot)
