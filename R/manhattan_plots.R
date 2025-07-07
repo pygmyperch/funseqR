@@ -397,9 +397,9 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
                 label_text <- trimws(term_ids[1])
               }
             }
-          } else if (label_type == "gene_name" && !is.null(loci_info$gene_names) && !is.na(loci_info$gene_names) && loci_info$gene_names != "") {
+          } else if (label_type == "gene_name" && !is.null(loci_info$gene_name) && !is.na(loci_info$gene_name) && loci_info$gene_name != "") {
             # Use gene names
-            genes <- strsplit(loci_info$gene_names, ";")[[1]]
+            genes <- strsplit(loci_info$gene_name, ";")[[1]]
             label_text <- trimws(genes[1])
           } else if (label_type == "uniprot_accession" && !is.null(loci_info$uniprot_accession) && !is.na(loci_info$uniprot_accession)) {
             # Use UniProt accession
