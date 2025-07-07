@@ -71,13 +71,13 @@ create_functional_manhattan_plot(
 
 \item{transform_y}{Character. Transform y-values: "none", "neg_log10", or "log10". Default is "neg_log10"}
 
-\item{highlight_color}{Character. Color for functionally enriched points. Default is "#D0DBEE"}
+\item{highlight_color}{Character. Default color for enriched points (used if enriched_point_color is NULL). Default is "#D0DBEE"}
 
 \item{chr_colors}{Character vector. Two colors for alternating chromosomes. Default is snapper colors}
 
 \item{point_size}{Numeric. Size of points. Default is 1.2}
 
-\item{label_type}{Character. Type of labels for enriched loci: "go_term", "gene_name", "uniprot_accession", or "position". Default is "go_term"}
+\item{label_type}{Character. Type of labels for enriched loci: "go_term", "go_id", "gene_name", "uniprot_accession", or "position". Default is "go_term"}
 
 \item{label_top_hits}{Integer. Number of top statistical hits to label if no functional loci. Default is 0}
 
@@ -87,7 +87,7 @@ create_functional_manhattan_plot(
 
 \item{enriched_point_shape}{Integer. Shape (pch) for enriched loci points. Default is 19 (filled circle)}
 
-\item{enriched_point_color}{Character. Color for enriched loci points. Default is highlight_color}
+\item{enriched_point_color}{Character. Color for enriched loci points. If NULL, uses highlight_color. Default is NULL}
 
 \item{use_label_lines}{Logical. Use indicator lines from labels to points. Default is TRUE}
 
@@ -168,8 +168,15 @@ are highlighted in a different color and automatically labeled. Use dataset_type
 whether to highlight candidate loci, background loci, or both.
 
 \\strong{Labeling Options:}
-Functional loci can be labeled with GO terms, gene names, UniProt accessions, or positions
-based on the label_type parameter. Labels are automatically applied to all enriched loci.
+Enriched loci can be labeled with different annotation types using the label_type parameter:
+\\itemize{
+\\item \\strong{go_term}: Enriched GO term names (e.g., "P:hemopoiesis") - human readable
+\\item \\strong{go_id}: Enriched GO term IDs (e.g., "GO:0030097") - compact format
+\\item \\strong{gene_name}: Gene names (e.g., "zfpm1") - protein/gene identifiers
+\\item \\strong{uniprot_accession}: UniProt accessions - database identifiers
+\\item \\strong{position}: Genomic position (e.g., "LG4:3814415") - coordinate fallback
+}
+Labels use only significantly enriched terms, not all functional annotations.
 
 \\strong{Visual Features:}
 \itemize{
@@ -252,15 +259,23 @@ manhattan_plot <- create_functional_manhattan_plot(
   plot_title = "Analysis with Functional Annotation"
 )
 
-# Create Manhattan plot showing all enriched loci (candidate + background)
-manhattan_plot_all <- create_functional_manhattan_plot(
-  con,
-  y_values = my_statistical_values,
-  vcf_file_id = 1,
-  enrichment_data = enrichment_results,
-  dataset_type = "all",
-  label_type = "gene_name",
-  numeric_x_labels = TRUE
+# Different labeling options for enriched loci
+# Use GO term names (default - descriptive but longer)
+plot_go_names <- create_functional_manhattan_plot(
+  con, y_values = my_statistical_values, vcf_file_id = 1,
+  enrichment_data = enrichment_results, label_type = "go_term"
+)
+
+# Use GO term IDs (compact format for cleaner plots)
+plot_go_ids <- create_functional_manhattan_plot(
+  con, y_values = my_statistical_values, vcf_file_id = 1,
+  enrichment_data = enrichment_results, label_type = "go_id"
+)
+
+# Use gene names (intermediate length)
+plot_genes <- create_functional_manhattan_plot(
+  con, y_values = my_statistical_values, vcf_file_id = 1,
+  enrichment_data = enrichment_results, label_type = "gene_name"
 )
 
 print(manhattan_plot)

@@ -484,6 +484,7 @@ compile_funseq_results <- function(con,
     enrichment_fdr = numeric(0),
     enrichment_pvalue = numeric(0),
     enriched_terms = character(0),
+    enriched_term_ids = character(0),
     enrichment_analysis_ids = character(0),
     stringsAsFactors = FALSE
   )
@@ -507,6 +508,7 @@ compile_funseq_results <- function(con,
     # Check if this locus has genes that appear in enriched terms
     is_enriched <- FALSE
     matched_terms <- character(0)
+    matched_term_ids <- character(0)
     matched_analyses <- character(0)
     best_fdr <- NA_real_
     best_pvalue <- NA_real_
@@ -526,6 +528,7 @@ compile_funseq_results <- function(con,
           
           if (nrow(matching_rows) > 0) {
             matched_terms <- c(matched_terms, matching_rows$term_name)
+            matched_term_ids <- c(matched_term_ids, matching_rows$term_id)
             matched_analyses <- c(matched_analyses, matching_rows$analysis_id)
             
             # Track best (lowest) FDR and p-value
@@ -547,6 +550,7 @@ compile_funseq_results <- function(con,
       enrichment_fdr = if (is_enriched) best_fdr else NA_real_,
       enrichment_pvalue = if (is_enriched) best_pvalue else NA_real_,
       enriched_terms = if (is_enriched) paste(unique(matched_terms), collapse = ";") else "",
+      enriched_term_ids = if (is_enriched) paste(unique(matched_term_ids), collapse = ";") else "",
       enrichment_analysis_ids = if (is_enriched) paste(unique(matched_analyses), collapse = ";") else "",
       stringsAsFactors = FALSE
     ))
@@ -574,12 +578,13 @@ compile_funseq_results <- function(con,
   result$enrichment_fdr[is.na(result$enrichment_fdr) & !result$enriched] <- NA_real_
   result$enrichment_pvalue[is.na(result$enrichment_pvalue) & !result$enriched] <- NA_real_
   result$enriched_terms[is.na(result$enriched_terms)] <- ""
+  result$enriched_term_ids[is.na(result$enriched_term_ids)] <- ""
   result$enrichment_analysis_ids[is.na(result$enrichment_analysis_ids)] <- ""
   
   # Reorder columns to put enrichment columns at the end
   base_cols <- names(data)
   enrichment_cols <- c("enriched", "enrichment_fdr", "enrichment_pvalue", 
-                      "enriched_terms", "enrichment_analysis_ids")
+                      "enriched_terms", "enriched_term_ids", "enrichment_analysis_ids")
   result <- result[, c(base_cols, enrichment_cols)]
   
   return(result)

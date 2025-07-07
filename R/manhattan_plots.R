@@ -17,15 +17,15 @@
 #' @param plot_title Character. Title for the plot. Default is "Functional Manhattan Plot"
 #' @param signif_threshold Numeric. Significance threshold line to draw. Default is 0.01
 #' @param transform_y Character. Transform y-values: "none", "neg_log10", or "log10". Default is "neg_log10"
-#' @param highlight_color Character. Color for functionally enriched points. Default is "#D0DBEE"
+#' @param highlight_color Character. Default color for enriched points (used if enriched_point_color is NULL). Default is "#D0DBEE"
 #' @param chr_colors Character vector. Two colors for alternating chromosomes. Default is snapper colors
 #' @param point_size Numeric. Size of points. Default is 1.2
-#' @param label_type Character. Type of labels for enriched loci: "go_term", "gene_name", "uniprot_accession", or "position". Default is "go_term"
+#' @param label_type Character. Type of labels for enriched loci: "go_term", "go_id", "gene_name", "uniprot_accession", or "position". Default is "go_term"
 #' @param label_top_hits Integer. Number of top statistical hits to label if no functional loci. Default is 0
 #' @param numeric_x_labels Logical. Use numeric labels (1,2,3,...,U) instead of chromosome names (LG1,LG2,...,U). Default is FALSE
 #' @param enriched_point_size Numeric. Size of enriched loci points. Default is point_size * 1.5
 #' @param enriched_point_shape Integer. Shape (pch) for enriched loci points. Default is 19 (filled circle)
-#' @param enriched_point_color Character. Color for enriched loci points. Default is highlight_color
+#' @param enriched_point_color Character. Color for enriched loci points. If NULL, uses highlight_color. Default is NULL
 #' @param use_label_lines Logical. Use indicator lines from labels to points. Default is TRUE
 #' @param signif_line_color Character. Color for significance threshold line. Default is "red"
 #' @param verbose Logical. Print progress information. Default is TRUE
@@ -45,8 +45,15 @@
 #' whether to highlight candidate loci, background loci, or both.
 #'
 #' \\strong{Labeling Options:}
-#' Functional loci can be labeled with GO terms, gene names, UniProt accessions, or positions
-#' based on the label_type parameter. Labels are automatically applied to all enriched loci.
+#' Enriched loci can be labeled with different annotation types using the label_type parameter:
+#' \\itemize{
+#'   \\item \\strong{go_term}: Enriched GO term names (e.g., "P:hemopoiesis") - human readable
+#'   \\item \\strong{go_id}: Enriched GO term IDs (e.g., "GO:0030097") - compact format
+#'   \\item \\strong{gene_name}: Gene names (e.g., "zfpm1") - protein/gene identifiers
+#'   \\item \\strong{uniprot_accession}: UniProt accessions - database identifiers
+#'   \\item \\strong{position}: Genomic position (e.g., "LG4:3814415") - coordinate fallback
+#' }
+#' Labels use only significantly enriched terms, not all functional annotations.
 #'
 #' \\strong{Visual Features:}
 #' - Alternating chromosome colors for easy visualization
@@ -95,15 +102,23 @@
 #'   plot_title = "Analysis with Functional Annotation"
 #' )
 #'
-#' # Create Manhattan plot showing all enriched loci (candidate + background)
-#' manhattan_plot_all <- create_functional_manhattan_plot(
-#'   con,
-#'   y_values = my_statistical_values,
-#'   vcf_file_id = 1,
-#'   enrichment_data = enrichment_results,
-#'   dataset_type = "all",
-#'   label_type = "gene_name",
-#'   numeric_x_labels = TRUE
+#' # Different labeling options for enriched loci
+#' # Use GO term names (default - descriptive but longer)
+#' plot_go_names <- create_functional_manhattan_plot(
+#'   con, y_values = my_statistical_values, vcf_file_id = 1,
+#'   enrichment_data = enrichment_results, label_type = "go_term"
+#' )
+#' 
+#' # Use GO term IDs (compact format for cleaner plots)
+#' plot_go_ids <- create_functional_manhattan_plot(
+#'   con, y_values = my_statistical_values, vcf_file_id = 1,
+#'   enrichment_data = enrichment_results, label_type = "go_id"
+#' )
+#' 
+#' # Use gene names (intermediate length)
+#' plot_genes <- create_functional_manhattan_plot(
+#'   con, y_values = my_statistical_values, vcf_file_id = 1,
+#'   enrichment_data = enrichment_results, label_type = "gene_name"
 #' )
 #'
 #' print(manhattan_plot)
@@ -243,8 +258,8 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
 
         if (length(matches) > 0) {
           manhattan_data$functional[matches] <- TRUE
-          # Use go_names for labeling (truncate if long)
-          terms <- enriched_loci$go_names[i]
+          # Use enriched_terms for labeling (truncate if long)
+          terms <- enriched_loci$enriched_terms[i]
           if (!is.na(terms) && terms != "") {
             if (nchar(terms) > 100) {
               terms <- paste0(substr(terms, 1, 97), "...")
@@ -363,15 +378,23 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
           loci_info <- loci_data[loci_match[1], ]
 
           if (label_type == "go_term") {
-            # Use first GO term from go_names
-            if (!is.na(loci_info$go_names) && loci_info$go_names != "") {
-              terms <- strsplit(loci_info$go_names, ";")[[1]]
+            # Use first enriched GO term name
+            if (!is.na(loci_info$enriched_terms) && loci_info$enriched_terms != "") {
+              terms <- strsplit(loci_info$enriched_terms, ";")[[1]]
               if (length(terms) > 0) {
                 label_text <- trimws(terms[1])
                 # Truncate if too long
                 if (nchar(label_text) > 30) {
                   label_text <- paste0(substr(label_text, 1, 27), "...")
                 }
+              }
+            }
+          } else if (label_type == "go_id") {
+            # Use first enriched GO term ID (compact format)
+            if (!is.na(loci_info$enriched_term_ids) && loci_info$enriched_term_ids != "") {
+              term_ids <- strsplit(loci_info$enriched_term_ids, ";")[[1]]
+              if (length(term_ids) > 0) {
+                label_text <- trimws(term_ids[1])
               }
             }
           } else if (label_type == "gene_name" && !is.null(loci_info$gene_names) && !is.na(loci_info$gene_names) && loci_info$gene_names != "") {
