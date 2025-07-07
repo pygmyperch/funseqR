@@ -377,6 +377,17 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
         if (length(loci_match) > 0) {
           loci_info <- loci_data[loci_match[1], ]
 
+          if (verbose) {
+            message("    DEBUG: Processing locus at ", manhattan_data$chromosome[idx], ":", manhattan_data$position[idx])
+            message("    DEBUG: Available columns: ", paste(names(loci_info), collapse = ", "))
+            message("    DEBUG: enriched_terms value: '", loci_info$enriched_terms, "'")
+            if ("enriched_term_ids" %in% names(loci_info)) {
+              message("    DEBUG: enriched_term_ids value: '", loci_info$enriched_term_ids, "'")
+            } else {
+              message("    DEBUG: enriched_term_ids column not found")
+            }
+          }
+
           if (label_type == "go_term") {
             # Use first enriched GO term name
             if (!is.na(loci_info$enriched_terms) && loci_info$enriched_terms != "") {
@@ -387,14 +398,16 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
                 if (nchar(label_text) > 30) {
                   label_text <- paste0(substr(label_text, 1, 27), "...")
                 }
+                if (verbose) message("    DEBUG: Using go_term label: '", label_text, "'")
               }
             }
           } else if (label_type == "go_id") {
             # Use first enriched GO term ID (compact format)
-            if (!is.na(loci_info$enriched_term_ids) && loci_info$enriched_term_ids != "") {
+            if ("enriched_term_ids" %in% names(loci_info) && !is.na(loci_info$enriched_term_ids) && loci_info$enriched_term_ids != "") {
               term_ids <- strsplit(loci_info$enriched_term_ids, ";")[[1]]
               if (length(term_ids) > 0) {
                 label_text <- trimws(term_ids[1])
+                if (verbose) message("    DEBUG: Using go_id label: '", label_text, "'")
               }
             }
           } else if (label_type == "gene_name" && !is.null(loci_info$gene_names) && !is.na(loci_info$gene_names) && loci_info$gene_names != "") {
@@ -411,6 +424,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
       # Fallback to position if no specific label found
       if (label_text == "") {
         label_text <- paste0(manhattan_data$chromosome[idx], ":", format(manhattan_data$position[idx], big.mark = ","))
+        if (verbose) message("    DEBUG: Using fallback position label: '", label_text, "'")
       }
 
       manhattan_data$label[idx] <- label_text
