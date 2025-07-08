@@ -9,7 +9,6 @@ create_manhattan_plot(
   y_values,
   vcf_file_id,
   y_label = "Statistical Value",
-  plot_title = "Manhattan Plot",
   signif_threshold = 0.01,
   transform_y = "neg_log10",
   chr_colors = c("#A1B1CC", "#0E7EC0"),
@@ -27,8 +26,6 @@ create_manhattan_plot(
 \item{vcf_file_id}{Integer. File ID of the VCF file}
 
 \item{y_label}{Character. Label for y-axis. Default is "Statistical Value"}
-
-\item{plot_title}{Character. Title for the plot. Default is "Manhattan Plot"}
 
 \item{signif_threshold}{Numeric. Significance threshold line to draw. Default is 0.01}
 
@@ -58,8 +55,7 @@ manhattan_plot <- create_manhattan_plot(
   con,
   y_values = rda.simple.pq$q.values,
   vcf_file_id = 1,
-  y_label = "RDA q-value",
-  plot_title = "RDA Analysis"
+  y_label = "RDA q-value"
 )
 
 # Manhattan plot with numeric x-axis labels
@@ -68,7 +64,6 @@ manhattan_plot_numeric <- create_manhattan_plot(
   y_values = rda.simple.pq$q.values,
   vcf_file_id = 1,
   y_label = "RDA q-value",
-  plot_title = "RDA Analysis",
   numeric_x_labels = TRUE
 )
 }

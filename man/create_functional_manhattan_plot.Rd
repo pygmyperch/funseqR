@@ -8,21 +8,20 @@ create_functional_manhattan_plot(
   con,
   y_values,
   vcf_file_id,
-  enrichment_data,
-  dataset_type = "candidate",
+  enrichment_data = NULL,
   y_label = "Statistical Value",
-  plot_title = "Functional Manhattan Plot",
   signif_threshold = 0.01,
   transform_y = "neg_log10",
   highlight_color = "#D0DBEE",
   chr_colors = c("#A1B1CC", "#0E7EC0"),
   point_size = 1.2,
   label_type = "go_term",
+  label_cex = 0.8,
   label_top_hits = 0,
   numeric_x_labels = FALSE,
   enriched_point_size = NULL,
-  enriched_point_shape = 19,
-  enriched_point_color = NULL,
+  enriched_point_shape = 17,
+  enriched_point_color = "red",
   use_label_lines = TRUE,
   signif_line_color = "red",
   verbose = TRUE
@@ -32,21 +31,20 @@ create_functional_manhattan_plot(
   con,
   y_values,
   vcf_file_id,
-  enrichment_data,
-  dataset_type = "candidate",
+  enrichment_data = NULL,
   y_label = "Statistical Value",
-  plot_title = "Functional Manhattan Plot",
   signif_threshold = 0.01,
   transform_y = "neg_log10",
   highlight_color = "#D0DBEE",
   chr_colors = c("#A1B1CC", "#0E7EC0"),
   point_size = 1.2,
   label_type = "go_term",
+  label_cex = 0.8,
   label_top_hits = 0,
   numeric_x_labels = FALSE,
   enriched_point_size = NULL,
-  enriched_point_shape = 19,
-  enriched_point_color = NULL,
+  enriched_point_shape = 17,
+  enriched_point_color = "red",
   use_label_lines = TRUE,
   signif_line_color = "red",
   verbose = TRUE
@@ -59,13 +57,9 @@ create_functional_manhattan_plot(
 
 \item{vcf_file_id}{Integer. File ID of the VCF file used in the analysis}
 
-\item{enrichment_data}{Data.frame. Output from compile_funseq_results() with enrichment stage}
-
-\item{dataset_type}{Character. Filter enriched loci by dataset type: "candidate", "background", or "all". Default is "candidate"}
+\item{enrichment_data}{Data.frame. Output from compile_funseq_results() with enrichment stage. If NULL, creates basic Manhattan plot. Default is NULL}
 
 \item{y_label}{Character. Label for y-axis. Default is "Statistical Value"}
-
-\item{plot_title}{Character. Title for the plot. Default is "Functional Manhattan Plot"}
 
 \item{signif_threshold}{Numeric. Significance threshold line to draw. Default is 0.01}
 
@@ -79,15 +73,17 @@ create_functional_manhattan_plot(
 
 \item{label_type}{Character. Type of labels for enriched loci: "go_term", "go_id", "gene_name", "uniprot_accession", or "position". Default is "go_term"}
 
-\item{label_top_hits}{Integer. Number of top statistical hits to label if no functional loci. Default is 0}
+\item{label_cex}{Numeric. Size of text labels. Default is 0.8}
+
+\item{label_top_hits}{Integer. Number of top statistical hits to label (works independently of enrichment). Default is 0}
 
 \item{numeric_x_labels}{Logical. Use numeric labels (1,2,3,...,U) instead of chromosome names (LG1,LG2,...,U). Default is FALSE}
 
 \item{enriched_point_size}{Numeric. Size of enriched loci points. Default is point_size * 1.5}
 
-\item{enriched_point_shape}{Integer. Shape (pch) for enriched loci points. Default is 19 (filled circle)}
+\item{enriched_point_shape}{Integer. Shape (pch) for enriched loci points. Default is 17 (triangle)}
 
-\item{enriched_point_color}{Character. Color for enriched loci points. If NULL, uses highlight_color. Default is NULL}
+\item{enriched_point_color}{Character. Color for enriched loci points. Default is "red"}
 
 \item{use_label_lines}{Logical. Use indicator lines from labels to points. Default is TRUE}
 
@@ -254,9 +250,7 @@ manhattan_plot <- create_functional_manhattan_plot(
   y_values = my_statistical_values,  # Your p-values, q-values, etc.
   vcf_file_id = 1,
   enrichment_data = enrichment_results,
-  dataset_type = "candidate",
-  y_label = "Statistical Value",
-  plot_title = "Analysis with Functional Annotation"
+  y_label = "Statistical Value"
 )
 
 # Different labeling options for enriched loci

@@ -11,21 +11,20 @@
 #' @param con Database connection object
 #' @param y_values Numeric vector of values to plot on y-axis (same order as VCF file variants)
 #' @param vcf_file_id Integer. File ID of the VCF file used in the analysis
-#' @param enrichment_data Data.frame. Output from compile_funseq_results() with enrichment stage
-#' @param dataset_type Character. Filter enriched loci by dataset type: "candidate", "background", or "all". Default is "candidate"
+#' @param enrichment_data Data.frame. Output from compile_funseq_results() with enrichment stage. If NULL, creates basic Manhattan plot. Default is NULL
 #' @param y_label Character. Label for y-axis. Default is "Statistical Value"
-#' @param plot_title Character. Title for the plot. Default is "Functional Manhattan Plot"
 #' @param signif_threshold Numeric. Significance threshold line to draw. Default is 0.01
 #' @param transform_y Character. Transform y-values: "none", "neg_log10", or "log10". Default is "neg_log10"
 #' @param highlight_color Character. Default color for enriched points (used if enriched_point_color is NULL). Default is "#D0DBEE"
 #' @param chr_colors Character vector. Two colors for alternating chromosomes. Default is snapper colors
 #' @param point_size Numeric. Size of points. Default is 1.2
 #' @param label_type Character. Type of labels for enriched loci: "go_term", "go_id", "gene_name", "uniprot_accession", or "position". Default is "go_term"
-#' @param label_top_hits Integer. Number of top statistical hits to label if no functional loci. Default is 0
+#' @param label_cex Numeric. Size of text labels. Default is 0.8
+#' @param label_top_hits Integer. Number of top statistical hits to label (works independently of enrichment). Default is 0
 #' @param numeric_x_labels Logical. Use numeric labels (1,2,3,...,U) instead of chromosome names (LG1,LG2,...,U). Default is FALSE
 #' @param enriched_point_size Numeric. Size of enriched loci points. Default is point_size * 1.5
-#' @param enriched_point_shape Integer. Shape (pch) for enriched loci points. Default is 19 (filled circle)
-#' @param enriched_point_color Character. Color for enriched loci points. If NULL, uses highlight_color. Default is NULL
+#' @param enriched_point_shape Integer. Shape (pch) for enriched loci points. Default is 17 (triangle)
+#' @param enriched_point_color Character. Color for enriched loci points. Default is "red"
 #' @param use_label_lines Logical. Use indicator lines from labels to points. Default is TRUE
 #' @param signif_line_color Character. Color for significance threshold line. Default is "red"
 #' @param verbose Logical. Print progress information. Default is TRUE
@@ -97,9 +96,7 @@
 #'   y_values = my_statistical_values,  # Your p-values, q-values, etc.
 #'   vcf_file_id = 1,
 #'   enrichment_data = enrichment_results,
-#'   dataset_type = "candidate",
-#'   y_label = "Statistical Value",
-#'   plot_title = "Analysis with Functional Annotation"
+#'   y_label = "Statistical Value"
 #' )
 #'
 #' # Different labeling options for enriched loci
@@ -125,21 +122,20 @@
 #' }
 #'
 #' @export
-create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichment_data,
-                                           dataset_type = "candidate",
+create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichment_data = NULL,
                                            y_label = "Statistical Value",
-                                           plot_title = "Functional Manhattan Plot",
                                            signif_threshold = 0.01,
                                            transform_y = "neg_log10",
                                            highlight_color = "#D0DBEE",
                                            chr_colors = c("#A1B1CC", "#0E7EC0"),
                                            point_size = 1.2,
                                            label_type = "go_term",
+                                           label_cex = 0.8,
                                            label_top_hits = 0,
                                            numeric_x_labels = FALSE,
                                            enriched_point_size = NULL,
-                                           enriched_point_shape = 19,
-                                           enriched_point_color = NULL,
+                                           enriched_point_shape = 17,
+                                           enriched_point_color = "red",
                                            use_label_lines = TRUE,
                                            signif_line_color = "red",
                                            verbose = TRUE) {
@@ -153,9 +149,6 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
   # Set default values for enriched point styling
   if (is.null(enriched_point_size)) {
     enriched_point_size <- point_size * 1.5
-  }
-  if (is.null(enriched_point_color)) {
-    enriched_point_color <- highlight_color
   }
 
   # Get genomic coordinates from database in VCF order
@@ -240,16 +233,12 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
   manhattan_data$enriched_terms <- ""
 
   if (!is.null(enrichment_data)) {
-    # Filter enriched loci by dataset type
-    if (dataset_type == "all") {
-      enriched_loci <- enrichment_data[enrichment_data$enriched == TRUE, ]
-    } else {
-      enriched_loci <- enrichment_data[enrichment_data$enriched == TRUE & 
-                                     enrichment_data$dataset_type == dataset_type, ]
-    }
+    # Filter enriched candidate loci
+    enriched_loci <- enrichment_data[enrichment_data$enriched == TRUE & 
+                                   enrichment_data$dataset_type == "candidate", ]
 
     if (nrow(enriched_loci) > 0) {
-      if (verbose) message("  - Highlighting ", nrow(enriched_loci), " functionally enriched loci (", dataset_type, " dataset)")
+      if (verbose) message("  - Highlighting ", nrow(enriched_loci), " functionally enriched candidate loci")
 
       # Match enriched loci to Manhattan data
       for (i in 1:nrow(enriched_loci)) {
@@ -363,13 +352,9 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
 
       # Find corresponding enrichment data entry for this position
       if (!is.null(enrichment_data)) {
-        # Filter by dataset type first
-        if (dataset_type == "all") {
-          loci_data <- enrichment_data[enrichment_data$enriched == TRUE, ]
-        } else {
-          loci_data <- enrichment_data[enrichment_data$enriched == TRUE & 
-                                     enrichment_data$dataset_type == dataset_type, ]
-        }
+        # Filter enriched candidate loci
+        loci_data <- enrichment_data[enrichment_data$enriched == TRUE & 
+                                   enrichment_data$dataset_type == "candidate", ]
         
         loci_match <- which(loci_data$chromosome == manhattan_data$chromosome[idx] &
                            loci_data$position == manhattan_data$position[idx])
@@ -417,9 +402,9 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
     }
   }
 
-  # Optionally label top statistical hits if no functional loci or if requested
-  if (label_top_hits > 0 && length(functional_loci) == 0) {
-    if (verbose) message("  - No functional loci found, labeling ", label_top_hits, " top statistical hits")
+  # Optionally label top statistical hits (works independently of enrichment)
+  if (label_top_hits > 0) {
+    if (verbose) message("  - Labeling ", label_top_hits, " top statistical hits")
 
     if (transform_y == "neg_log10") {
       top_indices <- order(manhattan_data$y_transformed, decreasing = TRUE)[1:min(label_top_hits, nrow(manhattan_data))]
@@ -428,8 +413,11 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
     }
 
     for (idx in top_indices) {
-      manhattan_data$label[idx] <- paste0(manhattan_data$chromosome[idx], ":",
-                                         format(manhattan_data$position[idx], big.mark = ","))
+      # Only label if not already labeled by enrichment
+      if (manhattan_data$label[idx] == "") {
+        manhattan_data$label[idx] <- paste0(manhattan_data$chromosome[idx], ":",
+                                           format(manhattan_data$position[idx], big.mark = ","))
+      }
     }
   }
 
@@ -459,7 +447,6 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
     ) +
     # Labels
     ggplot2::labs(
-      title = plot_title,
       x = "Chromosome",
       y = y_label
     ) +
@@ -476,7 +463,6 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
       axis.ticks.length = ggplot2::unit(0.2, "cm"),
       # Text formatting
       axis.text.x = ggplot2::element_text(angle = 0, hjust = 0.5),
-      plot.title = ggplot2::element_text(hjust = 0.5, size = 14),
       axis.title = ggplot2::element_text(size = 12),
       legend.position = "none",
       # Clean panel background
@@ -510,13 +496,13 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
       }
       p <- p + ggplot2::geom_text(data = labeled_data,
                                  ggplot2::aes(label = label),
-                                 size = 3, vjust = -0.5, hjust = 0.5)
+                                 size = label_cex * 3, vjust = -0.5, hjust = 0.5)
     } else {
       # Use ggrepel for better label positioning with indicator lines
       if (use_label_lines) {
         p <- p + ggrepel::geom_text_repel(data = labeled_data,
                                          ggplot2::aes(label = label),
-                                         size = 3,
+                                         size = label_cex * 3,
                                          max.overlaps = Inf,
                                          box.padding = 0.5,
                                          point.padding = 0.3,
@@ -530,7 +516,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
         # No indicator lines
         p <- p + ggrepel::geom_text_repel(data = labeled_data,
                                          ggplot2::aes(label = label),
-                                         size = 3,
+                                         size = label_cex * 3,
                                          max.overlaps = Inf,
                                          box.padding = 0.3,
                                          point.padding = 0.3,
@@ -561,7 +547,6 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
 #' @param y_values Numeric vector of values to plot on y-axis (same order as VCF file variants)
 #' @param vcf_file_id Integer. File ID of the VCF file
 #' @param y_label Character. Label for y-axis. Default is "Statistical Value"
-#' @param plot_title Character. Title for the plot. Default is "Manhattan Plot"
 #' @param signif_threshold Numeric. Significance threshold line to draw. Default is 0.01
 #' @param transform_y Character. Transform y-values: "none", "neg_log10", or "log10". Default is "neg_log10"
 #' @param chr_colors Character vector. Two colors for alternating chromosomes. Default is snapper colors
@@ -579,8 +564,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
 #'   con,
 #'   y_values = rda.simple.pq$q.values,
 #'   vcf_file_id = 1,
-#'   y_label = "RDA q-value",
-#'   plot_title = "RDA Analysis"
+#'   y_label = "RDA q-value"
 #' )
 #'
 #' # Manhattan plot with numeric x-axis labels
@@ -589,7 +573,6 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
 #'   y_values = rda.simple.pq$q.values,
 #'   vcf_file_id = 1,
 #'   y_label = "RDA q-value",
-#'   plot_title = "RDA Analysis",
 #'   numeric_x_labels = TRUE
 #' )
 #' }
@@ -597,7 +580,6 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
 #' @export
 create_manhattan_plot <- function(con, y_values, vcf_file_id,
                                  y_label = "Statistical Value",
-                                 plot_title = "Manhattan Plot",
                                  signif_threshold = 0.01,
                                  transform_y = "neg_log10",
                                  chr_colors = c("#A1B1CC", "#0E7EC0"),
@@ -612,9 +594,7 @@ create_manhattan_plot <- function(con, y_values, vcf_file_id,
     y_values = y_values,
     vcf_file_id = vcf_file_id,
     enrichment_data = NULL,
-    dataset_type = "candidate",
     y_label = y_label,
-    plot_title = plot_title,
     signif_threshold = signif_threshold,
     transform_y = transform_y,
     highlight_color = NULL,
