@@ -17,7 +17,7 @@ create_functional_manhattan_plot(
   point_size = 1.2,
   label_type = "go_term",
   label_cex = 0.8,
-  label_top_hits = 0,
+  label_top_candidates = 0,
   numeric_x_labels = FALSE,
   enriched_point_size = NULL,
   enriched_point_shape = 17,
@@ -40,7 +40,7 @@ create_functional_manhattan_plot(
   point_size = 1.2,
   label_type = "go_term",
   label_cex = 0.8,
-  label_top_hits = 0,
+  label_top_candidates = 0,
   numeric_x_labels = FALSE,
   enriched_point_size = NULL,
   enriched_point_shape = 17,
@@ -75,7 +75,7 @@ create_functional_manhattan_plot(
 
 \item{label_cex}{Numeric. Size of text labels. Default is 0.8}
 
-\item{label_top_hits}{Integer. Number of top statistical hits to label (works independently of enrichment). Default is 0}
+\item{label_top_candidates}{Integer. Number of top candidate loci to label based on y_values. Uses functional annotations when available, falls back to position. Default is 0}
 
 \item{numeric_x_labels}{Logical. Use numeric labels (1,2,3,...,U) instead of chromosome names (LG1,LG2,...,U). Default is FALSE}
 
@@ -174,6 +174,16 @@ Enriched loci can be labeled with different annotation types using the label_typ
 }
 Labels use only significantly enriched terms, not all functional annotations.
 
+\\strong{Top Candidate Labeling:}
+The \\code{label_top_candidates} parameter labels the highest y_value loci using
+intelligent per-locus fallback logic:
+\\enumerate{
+\\item Try functional annotation (based on label_type: go_term, gene_name, etc.)
+\\item Fall back to position labels (e.g., "LG4:3,814,415") if no annotation found
+}
+This creates mixed labeling where some top candidates show functional information
+while others show positions, depending on annotation availability.
+
 \\strong{Visual Features:}
 \itemize{
 \item Alternating chromosome colors for easy visualization
@@ -270,6 +280,14 @@ plot_go_ids <- create_functional_manhattan_plot(
 plot_genes <- create_functional_manhattan_plot(
   con, y_values = my_statistical_values, vcf_file_id = 1,
   enrichment_data = enrichment_results, label_type = "gene_name"
+)
+
+# Label top 10 candidates with mixed functional/position labels
+plot_top_candidates <- create_functional_manhattan_plot(
+  con, y_values = my_statistical_values, vcf_file_id = 1,
+  enrichment_data = enrichment_results, 
+  label_top_candidates = 10, label_type = "gene_name"
+  # Results in mixed labels: "zfpm1", "gata1", "LG10:28,936,085", "tbx5", etc.
 )
 
 print(manhattan_plot)

@@ -20,7 +20,7 @@
 #' @param point_size Numeric. Size of points. Default is 1.2
 #' @param label_type Character. Type of labels for enriched loci: "go_term", "go_id", "gene_name", "uniprot_accession", or "position". Default is "go_term"
 #' @param label_cex Numeric. Size of text labels. Default is 0.8
-#' @param label_top_hits Integer. Number of top statistical hits to label (works independently of enrichment). Default is 0
+#' @param label_top_candidates Integer. Number of top candidate loci to label based on y_values. Uses functional annotations when available, falls back to position. Default is 0
 #' @param numeric_x_labels Logical. Use numeric labels (1,2,3,...,U) instead of chromosome names (LG1,LG2,...,U). Default is FALSE
 #' @param enriched_point_size Numeric. Size of enriched loci points. Default is point_size * 1.5
 #' @param enriched_point_shape Integer. Shape (pch) for enriched loci points. Default is 17 (triangle)
@@ -53,6 +53,16 @@
 #'   \\item \\strong{position}: Genomic position (e.g., "LG4:3814415") - coordinate fallback
 #' }
 #' Labels use only significantly enriched terms, not all functional annotations.
+#'
+#' \\strong{Top Candidate Labeling:}
+#' The \\code{label_top_candidates} parameter labels the highest y_value loci using 
+#' intelligent per-locus fallback logic:
+#' \\enumerate{
+#'   \\item Try functional annotation (based on label_type: go_term, gene_name, etc.)
+#'   \\item Fall back to position labels (e.g., "LG4:3,814,415") if no annotation found
+#' }
+#' This creates mixed labeling where some top candidates show functional information 
+#' while others show positions, depending on annotation availability.
 #'
 #' \\strong{Visual Features:}
 #' - Alternating chromosome colors for easy visualization
@@ -117,6 +127,14 @@
 #'   con, y_values = my_statistical_values, vcf_file_id = 1,
 #'   enrichment_data = enrichment_results, label_type = "gene_name"
 #' )
+#' 
+#' # Label top 10 candidates with mixed functional/position labels
+#' plot_top_candidates <- create_functional_manhattan_plot(
+#'   con, y_values = my_statistical_values, vcf_file_id = 1,
+#'   enrichment_data = enrichment_results, 
+#'   label_top_candidates = 10, label_type = "gene_name"
+#'   # Results in mixed labels: "zfpm1", "gata1", "LG10:28,936,085", "tbx5", etc.
+#' )
 #'
 #' print(manhattan_plot)
 #' }
@@ -131,7 +149,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
                                            point_size = 1.2,
                                            label_type = "go_term",
                                            label_cex = 0.8,
-                                           label_top_hits = 0,
+                                           label_top_candidates = 0,
                                            numeric_x_labels = FALSE,
                                            enriched_point_size = NULL,
                                            enriched_point_shape = 17,
@@ -402,21 +420,83 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
     }
   }
 
-  # Optionally label top statistical hits (works independently of enrichment)
-  if (label_top_hits > 0) {
-    if (verbose) message("  - Labeling ", label_top_hits, " top statistical hits")
+  # Optionally label top candidate loci (works independently of enrichment)
+  if (label_top_candidates > 0) {
+    if (verbose) message("  - Labeling ", label_top_candidates, " top candidate loci")
 
     if (transform_y == "neg_log10") {
-      top_indices <- order(manhattan_data$y_transformed, decreasing = TRUE)[1:min(label_top_hits, nrow(manhattan_data))]
+      top_indices <- order(manhattan_data$y_transformed, decreasing = TRUE)[1:min(label_top_candidates, nrow(manhattan_data))]
     } else {
-      top_indices <- order(manhattan_data$y_value, decreasing = TRUE)[1:min(label_top_hits, nrow(manhattan_data))]
+      top_indices <- order(manhattan_data$y_value, decreasing = TRUE)[1:min(label_top_candidates, nrow(manhattan_data))]
     }
 
     for (idx in top_indices) {
       # Only label if not already labeled by enrichment
       if (manhattan_data$label[idx] == "") {
-        manhattan_data$label[idx] <- paste0(manhattan_data$chromosome[idx], ":",
-                                           format(manhattan_data$position[idx], big.mark = ","))
+        label_text <- ""
+        
+        # Try to find functional annotation for this position
+        if (!is.null(enrichment_data)) {
+          # Search ALL candidate loci (not just enriched=TRUE)
+          all_candidates <- enrichment_data[enrichment_data$dataset_type == "candidate", ]
+          
+          loci_match <- which(all_candidates$chromosome == manhattan_data$chromosome[idx] &
+                             all_candidates$position == manhattan_data$position[idx])
+          
+          if (length(loci_match) > 0) {
+            loci_info <- all_candidates[loci_match[1], ]
+            
+            # Apply same labeling logic as enriched loci
+            if (label_type == "go_term") {
+              # Use enriched terms if available, otherwise use general GO terms
+              if ("enriched_terms" %in% names(loci_info) && !is.na(loci_info$enriched_terms) && loci_info$enriched_terms != "") {
+                terms <- strsplit(loci_info$enriched_terms, ";")[[1]]
+                if (length(terms) > 0) {
+                  label_text <- trimws(terms[1])
+                  if (nchar(label_text) > 30) {
+                    label_text <- paste0(substr(label_text, 1, 27), "...")
+                  }
+                }
+              } else if (!is.na(loci_info$go_names) && loci_info$go_names != "") {
+                terms <- strsplit(loci_info$go_names, ";")[[1]]
+                if (length(terms) > 0) {
+                  label_text <- trimws(terms[1])
+                  if (nchar(label_text) > 30) {
+                    label_text <- paste0(substr(label_text, 1, 27), "...")
+                  }
+                }
+              }
+            } else if (label_type == "go_id") {
+              # Use enriched term IDs if available, otherwise use general GO IDs
+              if ("enriched_term_ids" %in% names(loci_info) && !is.na(loci_info$enriched_term_ids) && loci_info$enriched_term_ids != "") {
+                term_ids <- strsplit(loci_info$enriched_term_ids, ";")[[1]]
+                if (length(term_ids) > 0) {
+                  label_text <- trimws(term_ids[1])
+                }
+              } else if (!is.na(loci_info$go_terms) && loci_info$go_terms != "") {
+                go_ids <- strsplit(loci_info$go_terms, ";")[[1]]
+                if (length(go_ids) > 0) {
+                  label_text <- trimws(go_ids[1])
+                }
+              }
+            } else if (label_type == "gene_name" && !is.na(loci_info$gene_name) && loci_info$gene_name != "") {
+              # Use gene names
+              genes <- strsplit(loci_info$gene_name, ";")[[1]]
+              label_text <- trimws(genes[1])
+            } else if (label_type == "uniprot_accession" && !is.na(loci_info$uniprot_accession) && loci_info$uniprot_accession != "") {
+              # Use UniProt accession
+              label_text <- loci_info$uniprot_accession
+            }
+          }
+        }
+        
+        # Fallback to position if no functional annotation found
+        if (label_text == "") {
+          label_text <- paste0(manhattan_data$chromosome[idx], ":", 
+                              format(manhattan_data$position[idx], big.mark = ","))
+        }
+        
+        manhattan_data$label[idx] <- label_text
       }
     }
   }
@@ -530,8 +610,8 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
     if (sum(manhattan_data$functional) > 0) {
       message("  - ", sum(manhattan_data$functional), " functionally enriched loci highlighted")
     }
-    if (label_top_hits > 0) {
-      message("  - ", nrow(labeled_data), " top hits labeled")
+    if (label_top_candidates > 0) {
+      message("  - ", nrow(labeled_data), " candidate loci labeled")
     }
   }
 
@@ -601,7 +681,7 @@ create_manhattan_plot <- function(con, y_values, vcf_file_id,
     chr_colors = chr_colors,
     point_size = point_size,
     label_type = "position",
-    label_top_hits = 0,
+    label_top_candidates = 0,
     numeric_x_labels = numeric_x_labels,
     signif_line_color = signif_line_color,
     verbose = verbose
