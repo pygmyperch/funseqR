@@ -48,11 +48,12 @@
 #' \\itemize{
 #'   \\item \\strong{go_term}: Enriched GO term names (e.g., "P:hemopoiesis") - human readable
 #'   \\item \\strong{go_id}: Enriched GO term IDs (e.g., "GO:0030097") - compact format
-#'   \\item \\strong{gene_name}: Gene names (e.g., "zfpm1") - protein/gene identifiers
+#'   \\item \\strong{gene_name}: Gene names (e.g., "zfpm1") - protein/gene identifiers (displayed in italics)
 #'   \\item \\strong{uniprot_accession}: UniProt accessions - database identifiers
 #'   \\item \\strong{position}: Genomic position (e.g., "LG4:3814415") - coordinate fallback
 #' }
 #' Labels use only significantly enriched terms, not all functional annotations.
+#' Gene names are automatically formatted in italics following scientific convention.
 #'
 #' \\strong{Top Candidate Labeling:}
 #' The \\code{label_top_candidates} parameter labels the highest y_value loci using
@@ -355,6 +356,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
 
   # Identify loci for labeling - prioritize functional loci
   manhattan_data$label <- ""
+  manhattan_data$is_gene_name <- FALSE  # Track which labels are gene names for italic formatting
 
   # First, label functional loci based on label_type
   functional_loci <- which(manhattan_data$functional)
@@ -400,6 +402,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
             # Use gene names
             genes <- strsplit(loci_info$gene_name, ";")[[1]]
             label_text <- trimws(genes[1])
+            manhattan_data$is_gene_name[idx] <- TRUE  # Mark as gene name for italic formatting
           } else if (label_type == "uniprot_accession" && !is.null(loci_info$uniprot_accession) && !is.na(loci_info$uniprot_accession)) {
             # Use UniProt accession
             label_text <- loci_info$uniprot_accession
@@ -479,6 +482,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
               # Use gene names
               genes <- strsplit(loci_info$gene_name, ";")[[1]]
               label_text <- trimws(genes[1])
+              manhattan_data$is_gene_name[idx] <- TRUE  # Mark as gene name for italic formatting
             } else if (label_type == "uniprot_accession" && !is.na(loci_info$uniprot_accession) && loci_info$uniprot_accession != "") {
               # Use UniProt accession
               label_text <- loci_info$uniprot_accession
@@ -571,13 +575,13 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
         warning("ggrepel package required for label lines. Using basic text labels without lines.")
       }
       p <- p + ggplot2::geom_text(data = labeled_data,
-                                 ggplot2::aes(label = label),
+                                 ggplot2::aes(label = label, fontface = ifelse(is_gene_name, "italic", "plain")),
                                  size = label_cex * 3, vjust = -0.5, hjust = 0.5)
     } else {
       # Use ggrepel for better label positioning with indicator lines
       if (use_label_lines) {
         p <- p + ggrepel::geom_text_repel(data = labeled_data,
-                                         ggplot2::aes(label = label),
+                                         ggplot2::aes(label = label, fontface = ifelse(is_gene_name, "italic", "plain")),
                                          size = label_cex * 3,
                                          max.overlaps = Inf,
                                          box.padding = 0.5,
@@ -591,7 +595,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
       } else {
         # No indicator lines
         p <- p + ggrepel::geom_text_repel(data = labeled_data,
-                                         ggplot2::aes(label = label),
+                                         ggplot2::aes(label = label, fontface = ifelse(is_gene_name, "italic", "plain")),
                                          size = label_cex * 3,
                                          max.overlaps = Inf,
                                          box.padding = 0.3,

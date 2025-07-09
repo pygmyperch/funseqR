@@ -168,11 +168,12 @@ Enriched loci can be labeled with different annotation types using the label_typ
 \\itemize{
 \\item \\strong{go_term}: Enriched GO term names (e.g., "P:hemopoiesis") - human readable
 \\item \\strong{go_id}: Enriched GO term IDs (e.g., "GO:0030097") - compact format
-\\item \\strong{gene_name}: Gene names (e.g., "zfpm1") - protein/gene identifiers
+\\item \\strong{gene_name}: Gene names (e.g., "zfpm1") - protein/gene identifiers (displayed in italics)
 \\item \\strong{uniprot_accession}: UniProt accessions - database identifiers
 \\item \\strong{position}: Genomic position (e.g., "LG4:3814415") - coordinate fallback
 }
 Labels use only significantly enriched terms, not all functional annotations.
+Gene names are automatically formatted in italics following scientific convention.
 
 \\strong{Top Candidate Labeling:}
 The \\code{label_top_candidates} parameter labels the highest y_value loci using
