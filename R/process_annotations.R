@@ -1382,6 +1382,11 @@ get_locus_annotations <- function(con, loci = NULL, bed_file = NULL, include_enr
         result_data$enrichment_analysis_ids <<- ""
       })
       
+      # Filter results to only include the requested loci
+      if (nrow(result_data) > 0) {
+        result_data <- .filter_to_requested_loci(result_data, loci_coords, verbose)
+      }
+      
     }, error = function(e) {
       if (verbose) message("    - Error retrieving annotation data: ", e$message)
       result_data <<- .create_empty_annotation_dataframe()
@@ -1403,6 +1408,11 @@ get_locus_annotations <- function(con, loci = NULL, bed_file = NULL, include_enr
       result_data$enriched_terms <- ""
       result_data$enriched_term_ids <- ""
       result_data$enrichment_analysis_ids <- ""
+      
+      # Filter results to only include the requested loci
+      if (nrow(result_data) > 0) {
+        result_data <- .filter_to_requested_loci(result_data, loci_coords, verbose)
+      }
     }, error = function(e) {
       if (verbose) message("    - Error retrieving annotation data: ", e$message)
       result_data <- .create_empty_annotation_dataframe()
@@ -1632,6 +1642,25 @@ get_locus_annotations <- function(con, loci = NULL, bed_file = NULL, include_enr
   result_data <- result_data[order(result_data$chromosome, result_data$position), ]
   
   return(result_data)
+}
+
+#' Filter comprehensive results to only include requested loci
+#' @keywords internal
+.filter_to_requested_loci <- function(result_data, loci_coords, verbose) {
+  # Create a matching key for requested loci
+  requested_keys <- paste0(loci_coords$chromosome, ":", loci_coords$position)
+  
+  # Create matching key for result data
+  result_keys <- paste0(result_data$chromosome, ":", result_data$position)
+  
+  # Filter to only include requested loci
+  filtered_data <- result_data[result_keys %in% requested_keys, ]
+  
+  if (verbose && nrow(filtered_data) < nrow(result_data)) {
+    message("    - Filtered from ", nrow(result_data), " to ", nrow(filtered_data), " loci")
+  }
+  
+  return(filtered_data)
 }
 
 
