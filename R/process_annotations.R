@@ -1245,4 +1245,393 @@ compile_funseq_results <- function(con,
   return(result_data)
 }
 
+#' Get comprehensive annotations for specific loci
+#'
+#' Retrieve all available annotation information for specified genomic loci, including
+#' functional annotations, enrichment status, and pathway information. Useful for detailed
+#' investigation of specific positions identified in analyses.
+#'
+#' @param con Database connection object
+#' @param loci Character vector of loci in "chromosome:position" format, or data.frame with chromosome and position columns. If NULL, bed_file must be provided.
+#' @param bed_file Character. Path to BED file containing loci to query. If provided, overrides loci parameter.
+#' @param include_enrichment Logical. Whether to include enrichment analysis results. Default is TRUE.
+#' @param verbose Logical. Print progress information. Default is TRUE.
+#'
+#' @return Data.frame with comprehensive annotation information for each locus.
+#'         Always includes all possible columns from compile_funseq_results() output,
+#'         with NA values for missing data.
+#'
+#' @details
+#' This function provides a convenient way to investigate specific loci in detail.
+#' It returns a standardized data.frame with the same column structure as
+#' compile_funseq_results(), ensuring consistency across the funseqR workflow.
+#'
+#' \\strong{Input Formats:}
+#' \\itemize{
+#'   \\item Single locus: "LG4:3814415"
+#'   \\item Multiple loci: c("LG4:3814415", "LG8:22215908", "LG10:28936085")
+#'   \\item Data.frame: data.frame(chromosome = c("LG4", "LG8"), position = c(3814415, 22215908))
+#'   \\item BED file: Any standard BED format file with chromosome and position information
+#' }
+#'
+#' \\strong{Output Structure:}
+#' The function always returns the complete column set, populating NA for missing data:
+#' locus_id, chromosome, position, gene_name, protein_name, uniprot_accession,
+#' go_terms, go_names, go_categories, kegg_pathways, kegg_pathway_names,
+#' kegg_brite_categories, kegg_modules, pfam_domains, pfam_domain_names,
+#' interpro_families, interpro_family_names, eggnog_categories,
+#' eggnog_taxonomic_scopes, dataset_type, enriched, enrichment_fdr,
+#' enrichment_pvalue, enriched_terms, enriched_term_ids, enrichment_analysis_ids.
+#'
+#' @examples
+#' \\dontrun{
+#' con <- connect_funseq_db("analysis.db")
+#'
+#' # Single locus investigation
+#' peak_info <- get_locus_annotations(con, "LG4:3814415")
+#'
+#' # Multiple loci analysis
+#' top_candidates <- c("LG4:3814415", "LG8:22215908", "LG10:28936085")
+#' candidate_info <- get_locus_annotations(con, top_candidates)
+#'
+#' # BED file analysis
+#' region_info <- get_locus_annotations(con, bed_file = "interesting_regions.bed")
+#'
+#' # Data.frame input
+#' loci_df <- data.frame(chromosome = c("LG4", "LG8"), position = c(3814415, 22215908))
+#' batch_info <- get_locus_annotations(con, loci_df)
+#'
+#' # View specific columns
+#' print(candidate_info[, c("chromosome", "position", "gene_name", "enriched", "enriched_terms")])
+#' }
+#'
+#' @export
+get_locus_annotations <- function(con, loci = NULL, bed_file = NULL, include_enrichment = TRUE, verbose = TRUE) {
+  
+  if (is.null(loci) && is.null(bed_file)) {
+    stop("Either 'loci' or 'bed_file' must be provided")
+  }
+  
+  # Parse input coordinates
+  if (!is.null(bed_file)) {
+    if (verbose) message("Reading loci from BED file: ", bed_file)
+    loci_coords <- .parse_bed_file(bed_file, verbose)
+  } else {
+    if (verbose) message("Parsing ", length(loci), " loci coordinates")
+    loci_coords <- .parse_loci_input(loci, verbose)
+  }
+  
+  if (nrow(loci_coords) == 0) {
+    if (verbose) message("No valid loci found")
+    return(.create_empty_annotation_dataframe())
+  }
+  
+  if (verbose) message("Retrieving annotations for ", nrow(loci_coords), " loci")
+  
+  # Create a temporary candidate dataset for these specific loci
+  temp_candidates <- data.frame(
+    chromosome = loci_coords$chromosome,
+    position = loci_coords$position,
+    stringsAsFactors = FALSE
+  )
+  
+  # Use compile_funseq_results infrastructure to get comprehensive data
+  # First try with enrichment data if requested
+  if (include_enrichment) {
+    tryCatch({
+      # Get all available annotation data using compile_funseq_results
+      all_annotations <- compile_funseq_results(
+        con = con,
+        stage = "annotations", 
+        include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"),
+        candidate_loci = temp_candidates,
+        verbose = FALSE
+      )
+      
+      # Try to add enrichment information if available
+      tryCatch({
+        # Get available ORA analysis IDs
+        ora_analyses <- DBI::dbGetQuery(con, "SELECT DISTINCT analysis_id FROM ora_results")
+        if (nrow(ora_analyses) > 0) {
+          result_data <- compile_funseq_results(
+            con = con,
+            stage = "enrichment",
+            data = all_annotations,
+            analysis_ids = ora_analyses$analysis_id,
+            verbose = FALSE
+          )
+        } else {
+          result_data <- all_annotations
+          # Add empty enrichment columns
+          result_data$enriched <- FALSE
+          result_data$enrichment_fdr <- NA_real_
+          result_data$enrichment_pvalue <- NA_real_
+          result_data$enriched_terms <- ""
+          result_data$enriched_term_ids <- ""
+          result_data$enrichment_analysis_ids <- ""
+        }
+      }, error = function(e) {
+        if (verbose) message("    - Enrichment data not available: ", e$message)
+        result_data <<- all_annotations
+        # Add empty enrichment columns
+        result_data$enriched <<- FALSE
+        result_data$enrichment_fdr <<- NA_real_
+        result_data$enrichment_pvalue <<- NA_real_
+        result_data$enriched_terms <<- ""
+        result_data$enriched_term_ids <<- ""
+        result_data$enrichment_analysis_ids <<- ""
+      })
+      
+    }, error = function(e) {
+      if (verbose) message("    - Error retrieving annotation data: ", e$message)
+      result_data <<- .create_empty_annotation_dataframe()
+    })
+  } else {
+    # Just get annotation data without enrichment
+    tryCatch({
+      result_data <- compile_funseq_results(
+        con = con,
+        stage = "annotations", 
+        include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"),
+        candidate_loci = temp_candidates,
+        verbose = FALSE
+      )
+      # Add empty enrichment columns
+      result_data$enriched <- FALSE
+      result_data$enrichment_fdr <- NA_real_
+      result_data$enrichment_pvalue <- NA_real_
+      result_data$enriched_terms <- ""
+      result_data$enriched_term_ids <- ""
+      result_data$enrichment_analysis_ids <- ""
+    }, error = function(e) {
+      if (verbose) message("    - Error retrieving annotation data: ", e$message)
+      result_data <- .create_empty_annotation_dataframe()
+    })
+  }
+  
+  # Ensure all requested loci are represented, even if no annotations found
+  result_data <- .ensure_all_loci_present(result_data, loci_coords, verbose)
+  
+  if (verbose) {
+    annotated_count <- sum(!is.na(result_data$gene_name) & result_data$gene_name != "")
+    enriched_count <- sum(result_data$enriched, na.rm = TRUE)
+    message("Retrieved annotations for ", nrow(result_data), " loci:")
+    message("  - ", annotated_count, " have functional annotations")
+    if (include_enrichment) {
+      message("  - ", enriched_count, " are associated with enriched terms")
+    }
+  }
+  
+  return(result_data)
+}
+
+# Helper functions for get_locus_annotations()
+
+#' Parse loci input into standardized coordinate format
+#' @keywords internal
+.parse_loci_input <- function(loci, verbose) {
+  if (is.data.frame(loci)) {
+    # Input is already a data.frame
+    if (all(c("chromosome", "position") %in% names(loci))) {
+      result <- data.frame(
+        chromosome = as.character(loci$chromosome),
+        position = as.numeric(loci$position),
+        stringsAsFactors = FALSE
+      )
+      # Remove rows with missing coordinates
+      result <- result[!is.na(result$position), ]
+      if (verbose) message("  - Parsed ", nrow(result), " loci from data.frame")
+      return(result)
+    } else {
+      stop("Data.frame input must contain 'chromosome' and 'position' columns")
+    }
+  } else if (is.character(loci)) {
+    # Parse character vector of coordinates
+    result <- data.frame(
+      chromosome = character(0),
+      position = numeric(0),
+      stringsAsFactors = FALSE
+    )
+    
+    for (locus in loci) {
+      # Handle different formats: "chr:pos", "chr pos", "chr_pos"
+      if (grepl(":", locus)) {
+        parts <- strsplit(locus, ":")[[1]]
+      } else if (grepl("\\s+", locus)) {
+        parts <- strsplit(locus, "\\s+")[[1]]
+      } else if (grepl("_", locus)) {
+        parts <- strsplit(locus, "_")[[1]]
+      } else {
+        if (verbose) message("  - Skipping invalid locus format: ", locus)
+        next
+      }
+      
+      if (length(parts) == 2) {
+        chr <- trimws(parts[1])
+        pos <- suppressWarnings(as.numeric(gsub("[^0-9]", "", parts[2])))
+        
+        if (!is.na(pos)) {
+          result <- rbind(result, data.frame(
+            chromosome = chr,
+            position = pos,
+            stringsAsFactors = FALSE
+          ))
+        } else {
+          if (verbose) message("  - Skipping invalid position: ", locus)
+        }
+      } else {
+        if (verbose) message("  - Skipping invalid format: ", locus)
+      }
+    }
+    
+    if (verbose) message("  - Parsed ", nrow(result), "/", length(loci), " valid loci")
+    return(result)
+  } else {
+    stop("loci must be either a character vector or a data.frame")
+  }
+}
+
+#' Parse BED file into coordinate format
+#' @keywords internal  
+.parse_bed_file <- function(bed_file, verbose) {
+  if (!file.exists(bed_file)) {
+    stop("BED file not found: ", bed_file)
+  }
+  
+  # Read BED file (tab-separated, first 3 columns are chr, start, end)
+  bed_data <- read.table(bed_file, header = FALSE, stringsAsFactors = FALSE, sep = "\t")
+  
+  if (ncol(bed_data) < 3) {
+    stop("BED file must have at least 3 columns (chromosome, start, end)")
+  }
+  
+  # Use middle position of each interval
+  result <- data.frame(
+    chromosome = as.character(bed_data[, 1]),
+    position = as.numeric(bed_data[, 2]) + floor((as.numeric(bed_data[, 3]) - as.numeric(bed_data[, 2])) / 2),
+    stringsAsFactors = FALSE
+  )
+  
+  # Remove rows with missing coordinates
+  result <- result[!is.na(result$position), ]
+  
+  if (verbose) message("  - Parsed ", nrow(result), " regions from BED file")
+  return(result)
+}
+
+#' Create empty annotation dataframe with all expected columns
+#' @keywords internal
+.create_empty_annotation_dataframe <- function() {
+  data.frame(
+    locus_id = character(0),
+    chromosome = character(0),
+    position = numeric(0),
+    gene_name = character(0),
+    protein_name = character(0),
+    uniprot_accession = character(0),
+    go_terms = character(0),
+    go_names = character(0),
+    go_categories = character(0),
+    kegg_pathways = character(0),
+    kegg_pathway_names = character(0),
+    kegg_brite_categories = character(0),
+    kegg_modules = character(0),
+    pfam_domains = character(0),
+    pfam_domain_names = character(0),
+    interpro_families = character(0),
+    interpro_family_names = character(0),
+    eggnog_categories = character(0),
+    eggnog_taxonomic_scopes = character(0),
+    dataset_type = character(0),
+    enriched = logical(0),
+    enrichment_fdr = numeric(0),
+    enrichment_pvalue = numeric(0),
+    enriched_terms = character(0),
+    enriched_term_ids = character(0),
+    enrichment_analysis_ids = character(0),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Ensure all requested loci are present in results
+#' @keywords internal
+.ensure_all_loci_present <- function(result_data, loci_coords, verbose) {
+  # Check which loci are missing from results
+  missing_loci <- data.frame(
+    chromosome = character(0),
+    position = numeric(0),
+    stringsAsFactors = FALSE
+  )
+  
+  for (i in 1:nrow(loci_coords)) {
+    chr <- loci_coords$chromosome[i]
+    pos <- loci_coords$position[i]
+    
+    # Check if this locus exists in results
+    exists <- any(result_data$chromosome == chr & result_data$position == pos)
+    
+    if (!exists) {
+      missing_loci <- rbind(missing_loci, data.frame(
+        chromosome = chr,
+        position = pos,
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  # Add missing loci with NA values
+  if (nrow(missing_loci) > 0) {
+    if (verbose) message("  - Adding ", nrow(missing_loci), " loci with no annotations")
+    
+    # Create empty rows for missing loci
+    empty_rows <- data.frame(
+      locus_id = paste0(missing_loci$chromosome, ":", missing_loci$position),
+      chromosome = missing_loci$chromosome,
+      position = missing_loci$position,
+      gene_name = NA_character_,
+      protein_name = NA_character_,
+      uniprot_accession = NA_character_,
+      go_terms = NA_character_,
+      go_names = NA_character_,
+      go_categories = NA_character_,
+      kegg_pathways = NA_character_,
+      kegg_pathway_names = NA_character_,
+      kegg_brite_categories = NA_character_,
+      kegg_modules = NA_character_,
+      pfam_domains = NA_character_,
+      pfam_domain_names = NA_character_,
+      interpro_families = NA_character_,
+      interpro_family_names = NA_character_,
+      eggnog_categories = NA_character_,
+      eggnog_taxonomic_scopes = NA_character_,
+      dataset_type = "candidate",
+      enriched = FALSE,
+      enrichment_fdr = NA_real_,
+      enrichment_pvalue = NA_real_,
+      enriched_terms = "",
+      enriched_term_ids = "",
+      enrichment_analysis_ids = "",
+      stringsAsFactors = FALSE
+    )
+    
+    # Add any missing columns that might exist in result_data
+    for (col in names(result_data)) {
+      if (!col %in% names(empty_rows)) {
+        empty_rows[[col]] <- NA
+      }
+    }
+    
+    # Ensure column order matches
+    empty_rows <- empty_rows[, names(result_data)]
+    
+    # Combine results
+    result_data <- rbind(result_data, empty_rows)
+  }
+  
+  # Sort by chromosome and position
+  result_data <- result_data[order(result_data$chromosome, result_data$position), ]
+  
+  return(result_data)
+}
+
 
