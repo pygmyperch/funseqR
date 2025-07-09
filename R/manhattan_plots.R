@@ -206,14 +206,10 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
   # Transform y-values if requested
   if (transform_y == "neg_log10") {
     manhattan_data$y_transformed <- -log10(pmax(manhattan_data$y_value, 1e-300))  # Avoid log(0)
-    if (is.null(y_label) || y_label == "Statistical Value") {
-      y_label <- paste0("-log10(", y_label, ")")
-    }
+    y_label <- paste0("-log10(", y_label, ")")
   } else if (transform_y == "log10") {
     manhattan_data$y_transformed <- log10(pmax(manhattan_data$y_value, 1e-300))
-    if (is.null(y_label) || y_label == "Statistical Value") {
-      y_label <- paste0("log10(", y_label, ")")
-    }
+    y_label <- paste0("log10(", y_label, ")")
   } else {
     manhattan_data$y_transformed <- manhattan_data$y_value
   }
