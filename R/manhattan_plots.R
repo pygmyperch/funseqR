@@ -55,13 +55,13 @@
 #' Labels use only significantly enriched terms, not all functional annotations.
 #'
 #' \\strong{Top Candidate Labeling:}
-#' The \\code{label_top_candidates} parameter labels the highest y_value loci using 
+#' The \\code{label_top_candidates} parameter labels the highest y_value loci using
 #' intelligent per-locus fallback logic:
 #' \\enumerate{
 #'   \\item Try functional annotation (based on label_type: go_term, gene_name, etc.)
 #'   \\item Fall back to position labels (e.g., "LG4:3,814,415") if no annotation found
 #' }
-#' This creates mixed labeling where some top candidates show functional information 
+#' This creates mixed labeling where some top candidates show functional information
 #' while others show positions, depending on annotation availability.
 #'
 #' \\strong{Visual Features:}
@@ -80,22 +80,22 @@
 #' con <- connect_funseq_db("analysis.db")
 #'
 #' # Complete workflow: annotations -> enrichment -> manhattan plot
-#' 
+#'
 #' # Step 1: Generate annotation data
 #' results <- compile_funseq_results(
-#'   con, 
+#'   con,
 #'   stage = "annotations",
 #'   include = c("GO", "KEGG"),
 #'   candidate_loci = "candidates.vcf"
 #' )
-#' 
+#'
 #' # Step 2: Run ORA analysis
 #' ORA_results <- run_ORA(con, "candidates.vcf", annotation_type = "GO")
-#' 
+#'
 #' # Step 3: Add enrichment results
 #' enrichment_results <- compile_funseq_results(
 #'   con,
-#'   stage = "enrichment", 
+#'   stage = "enrichment",
 #'   data = results,
 #'   analysis_ids = c(1, 2, 3)
 #' )
@@ -115,23 +115,23 @@
 #'   con, y_values = my_statistical_values, vcf_file_id = 1,
 #'   enrichment_data = enrichment_results, label_type = "go_term"
 #' )
-#' 
+#'
 #' # Use GO term IDs (compact format for cleaner plots)
 #' plot_go_ids <- create_functional_manhattan_plot(
 #'   con, y_values = my_statistical_values, vcf_file_id = 1,
 #'   enrichment_data = enrichment_results, label_type = "go_id"
 #' )
-#' 
+#'
 #' # Use gene names (intermediate length)
 #' plot_genes <- create_functional_manhattan_plot(
 #'   con, y_values = my_statistical_values, vcf_file_id = 1,
 #'   enrichment_data = enrichment_results, label_type = "gene_name"
 #' )
-#' 
+#'
 #' # Label top 10 candidates with mixed functional/position labels
 #' plot_top_candidates <- create_functional_manhattan_plot(
 #'   con, y_values = my_statistical_values, vcf_file_id = 1,
-#'   enrichment_data = enrichment_results, 
+#'   enrichment_data = enrichment_results,
 #'   label_top_candidates = 10, label_type = "gene_name"
 #'   # Results in mixed labels: "zfpm1", "gata1", "LG10:28,936,085", "tbx5", etc.
 #' )
@@ -206,10 +206,10 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
   # Transform y-values if requested
   if (transform_y == "neg_log10") {
     manhattan_data$y_transformed <- -log10(pmax(manhattan_data$y_value, 1e-300))  # Avoid log(0)
-    y_label <- paste0("-log10(", y_label, ")")
+    y_label <- bquote(-log[10](.(y_label)))
   } else if (transform_y == "log10") {
     manhattan_data$y_transformed <- log10(pmax(manhattan_data$y_value, 1e-300))
-    y_label <- paste0("log10(", y_label, ")")
+    y_label <- bquote(log[10](.(y_label)))
   } else {
     manhattan_data$y_transformed <- manhattan_data$y_value
   }
@@ -248,7 +248,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
 
   if (!is.null(enrichment_data)) {
     # Filter enriched candidate loci
-    enriched_loci <- enrichment_data[enrichment_data$enriched == TRUE & 
+    enriched_loci <- enrichment_data[enrichment_data$enriched == TRUE &
                                    enrichment_data$dataset_type == "candidate", ]
 
     if (nrow(enriched_loci) > 0) {
@@ -367,9 +367,9 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
       # Find corresponding enrichment data entry for this position
       if (!is.null(enrichment_data)) {
         # Filter enriched candidate loci
-        loci_data <- enrichment_data[enrichment_data$enriched == TRUE & 
+        loci_data <- enrichment_data[enrichment_data$enriched == TRUE &
                                    enrichment_data$dataset_type == "candidate", ]
-        
+
         loci_match <- which(loci_data$chromosome == manhattan_data$chromosome[idx] &
                            loci_data$position == manhattan_data$position[idx])
 
@@ -430,18 +430,18 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
       # Only label if not already labeled by enrichment
       if (manhattan_data$label[idx] == "") {
         label_text <- ""
-        
+
         # Try to find functional annotation for this position
         if (!is.null(enrichment_data)) {
           # Search ALL candidate loci (not just enriched=TRUE)
           all_candidates <- enrichment_data[enrichment_data$dataset_type == "candidate", ]
-          
+
           loci_match <- which(all_candidates$chromosome == manhattan_data$chromosome[idx] &
                              all_candidates$position == manhattan_data$position[idx])
-          
+
           if (length(loci_match) > 0) {
             loci_info <- all_candidates[loci_match[1], ]
-            
+
             # Apply same labeling logic as enriched loci
             if (label_type == "go_term") {
               # Use enriched terms if available, otherwise use general GO terms
@@ -485,13 +485,13 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
             }
           }
         }
-        
+
         # Fallback to position if no functional annotation found
         if (label_text == "") {
-          label_text <- paste0(manhattan_data$chromosome[idx], ":", 
+          label_text <- paste0(manhattan_data$chromosome[idx], ":",
                               format(manhattan_data$position[idx], big.mark = ","))
         }
-        
+
         manhattan_data$label[idx] <- label_text
       }
     }

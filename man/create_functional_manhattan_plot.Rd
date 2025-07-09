@@ -237,7 +237,7 @@ con <- connect_funseq_db("analysis.db")
 
 # Step 1: Generate annotation data
 results <- compile_funseq_results(
-  con, 
+  con,
   stage = "annotations",
   include = c("GO", "KEGG"),
   candidate_loci = "candidates.vcf"
@@ -249,7 +249,7 @@ ORA_results <- run_ORA(con, "candidates.vcf", annotation_type = "GO")
 # Step 3: Add enrichment results
 enrichment_results <- compile_funseq_results(
   con,
-  stage = "enrichment", 
+  stage = "enrichment",
   data = results,
   analysis_ids = c(1, 2, 3)
 )
@@ -285,7 +285,7 @@ plot_genes <- create_functional_manhattan_plot(
 # Label top 10 candidates with mixed functional/position labels
 plot_top_candidates <- create_functional_manhattan_plot(
   con, y_values = my_statistical_values, vcf_file_id = 1,
-  enrichment_data = enrichment_results, 
+  enrichment_data = enrichment_results,
   label_top_candidates = 10, label_type = "gene_name"
   # Results in mixed labels: "zfpm1", "gata1", "LG10:28,936,085", "tbx5", etc.
 )
