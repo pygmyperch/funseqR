@@ -1159,3 +1159,412 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
   return(analysis_id)
 }
 
+#' Export GO terms for ReviGO summarization
+#'
+#' Export GO terms in ReviGO-compatible format for functional summarization using
+#' the ReviGO web server (http://revigo.irb.hr). Supports three source types:
+#' all annotations, candidate loci, and enriched terms.
+#'
+#' @param con Database connection object
+#' @param source_type Character. Source of GO terms: "all_annotations", "candidate_loci", or "enriched_loci"
+#' @param analysis_ids Integer vector. ORA analysis IDs to export (required for "enriched_loci")
+#' @param candidate_loci Character, data.frame, or file path. Candidate loci specification (required for "candidate_loci")
+#' @param candidate_locus_pvalues Numeric vector. P-values for each candidate locus, same order as candidate_loci (optional for "candidate_loci")
+#' @param include_pvalues Logical. Whether to include p-values in output (for "candidate_loci"). Default is TRUE
+#' @param significance_threshold Numeric. P-value threshold for enriched terms (for "enriched_loci"). Default is 0.05
+#' @param ontologies Character vector. GO ontologies to include: c("BP", "MF", "CC"). If NULL, includes all
+#' @param output_file Character. Output file path. If NULL, returns data.frame instead of writing file
+#' @param verbose Logical. Print progress information. Default is TRUE
+#'
+#' @return If output_file is NULL, returns data.frame. Otherwise returns file path and writes ReviGO-compatible file
+#'
+#' @details
+#' This function exports GO terms for summarization using the widely-used ReviGO web server.
+#' Three source types are supported:
+#'
+#' \\strong{All Annotations} (\\code{source_type = "all_annotations"}):
+#' Exports all GO terms found in the database. Output contains only GO term IDs (no p-values).
+#' Useful for summarizing the complete functional landscape of your dataset.
+#'
+#' \\strong{Candidate Loci} (\\code{source_type = "candidate_loci"}):
+#' Exports GO terms associated with user-specified candidate loci. Two output modes:
+#' \\itemize{
+#'   \\item \\code{include_pvalues = FALSE}: GO term IDs only
+#'   \\item \\code{include_pvalues = TRUE}: GO terms with p-values derived from candidate_locus_pvalues
+#' }
+#' When p-values are included, each GO term receives the minimum p-value among all associated loci,
+#' effectively weighting functional terms by the strength of statistical evidence for selection.
+#'
+#' \\strong{Enriched Loci} (\\code{source_type = "enriched_loci"}):
+#' Exports statistically enriched GO terms from ORA analysis with their real statistical p-values.
+#' Uses results from \\code{run_ORA()} analysis.
+#'
+#' \\strong{Input Formats:}
+#' The \\code{candidate_loci} parameter supports multiple input formats:
+#' \\itemize{
+#'   \\item VCF file path: "candidates.vcf"
+#'   \\item VCF file ID: 1 (integer referencing database)
+#'   \\item Coordinate strings: c("LG4:3814415", "LG8:22215908")
+#'   \\item Data.frame: data.frame(chromosome = c("LG4", "LG8"), position = c(3814415, 22215908))
+#'   \\item BED file path: "regions.bed"
+#' }
+#'
+#' \\strong{Output Formats:}
+#' ReviGO-compatible tab-separated format:
+#' \\itemize{
+#'   \\item With p-values: "\\% GOterm\\tenrichment_P-value" header + "GO:0022402\\t1.74E-15"
+#'   \\item Without p-values: "GO:0022402" (one GO term per line)
+#' }
+#'
+#' @examples
+#' \\dontrun{
+#' con <- connect_funseq_db("analysis.db")
+#'
+#' # Export all GO annotations (functional landscape summary)
+#' export_revigo_file(con, source_type = "all_annotations",
+#'                    output_file = "all_functions.txt")
+#'
+#' # Export candidate loci functions weighted by selection evidence
+#' export_revigo_file(con, source_type = "candidate_loci",
+#'                    candidate_loci = c("LG4:3814415", "LG8:22215908"),
+#'                    candidate_locus_pvalues = c(0.001, 0.003),
+#'                    include_pvalues = TRUE,
+#'                    output_file = "candidate_functions.txt")
+#'
+#' # Export candidate loci functions without p-values
+#' export_revigo_file(con, source_type = "candidate_loci",
+#'                    candidate_loci = "candidates.vcf",
+#'                    include_pvalues = FALSE,
+#'                    output_file = "candidate_go_terms.txt")
+#'
+#' # Export enriched terms from ORA analysis
+#' export_revigo_file(con, source_type = "enriched_loci",
+#'                    analysis_ids = c(1, 2, 3),
+#'                    significance_threshold = 0.01,
+#'                    ontologies = c("BP", "MF"),
+#'                    output_file = "enriched_functions.txt")
+#' }
+#'
+#' @export
+export_revigo_file <- function(con, source_type = c("all_annotations", "candidate_loci", "enriched_loci"),
+                               analysis_ids = NULL, candidate_loci = NULL, candidate_locus_pvalues = NULL,
+                               include_pvalues = TRUE, significance_threshold = 0.05,
+                               ontologies = NULL, output_file = NULL, verbose = TRUE) {
+  
+  # Validate parameters
+  source_type <- match.arg(source_type)
+  
+  if (verbose) message("=== Exporting GO terms for ReviGO ===")
+  if (verbose) message("Source type: ", source_type)
+  
+  # Validate required parameters for each source type
+  if (source_type == "enriched_loci" && is.null(analysis_ids)) {
+    stop("analysis_ids is required for source_type = 'enriched_loci'")
+  }
+  
+  if (source_type == "candidate_loci" && is.null(candidate_loci)) {
+    stop("candidate_loci is required for source_type = 'candidate_loci'")
+  }
+  
+  if (source_type == "candidate_loci" && include_pvalues && is.null(candidate_locus_pvalues)) {
+    stop("candidate_locus_pvalues is required when source_type = 'candidate_loci' and include_pvalues = TRUE")
+  }
+  
+  # Extract GO terms based on source type
+  if (source_type == "all_annotations") {
+    go_data <- .extract_all_go_annotations(con, ontologies, verbose)
+    
+  } else if (source_type == "candidate_loci") {
+    go_data <- .extract_candidate_go_annotations(con, candidate_loci, candidate_locus_pvalues, 
+                                                include_pvalues, ontologies, verbose)
+    
+  } else if (source_type == "enriched_loci") {
+    go_data <- .extract_enriched_go_terms(con, analysis_ids, significance_threshold, 
+                                         ontologies, verbose)
+  }
+  
+  if (nrow(go_data) == 0) {
+    if (verbose) message("No GO terms found matching criteria")
+    if (!is.null(output_file)) {
+      # Create empty file
+      writeLines("", output_file)
+      if (verbose) message("Empty file written to: ", output_file)
+      return(output_file)
+    } else {
+      return(data.frame())
+    }
+  }
+  
+  # Format for ReviGO
+  revigo_data <- .format_revigo_output(go_data, include_pvalues = "p_value" %in% names(go_data), verbose)
+  
+  # Output results
+  if (!is.null(output_file)) {
+    .write_revigo_file(revigo_data, output_file, include_pvalues = "p_value" %in% names(go_data), verbose)
+    if (verbose) message("ReviGO file written to: ", output_file)
+    return(output_file)
+  } else {
+    if (verbose) message("Returning ", nrow(revigo_data), " GO terms as data.frame")
+    return(revigo_data)
+  }
+}
+
+# Helper functions for export_revigo_file()
+
+#' Extract all GO annotations from database
+#' @keywords internal
+.extract_all_go_annotations <- function(con, ontologies, verbose) {
+  
+  if (verbose) message("  - Extracting all GO annotations from database...")
+  
+  # Build ontology filter
+  ontology_filter <- ""
+  if (!is.null(ontologies)) {
+    ontology_list <- paste0("'", ontologies, "'", collapse = ", ")
+    ontology_filter <- paste0(" AND gt.ontology IN (", ontology_list, ")")
+    if (verbose) message("    - Filtering to ontologies: ", paste(ontologies, collapse = ", "))
+  }
+  
+  query <- paste0("
+    SELECT DISTINCT gt.go_id as term_id
+    FROM go_terms gt
+    JOIN annotations a ON gt.annotation_id = a.annotation_id
+    WHERE gt.go_id IS NOT NULL AND gt.go_id != ''",
+    ontology_filter, "
+    ORDER BY gt.go_id
+  ")
+  
+  result <- DBI::dbGetQuery(con, query)
+  
+  if (verbose) message("    - Found ", nrow(result), " unique GO terms")
+  
+  return(result)
+}
+
+#' Extract GO annotations for candidate loci
+#' @keywords internal
+.extract_candidate_go_annotations <- function(con, candidate_loci, candidate_locus_pvalues, 
+                                            include_pvalues, ontologies, verbose) {
+  
+  if (verbose) message("  - Extracting GO annotations for candidate loci...")
+  
+  # Parse candidate loci using existing infrastructure
+  if (is.character(candidate_loci) && length(candidate_loci) == 1) {
+    # Check if it's a file path or VCF ID
+    if (file.exists(candidate_loci)) {
+      if (verbose) message("    - Processing file: ", candidate_loci)
+      if (grepl("\\.bed$", candidate_loci, ignore.case = TRUE)) {
+        # BED file
+        loci_coords <- .parse_bed_file(candidate_loci, verbose)
+      } else {
+        # Assume VCF file - import and get coordinates
+        temp_import <- import_vcf_to_db(con, candidate_loci)
+        vcf_coords <- DBI::dbGetQuery(con, "
+          SELECT chromosome, position FROM vcf_data 
+          WHERE file_id = ? ORDER BY vcf_id
+        ", list(temp_import$file_id))
+        loci_coords <- vcf_coords
+      }
+    } else {
+      # Try as VCF file ID
+      vcf_id <- suppressWarnings(as.integer(candidate_loci))
+      if (!is.na(vcf_id)) {
+        if (verbose) message("    - Using VCF file ID: ", vcf_id)
+        vcf_coords <- DBI::dbGetQuery(con, "
+          SELECT chromosome, position FROM vcf_data 
+          WHERE file_id = ? ORDER BY vcf_id
+        ", list(vcf_id))
+        loci_coords <- vcf_coords
+      } else {
+        # Single coordinate string
+        loci_coords <- .parse_loci_input(candidate_loci, verbose)
+      }
+    }
+  } else {
+    # Multiple coordinates or data.frame
+    loci_coords <- .parse_loci_input(candidate_loci, verbose)
+  }
+  
+  if (nrow(loci_coords) == 0) {
+    if (verbose) message("    - No valid candidate loci found")
+    return(data.frame(term_id = character(0), p_value = numeric(0)))
+  }
+  
+  # Validate p-values length if provided
+  if (include_pvalues && !is.null(candidate_locus_pvalues)) {
+    if (length(candidate_locus_pvalues) != nrow(loci_coords)) {
+      stop("Length of candidate_locus_pvalues (", length(candidate_locus_pvalues), 
+           ") does not match number of loci (", nrow(loci_coords), ")")
+    }
+  }
+  
+  # Build ontology filter
+  ontology_filter <- ""
+  if (!is.null(ontologies)) {
+    ontology_list <- paste0("'", ontologies, "'", collapse = ", ")
+    ontology_filter <- paste0(" AND gt.ontology IN (", ontology_list, ")")
+  }
+  
+  # Query GO terms for these loci
+  go_results <- data.frame(term_id = character(0), locus_chromosome = character(0), 
+                          locus_position = numeric(0), stringsAsFactors = FALSE)
+  
+  for (i in 1:nrow(loci_coords)) {
+    chr <- loci_coords$chromosome[i]
+    pos <- loci_coords$position[i]
+    
+    query <- paste0("
+      SELECT DISTINCT 
+        gt.go_id as term_id,
+        vd.chromosome as locus_chromosome,
+        vd.position as locus_position
+      FROM vcf_data vd
+      JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
+      JOIN blast_results br ON fs.flanking_id = br.flanking_id
+      JOIN annotations a ON br.blast_result_id = a.blast_result_id
+      JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+      WHERE vd.chromosome = ? AND vd.position = ?
+        AND gt.go_id IS NOT NULL AND gt.go_id != ''",
+      ontology_filter
+    )
+    
+    locus_results <- DBI::dbGetQuery(con, query, list(chr, pos))
+    go_results <- rbind(go_results, locus_results)
+  }
+  
+  if (nrow(go_results) == 0) {
+    if (verbose) message("    - No GO annotations found for candidate loci")
+    if (include_pvalues) {
+      return(data.frame(term_id = character(0), p_value = numeric(0)))
+    } else {
+      return(data.frame(term_id = character(0)))
+    }
+  }
+  
+  # Aggregate by GO term and assign p-values if requested
+  if (include_pvalues && !is.null(candidate_locus_pvalues)) {
+    # Create lookup for locus p-values
+    locus_pvalues <- data.frame(
+      chromosome = loci_coords$chromosome,
+      position = loci_coords$position,
+      p_value = candidate_locus_pvalues,
+      stringsAsFactors = FALSE
+    )
+    
+    # Merge p-values with GO results
+    go_results <- merge(go_results, locus_pvalues, 
+                       by.x = c("locus_chromosome", "locus_position"),
+                       by.y = c("chromosome", "position"))
+    
+    # Aggregate: take minimum p-value per GO term
+    result <- aggregate(p_value ~ term_id, data = go_results, FUN = min)
+    result <- result[order(result$p_value), ]
+    
+    if (verbose) message("    - Found ", nrow(result), " GO terms with p-values")
+    
+  } else {
+    # Just unique GO terms
+    result <- data.frame(term_id = unique(go_results$term_id), stringsAsFactors = FALSE)
+    result <- result[order(result$term_id), , drop = FALSE]
+    
+    if (verbose) message("    - Found ", nrow(result), " unique GO terms")
+  }
+  
+  return(result)
+}
+
+#' Extract enriched GO terms from ORA results
+#' @keywords internal
+.extract_enriched_go_terms <- function(con, analysis_ids, significance_threshold, ontologies, verbose) {
+  
+  if (verbose) message("  - Extracting enriched GO terms from ORA analysis...")
+  
+  # Use existing function from process_annotations.R
+  enrichment_data <- .extract_enrichment_data(con, analysis_ids, significance_threshold, verbose = FALSE)
+  
+  if (nrow(enrichment_data) == 0) {
+    if (verbose) message("    - No enriched terms found")
+    return(data.frame(term_id = character(0), p_value = numeric(0)))
+  }
+  
+  # Filter to GO terms only
+  go_enrichment <- enrichment_data[enrichment_data$annotation_type == "GO", ]
+  
+  if (nrow(go_enrichment) == 0) {
+    if (verbose) message("    - No enriched GO terms found")
+    return(data.frame(term_id = character(0), p_value = numeric(0)))
+  }
+  
+  # Filter by ontologies if specified
+  if (!is.null(ontologies)) {
+    go_enrichment <- go_enrichment[go_enrichment$term_type %in% ontologies, ]
+    if (verbose) message("    - Filtering to ontologies: ", paste(ontologies, collapse = ", "))
+  }
+  
+  if (nrow(go_enrichment) == 0) {
+    if (verbose) message("    - No GO terms found after ontology filtering")
+    return(data.frame(term_id = character(0), p_value = numeric(0)))
+  }
+  
+  # Format results
+  result <- data.frame(
+    term_id = go_enrichment$term_id,
+    p_value = as.numeric(go_enrichment$p_value),
+    stringsAsFactors = FALSE
+  )
+  
+  # Remove rows with missing p-values and sort
+  result <- result[!is.na(result$p_value), ]
+  result <- result[order(result$p_value), ]
+  
+  if (verbose) message("    - Found ", nrow(result), " enriched GO terms")
+  
+  return(result)
+}
+
+#' Format GO data for ReviGO output
+#' @keywords internal
+.format_revigo_output <- function(go_data, include_pvalues, verbose) {
+  
+  if (verbose) message("  - Formatting data for ReviGO...")
+  
+  if (include_pvalues && "p_value" %in% names(go_data)) {
+    # Format with p-values in scientific notation
+    result <- data.frame(
+      term_id = go_data$term_id,
+      p_value = sprintf("%.2E", go_data$p_value),
+      stringsAsFactors = FALSE
+    )
+    if (verbose) message("    - Formatted ", nrow(result), " GO terms with p-values")
+  } else {
+    # Just GO terms
+    result <- data.frame(
+      term_id = go_data$term_id,
+      stringsAsFactors = FALSE
+    )
+    if (verbose) message("    - Formatted ", nrow(result), " GO terms")
+  }
+  
+  return(result)
+}
+
+#' Write ReviGO-compatible file
+#' @keywords internal
+.write_revigo_file <- function(revigo_data, output_file, include_pvalues, verbose) {
+  
+  if (verbose) message("  - Writing ReviGO file...")
+  
+  if (include_pvalues && ncol(revigo_data) > 1) {
+    # Write with header and p-values
+    lines <- c("% GOterm\tenrichment_P-value",
+               paste(revigo_data$term_id, revigo_data$p_value, sep = "\t"))
+  } else {
+    # Write just GO terms
+    lines <- revigo_data$term_id
+  }
+  
+  writeLines(lines, output_file)
+  
+  if (verbose) message("    - Written ", length(lines) - ifelse(include_pvalues, 1, 0), " GO terms")
+}
+
