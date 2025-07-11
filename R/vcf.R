@@ -504,7 +504,7 @@ count_vcf_entries <- function(con, file_id = NULL, project_id = NULL) {
 #' }
 #'
 #' @importFrom DBI dbGetQuery dbExecute
-#' @keywords internal
+#' @export
 define_chromosomes <- function(con, main_chromosomes = NULL, verbose = TRUE) {
   
   if (!DBI::dbIsValid(con)) {

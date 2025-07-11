@@ -47,4 +47,3 @@ get_database_summary(con)  # Uses consolidated view by default
 }
 
 }
-\keyword{internal}
