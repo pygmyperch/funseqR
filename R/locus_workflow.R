@@ -79,7 +79,7 @@
 #' )
 #' }
 #'
-#' @keywords internal
+#' @export
 define_locus_statistics <- function(con, statistics, candidate_threshold = NULL, verbose = TRUE) {
   
   if (verbose) message("=== Defining Locus Statistics ===")
