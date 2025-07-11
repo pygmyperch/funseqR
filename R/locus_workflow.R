@@ -13,7 +13,7 @@
 #' @param con Database connection object
 #' @param statistics Various formats: VCF file path, file ID, or data frame with coordinates and statistics
 #' @param candidate_threshold Numeric. Optional threshold for defining candidate loci. 
-#'   If provided, loci with statistics >= threshold become candidates. Default is NULL
+#'   If provided, loci with statistics <= threshold become candidates (for p-values/q-values). Default is NULL
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
 #' @return List containing:
@@ -45,7 +45,7 @@
 #' \strong{Candidate Definition:}
 #' When candidate_threshold is provided:
 #' \itemize{
-#'   \item Loci with statistic >= threshold become candidates
+#'   \item Loci with statistic <= threshold become candidates (typical for p-values/q-values)
 #'   \item Stored in candidate_loci table with method "threshold"
 #'   \item Enables downstream enrichment analysis
 #' }
@@ -244,7 +244,7 @@ define_locus_statistics <- function(con, statistics, candidate_threshold = NULL,
     }
     
     # Identify candidates based on threshold
-    candidates <- locus_data[locus_data$statistic >= candidate_threshold, ]
+    candidates <- locus_data[locus_data$statistic <= candidate_threshold, ]
     
     if (nrow(candidates) > 0) {
       # Prepare candidate data for insertion
