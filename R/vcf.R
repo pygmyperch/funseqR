@@ -19,7 +19,7 @@
 #' @importFrom vcfR read.vcfR getCHROM getPOS getID getREF getALT getQUAL getFILTER getINFO
 #' @importFrom DBI dbExecute dbGetQuery
 #' @importFrom progress progress_bar
-#' @keywords internal
+#' @export
 import_vcf <- function(con, vcf_file, verbose = TRUE) {
   # Register input file
   if (verbose) message("Registering VCF file...")

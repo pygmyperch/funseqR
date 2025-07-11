@@ -57,4 +57,3 @@ It can optionally extract ORFs from the flanking sequences for more targeted sea
 When translate_flanks = TRUE and threads > 1, parallel processing will be used with a
 two-phase approach: parallel ORF extraction followed by sequential database writes.
 }
-\keyword{internal}
