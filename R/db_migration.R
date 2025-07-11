@@ -1,1 +1,0 @@
-# This file has been removed as migration functions are not needed

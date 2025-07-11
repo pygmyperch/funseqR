@@ -1,0 +1,975 @@
+#' Sequence data storage and retrieval functions for funseqR
+#'
+#' These functions manage reference genomes and flanking sequences within the funseqR database.
+#'
+
+#' Import a reference genome into the database
+#'
+#' This function reads a reference genome file (FASTA) and stores its contents in the database.
+#'
+#' @param con A database connection object.
+#' @param genome_file A character string specifying the path to the FASTA file.
+#' @param genome_name A character string specifying a name for the genome. Default is NULL (derived from file name).
+#' @param genome_build A character string specifying the build version of the genome. Default is NULL.
+#' @param store_sequences Logical. If TRUE, store the actual sequence data in the database. Default is TRUE.
+#'   If FALSE, only sequence metadata will be stored, and the original file will need to be accessible.
+#' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
+#'
+#' @return A list containing:
+#'   \item{file_id}{The ID of the registered input file.}
+#'   \item{genome_id}{The ID of the imported genome.}
+#'   \item{sequence_count}{The number of sequences imported.}
+#'
+#' @importFrom Biostrings readDNAStringSet
+#' @importFrom DBI dbExecute dbGetQuery
+#' @importFrom progress progress_bar
+#' @export
+import_reference <- function(con, genome_file, genome_name = NULL, genome_build = NULL, 
+                                store_sequences = TRUE, verbose = TRUE) {
+  # Register input file
+  if (verbose) message("Registering genome file...")
+  file_id <- register_input_file(con, genome_file, "fasta", verbose = verbose)
+  
+  # Derive genome name from file if not provided
+  if (is.null(genome_name)) {
+    genome_name <- tools::file_path_sans_ext(basename(genome_file))
+  }
+  
+  # Check if genome already exists
+  existing <- DBI::dbGetQuery(
+    con,
+    "SELECT genome_id FROM reference_genomes WHERE file_id = ? AND genome_name = ?",
+    params = list(file_id, genome_name)
+  )
+  
+  if (nrow(existing) > 0) {
+    genome_id <- existing$genome_id[1]
+    
+    if (verbose) message("Genome already exists in the database with ID ", genome_id)
+    
+    # Count sequences
+    sequence_count <- DBI::dbGetQuery(
+      con,
+      "SELECT COUNT(*) AS count FROM reference_sequences WHERE genome_id = ?",
+      params = list(genome_id)
+    )$count
+    
+    return(list(file_id = file_id, genome_id = genome_id, sequence_count = sequence_count))
+  }
+  
+  # Read the genome file
+  if (verbose) message("Reading genome file...")
+  genome_data <- Biostrings::readDNAStringSet(genome_file)
+  
+  # Add the genome to the database
+  if (verbose) message("Adding genome to database...")
+  DBI::dbExecute(
+    con,
+    "INSERT INTO reference_genomes (file_id, genome_name, genome_build)
+     VALUES (?, ?, ?)",
+    params = list(file_id, genome_name, genome_build)
+  )
+  
+  # Get the genome ID
+  genome_id <- DBI::dbGetQuery(
+    con,
+    "SELECT genome_id FROM reference_genomes WHERE file_id = ? AND genome_name = ?",
+    params = list(file_id, genome_name)
+  )$genome_id[1]
+  
+  # Add sequences
+  if (verbose) {
+    message("Adding ", length(genome_data), " sequences to database...")
+    pb <- progress::progress_bar$new(
+      format = "[:bar] :percent ETA: :eta",
+      total = length(genome_data),
+      clear = FALSE,
+      width = 60
+    )
+  }
+  
+  # Start transaction
+  DBI::dbExecute(con, "BEGIN TRANSACTION")
+  
+  # Process sequences in batches
+  batch_size <- 100
+  num_batches <- ceiling(length(genome_data) / batch_size)
+  
+  tryCatch({
+    for (i in 1:num_batches) {
+      start_idx <- (i - 1) * batch_size + 1
+      end_idx <- min(i * batch_size, length(genome_data))
+      batch <- genome_data[start_idx:end_idx]
+      
+      for (j in 1:length(batch)) {
+        seq_idx <- start_idx + j - 1
+        seq_name <- names(batch)[j]
+        seq_length <- length(batch[[j]])
+        
+        # Some FASTA headers have additional description after the name
+        seq_name <- strsplit(seq_name, "\\s+")[[1]][1]
+        
+        # Store the sequence if requested
+        seq_data <- NULL
+        if (store_sequences) {
+          seq_data <- as.character(batch[[j]])
+        }
+        
+        # Add the sequence to the database
+        DBI::dbExecute(
+          con,
+          "INSERT INTO reference_sequences (genome_id, sequence_name, sequence_length, sequence)
+           VALUES (?, ?, ?, ?)",
+          params = list(genome_id, seq_name, seq_length, seq_data)
+        )
+        
+        # Update progress bar
+        if (verbose) {
+          pb$update(seq_idx / length(genome_data))
+        }
+      }
+    }
+    
+    # Commit transaction
+    DBI::dbExecute(con, "COMMIT")
+    
+    if (verbose) message("Imported ", length(genome_data), " sequences.")
+    
+    # Update analysis report if it exists
+    tryCatch({
+      # Calculate genome statistics
+      total_length <- sum(sapply(genome_data, length))
+      file_size_mb <- round(file.size(genome_file) / (1024^2), 2)
+      avg_seq_length <- round(total_length / length(genome_data))
+      
+      genome_message <- paste0(
+        "**Reference Genome Import Completed**\n\n",
+        "- **File:** ", basename(genome_file), " (", file_size_mb, " MB)\n",
+        "- **Genome:** ", genome_name %||% "Unknown", 
+        if (!is.null(genome_build)) paste0(" (build ", genome_build, ")") else "", "\n",
+        "- **Sequences imported:** ", format(length(genome_data), big.mark = ","), "\n",
+        "- **Total length:** ", format(total_length, big.mark = ","), " bp\n",
+        "- **Average sequence length:** ", format(avg_seq_length, big.mark = ","), " bp\n",
+        "- **Genome ID:** ", genome_id
+      )
+      
+      update_analysis_report(
+        con, project_id,
+        section = "genome_import",
+        message = genome_message,
+        verbose = FALSE
+      )
+    }, error = function(e) {
+      # Silently ignore if no report exists
+    })
+    
+    return(list(file_id = file_id, genome_id = genome_id, sequence_count = length(genome_data)))
+  }, error = function(e) {
+    # Rollback transaction on error
+    DBI::dbExecute(con, "ROLLBACK")
+    stop("Error importing genome: ", e$message)
+  })
+}
+
+#' Get a reference genome from the database
+#'
+#' This function retrieves a reference genome from the database.
+#'
+#' @param con A database connection object.
+#' @param genome_id The ID of the genome to retrieve.
+#' @param as_dna_string_set Logical. If TRUE, return a DNAStringSet object. Default is TRUE.
+#'   If FALSE, return a data frame with sequence data.
+#' @param include_sequences Logical. If TRUE, include the actual sequence data. Default is TRUE.
+#'   If FALSE, only include metadata.
+#'
+#' @return A DNAStringSet object or a data frame, depending on as_dna_string_set.
+#'
+#' @importFrom DBI dbGetQuery
+#' @importFrom Biostrings DNAStringSet
+#' @export
+get_reference_genome <- function(con, genome_id, as_dna_string_set = TRUE, include_sequences = TRUE) {
+  # Check if genome exists
+  genome_info <- DBI::dbGetQuery(
+    con,
+    "SELECT * FROM reference_genomes WHERE genome_id = ?",
+    params = list(genome_id)
+  )
+  
+  if (nrow(genome_info) == 0) {
+    stop("Genome with ID ", genome_id, " not found.")
+  }
+  
+  # Build query
+  if (include_sequences) {
+    query <- "SELECT * FROM reference_sequences WHERE genome_id = ? ORDER BY sequence_id"
+  } else {
+    query <- "SELECT sequence_id, genome_id, sequence_name, sequence_length FROM reference_sequences WHERE genome_id = ? ORDER BY sequence_id"
+  }
+  
+  # Get sequence data
+  sequences <- DBI::dbGetQuery(con, query, params = list(genome_id))
+  
+  if (nrow(sequences) == 0) {
+    stop("No sequences found for genome with ID ", genome_id)
+  }
+  
+  # Check if sequences are stored in the database
+  if (include_sequences && is.null(sequences$sequence[1])) {
+    # Get file path and read from file
+    file_info <- DBI::dbGetQuery(
+      con,
+      "SELECT f.file_path FROM input_files f
+       JOIN reference_genomes g ON f.file_id = g.file_id
+       WHERE g.genome_id = ?",
+      params = list(genome_id)
+    )
+    
+    if (nrow(file_info) == 0 || !file.exists(file_info$file_path[1])) {
+      stop("Sequences not stored in database and original file not found.")
+    }
+    
+    # Read sequences from file
+    genome_data <- Biostrings::readDNAStringSet(file_info$file_path[1])
+    
+    # Return as requested format
+    if (as_dna_string_set) {
+      return(genome_data)
+    } else {
+      return(data.frame(
+        sequence_id = 1:length(genome_data),
+        genome_id = genome_id,
+        sequence_name = names(genome_data),
+        sequence_length = width(genome_data),
+        sequence = as.character(genome_data),
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  # Return as requested format
+  if (as_dna_string_set && include_sequences) {
+    # Create DNAStringSet object
+    genome_data <- Biostrings::DNAStringSet(sequences$sequence)
+    names(genome_data) <- sequences$sequence_name
+    return(genome_data)
+  } else {
+    # Return as data frame
+    return(sequences)
+  }
+}
+
+#' Import flanking sequences into the database
+#'
+#' This function extracts flanking sequences for VCF data in the database and stores them.
+#' It can optionally extract ORFs from the flanking sequences for more targeted searches.
+#' When translate_flanks = TRUE and threads > 1, parallel processing will be used with a 
+#' two-phase approach: parallel ORF extraction followed by sequential database writes.
+#'
+#' @param con A database connection object.
+#' @param vcf_file_id The ID of the input file containing the VCF data.
+#' @param genome_id The ID of the reference genome to use.
+#' @param flank_size The size of the flanking region to extract on each side of the SNP. Default is 500.
+#' @param translate_flanks Logical. If TRUE, extract ORFs from flanking sequences. Default is FALSE.
+#' @param orf_min_aa Minimum ORF length in amino acids. Default is 30.
+#' @param orf_return Type of ORF to return: "nuc" for nucleotide, "aa" for amino acid. Default is "nuc".
+#' @param keep_raw_sequence Logical. If TRUE, store both raw and ORF sequences. Default is TRUE.
+#' @param chromosome Optional. Limit extraction to specific chromosome(s). Can be a single chromosome name or a vector of chromosome names. Default is NULL (all chromosomes).
+#' @param threads Integer specifying the number of CPU threads to use for ORF extraction. 
+#'   When threads > 1 and translate_flanks = TRUE, parallel processing will be used. Default is 1.
+#' @param batch_size Integer specifying the number of sequences to process per batch. Default is 1000.
+#' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
+#'
+#' @return A list containing:
+#'   \item{vcf_count}{The number of VCF entries processed.}
+#'   \item{flanking_count}{The number of flanking sequences extracted.}
+#'   \item{orf_count}{The number of ORF sequences extracted (if translate_flanks = TRUE).}
+#'
+#' @importFrom DBI dbExecute dbGetQuery
+#' @importFrom progress progress_bar
+#' @importFrom Biostrings subseq
+#' @importFrom parallel mclapply
+#' @export
+import_flanking_seqs <- function(con, vcf_file_id, genome_id, flank_size = 500, 
+                                 translate_flanks = FALSE, orf_min_aa = 30, 
+                                 orf_return = "nuc", keep_raw_sequence = TRUE,
+                                 chromosome = NULL, threads = 1, batch_size = 1000, 
+                                 verbose = TRUE) {
+  # Check if VCF file exists
+  vcf_file_info <- DBI::dbGetQuery(
+    con,
+    "SELECT * FROM input_files WHERE file_id = ?",
+    params = list(vcf_file_id)
+  )
+  
+  if (nrow(vcf_file_info) == 0) {
+    stop("VCF file with ID ", vcf_file_id, " not found.")
+  }
+  
+  # Check if genome exists
+  genome_info <- DBI::dbGetQuery(
+    con,
+    "SELECT * FROM reference_genomes WHERE genome_id = ?",
+    params = list(genome_id)
+  )
+  
+  if (nrow(genome_info) == 0) {
+    stop("Genome with ID ", genome_id, " not found.")
+  }
+  
+  # Get VCF data
+  if (verbose) {
+    if (is.null(chromosome)) {
+      message("Retrieving VCF data for all chromosomes...")
+    } else {
+      message("Retrieving VCF data for chromosome(s): ", paste(chromosome, collapse = ", "))
+    }
+  }
+  
+  if (is.null(chromosome)) {
+    vcf_query <- "SELECT vcf_id, chromosome, position FROM vcf_data WHERE file_id = ? ORDER BY chromosome, position"
+    vcf_params <- list(vcf_file_id)
+  } else if (length(chromosome) == 1) {
+    vcf_query <- "SELECT vcf_id, chromosome, position FROM vcf_data WHERE file_id = ? AND chromosome = ? ORDER BY position"
+    vcf_params <- list(vcf_file_id, chromosome)
+  } else {
+    # Handle multiple chromosomes
+    chrom_placeholders <- paste(rep("?", length(chromosome)), collapse = ", ")
+    vcf_query <- paste0("SELECT vcf_id, chromosome, position FROM vcf_data WHERE file_id = ? AND chromosome IN (", 
+                       chrom_placeholders, ") ORDER BY chromosome, position")
+    vcf_params <- c(list(vcf_file_id), as.list(chromosome))
+  }
+  
+  vcf_data <- DBI::dbGetQuery(con, vcf_query, params = vcf_params)
+  
+  if (nrow(vcf_data) == 0) {
+    if (is.null(chromosome)) {
+      stop("No VCF data found for file ID ", vcf_file_id)
+    } else {
+      stop("No VCF data found for file ID ", vcf_file_id, " on chromosome(s): ", paste(chromosome, collapse = ", "))
+    }
+  }
+  
+  # Get reference sequences
+  if (verbose) message("Retrieving reference sequences...")
+  ref_sequences <- DBI::dbGetQuery(
+    con,
+    "SELECT sequence_id, sequence_name, sequence_length, sequence FROM reference_sequences WHERE genome_id = ?",
+    params = list(genome_id)
+  )
+  
+  if (nrow(ref_sequences) == 0) {
+    stop("No reference sequences found for genome ID ", genome_id)
+  }
+  
+  # Check if sequences are stored in the database
+  if (is.null(ref_sequences$sequence[1])) {
+    if (verbose) message("Sequences not stored in database, reading from file...")
+    
+    # Get file path
+    file_path <- DBI::dbGetQuery(
+      con,
+      "SELECT file_path FROM input_files WHERE file_id = ?",
+      params = list(genome_info$file_id)
+    )$file_path[1]
+    
+    if (!file.exists(file_path)) {
+      stop("Reference genome file not found: ", file_path)
+    }
+    
+    # Read genome data
+    genome_data <- Biostrings::readDNAStringSet(file_path)
+    
+    # Create a mapping from sequence names to sequences
+    seq_names <- names(genome_data)
+    seq_names <- sapply(strsplit(seq_names, "\\s+"), `[`, 1)  # Extract first word from FASTA headers
+    
+    ref_seq_map <- setNames(as.list(genome_data), seq_names)
+  } else {
+    # Create a mapping from sequence names to sequences
+    ref_seq_map <- setNames(
+      lapply(1:nrow(ref_sequences), function(i) ref_sequences$sequence[i]), 
+      ref_sequences$sequence_name
+    )
+  }
+  
+  # Create a mapping from sequence names to sequence IDs
+  seq_id_map <- setNames(ref_sequences$sequence_id, ref_sequences$sequence_name)
+  
+  # Validate threading parameters
+  if (threads < 1) {
+    threads <- 1
+    if (verbose) message("Invalid threads value, using threads = 1")
+  }
+  
+  if (batch_size < 1) {
+    batch_size <- 1000
+    if (verbose) message("Invalid batch_size value, using batch_size = 1000")
+  }
+  
+  # Use sequential processing for small datasets or when threads = 1
+  use_parallel <- threads > 1 && nrow(vcf_data) > 50 && translate_flanks
+  
+  if (verbose && use_parallel) {
+    message("Using parallel processing with ", threads, " threads for ORF extraction")
+  }
+  
+  # Process VCF entries
+  flanking_count <- 0
+  orf_count <- 0
+  
+  # Start transaction
+  DBI::dbExecute(con, "BEGIN TRANSACTION")
+  
+  # Set up progress tracking
+  start_time <- Sys.time()
+  if (verbose) {
+    message("Processing ", nrow(vcf_data), " VCF entries...")
+    
+    if (use_parallel) {
+      # Create temporary progress tracking file for parallel processing
+      progress_file <- tempfile(pattern = "funseq_progress_", fileext = ".txt")
+      writeLines("0", progress_file)
+      
+      # Phase 1 progress bar for parallel computation
+      pb_phase1 <- progress::progress_bar$new(
+        format = "Phase 1 - Computing ORFs [:bar] :percent | :rate seq/sec | ETA: :eta",
+        total = nrow(vcf_data),
+        clear = FALSE,
+        width = 80
+      )
+    } else {
+      # Single progress bar for sequential processing
+      pb <- progress::progress_bar$new(
+        format = "Processing [:bar] :percent | :rate seq/sec | ETA: :eta",
+        total = nrow(vcf_data),
+        clear = FALSE,
+        width = 80
+      )
+    }
+  }
+  
+  tryCatch({
+    if (use_parallel) {
+      # Two-phase parallel processing
+      
+      # Phase 1: Parallel computation of sequences
+      phase1_start <- Sys.time()
+      if (verbose) {
+        message("\n=== Phase 1: Computing ORFs in parallel ===")
+        message("Using ", threads, " threads for ", nrow(vcf_data), " sequences")
+      }
+      
+      # Split data into chunks for parallel processing
+      chunk_size <- ceiling(nrow(vcf_data) / threads)
+      data_chunks <- split(vcf_data, ceiling(seq_len(nrow(vcf_data)) / chunk_size))
+      
+      if (verbose) {
+        message("Split into ", length(data_chunks), " chunks of ~", chunk_size, " sequences each")
+      }
+      
+      # Define worker function with progress tracking
+      process_chunk <- function(chunk_data, chunk_id = 1) {
+        chunk_results <- list()
+        chunk_processed <- 0
+        
+        for (i in 1:nrow(chunk_data)) {
+          chunk_processed <- chunk_processed + 1
+          vcf_id <- chunk_data$vcf_id[i]
+          chrom <- chunk_data$chromosome[i]
+          pos <- chunk_data$position[i]
+          
+          # Check what sequence types already exist for this VCF entry
+          existing <- DBI::dbGetQuery(
+            con,
+            "SELECT seq_type FROM flanking_sequences WHERE vcf_id = ?",
+            params = list(vcf_id)
+          )
+          
+          existing_types <- if (nrow(existing) > 0) existing$seq_type else character(0)
+          
+          # Determine what we need to create
+          need_raw <- (!translate_flanks || keep_raw_sequence) && !"raw" %in% existing_types
+          need_orf <- translate_flanks && !paste0("orf_", orf_return) %in% existing_types
+          
+          # Skip if we don't need to create anything
+          if (!need_raw && !need_orf) {
+            next
+          }
+          
+          # Check if chromosome exists in reference sequences
+          if (!chrom %in% names(ref_seq_map)) {
+            next
+          }
+          
+          # Get sequence ID
+          seq_id <- seq_id_map[chrom]
+          
+          # Get reference sequence
+          ref_seq <- ref_seq_map[[chrom]]
+          seq_length <- nchar(ref_seq)
+          
+          # Extract flanking sequence
+          start_pos <- max(1, pos - flank_size)
+          end_pos <- min(seq_length, pos + flank_size)
+          
+          flanking_seq <- substr(ref_seq, start_pos, end_pos)
+          
+          # Prepare result entry
+          result_entry <- list(
+            vcf_id = vcf_id,
+            seq_id = seq_id,
+            start_pos = start_pos,
+            end_pos = end_pos,
+            flanking_seq = flanking_seq,
+            need_raw = need_raw,
+            need_orf = need_orf
+          )
+          
+          # Extract ORF if needed (this is the computationally expensive part)
+          if (need_orf) {
+            orf_seq <- extract_longest_orf(flanking_seq, min_aa_length = orf_min_aa, 
+                                           return_type = orf_return, verbose = FALSE)
+            result_entry$orf_seq <- orf_seq
+          }
+          
+          chunk_results[[length(chunk_results) + 1]] <- result_entry
+          
+          # Update progress tracking (every 10 sequences to avoid file I/O overhead)
+          if (verbose && chunk_processed %% 10 == 0 && exists("progress_file")) {
+            tryCatch({
+              current_progress <- as.numeric(readLines(progress_file, warn = FALSE))
+              writeLines(as.character(current_progress + 10), progress_file)
+            }, error = function(e) {})
+          }
+        }
+        
+        # Final progress update for this chunk
+        if (verbose && exists("progress_file")) {
+          tryCatch({
+            current_progress <- as.numeric(readLines(progress_file, warn = FALSE))
+            writeLines(as.character(current_progress + (nrow(chunk_data) %% 10)), progress_file)
+          }, error = function(e) {})
+        }
+        
+        return(list(results = chunk_results, processed = nrow(chunk_data)))
+      }
+      
+      # Execute parallel computation with progress monitoring
+      if (verbose) {
+        # Start progress monitoring in background
+        progress_monitor <- function() {
+          total_processed <- 0
+          while (total_processed < nrow(vcf_data)) {
+            Sys.sleep(1)  # Update every second
+            tryCatch({
+              if (file.exists(progress_file)) {
+                current_progress <- as.numeric(readLines(progress_file, warn = FALSE))
+                if (current_progress > total_processed) {
+                  pb_phase1$update(current_progress / nrow(vcf_data))
+                  total_processed <- current_progress
+                }
+              }
+            }, error = function(e) {})
+          }
+        }
+        
+        # Start monitoring (this will run until computation completes)
+        # Note: We'll use a simpler approach without background monitoring to avoid complexity
+      }
+      
+      # Add chunk IDs for better tracking
+      chunk_ids <- seq_along(data_chunks)
+      names(data_chunks) <- paste0("chunk_", chunk_ids)
+      
+      # Execute parallel computation
+      all_results <- parallel::mclapply(data_chunks, function(chunk) {
+        process_chunk(chunk)
+      }, mc.cores = threads)
+      
+      # Complete Phase 1 progress
+      if (verbose) {
+        tryCatch({
+          pb_phase1$update(1.0)
+        }, error = function(e) {
+          # Progress bar might already be finished or corrupted, ignore
+        })
+        phase1_duration <- as.numeric(difftime(Sys.time(), phase1_start, units = "secs"))
+        message(sprintf("Phase 1 completed in %.1f seconds", phase1_duration))
+      }
+      
+      # Flatten results
+      computed_sequences <- do.call(c, lapply(all_results, function(x) x$results))
+      total_computed <- sum(sapply(all_results, function(x) x$processed))
+      
+      if (verbose) {
+        message(sprintf("Computed %d sequences (%d with results)", total_computed, length(computed_sequences)))
+      }
+      
+      # Phase 2: Sequential database writing
+      phase2_start <- Sys.time()
+      pb_phase2 <- NULL  # Initialize progress bar variable
+      
+      if (verbose) {
+        message("\n=== Phase 2: Writing results to database ===")
+        
+        # Create Phase 2 progress bar
+        if (length(computed_sequences) > 0) {
+          pb_phase2 <- progress::progress_bar$new(
+            format = "Phase 2 - Database writes [:bar] :percent | :rate records/sec | ETA: :eta",
+            total = length(computed_sequences),
+            clear = FALSE,
+            width = 80
+          )
+        }
+      }
+      
+      # Process results in batches
+      if (length(computed_sequences) > 0) {
+        num_batches <- ceiling(length(computed_sequences) / batch_size)
+        
+        for (batch_idx in 1:num_batches) {
+          start_idx <- (batch_idx - 1) * batch_size + 1
+          end_idx <- min(batch_idx * batch_size, length(computed_sequences))
+          batch_results <- computed_sequences[start_idx:end_idx]
+          
+          for (result in batch_results) {
+            # Store raw flanking sequence if needed
+            if (result$need_raw) {
+              DBI::dbExecute(
+                con,
+                "INSERT INTO flanking_sequences (vcf_id, sequence_id, flank_size, start_position, end_position, sequence, seq_type, seq_length)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                params = list(result$vcf_id, result$seq_id, flank_size, result$start_pos, result$end_pos, 
+                             result$flanking_seq, "raw", nchar(result$flanking_seq))
+              )
+              flanking_count <- flanking_count + 1
+            }
+            
+            # Store ORF sequence if needed
+            if (result$need_orf) {
+              if (!is.null(result$orf_seq) && nchar(result$orf_seq) > 0) {
+                DBI::dbExecute(
+                  con,
+                  "INSERT INTO flanking_sequences (vcf_id, sequence_id, flank_size, start_position, end_position, sequence, seq_type, seq_length)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                  params = list(result$vcf_id, result$seq_id, flank_size, result$start_pos, result$end_pos, 
+                               result$orf_seq, paste0("orf_", orf_return), nchar(result$orf_seq))
+                )
+                orf_count <- orf_count + 1
+              } else if (!keep_raw_sequence && !result$need_raw) {
+                # Fallback to raw sequence if no ORF found and raw not already stored
+                DBI::dbExecute(
+                  con,
+                  "INSERT INTO flanking_sequences (vcf_id, sequence_id, flank_size, start_position, end_position, sequence, seq_type, seq_length)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                  params = list(result$vcf_id, result$seq_id, flank_size, result$start_pos, result$end_pos, 
+                               result$flanking_seq, "raw", nchar(result$flanking_seq))
+                )
+                flanking_count <- flanking_count + 1
+              }
+            }
+          }
+          
+          # Update Phase 2 progress bar
+          if (verbose && length(computed_sequences) > 0 && !is.null(pb_phase2)) {
+            tryCatch({
+              pb_phase2$update(end_idx / length(computed_sequences))
+            }, error = function(e) {
+              # Progress bar might be corrupted, ignore update
+            })
+          }
+        }
+        
+        # Complete Phase 2 and show summary
+        if (verbose) {
+          if (length(computed_sequences) > 0 && !is.null(pb_phase2)) {
+            tryCatch({
+              pb_phase2$update(1.0)
+            }, error = function(e) {
+              # Progress bar might be corrupted, ignore final update
+            })
+          }
+          phase2_duration <- as.numeric(difftime(Sys.time(), phase2_start, units = "secs"))
+          total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+          
+          message(sprintf("Phase 2 completed in %.1f seconds", phase2_duration))
+          message(sprintf("\n=== Parallel Processing Summary ==="))
+          message(sprintf("Total processing time: %.1f seconds", total_duration))
+          message(sprintf("Phase 1 (ORF computation): %.1f seconds (%.1f%%)", 
+                         phase1_duration, (phase1_duration/total_duration)*100))
+          message(sprintf("Phase 2 (database writing): %.1f seconds (%.1f%%)", 
+                         phase2_duration, (phase2_duration/total_duration)*100))
+          message(sprintf("Overall throughput: %.1f sequences/second", nrow(vcf_data)/total_duration))
+          message(sprintf("Threads used: %d", threads))
+          
+          # Clean up progress file
+          if (exists("progress_file") && file.exists(progress_file)) {
+            unlink(progress_file)
+          }
+        }
+      }
+    } else {
+      # Sequential processing (original code)
+      for (i in 1:nrow(vcf_data)) {
+        vcf_id <- vcf_data$vcf_id[i]
+        chrom <- vcf_data$chromosome[i]
+        pos <- vcf_data$position[i]
+        
+        # Check what sequence types already exist for this VCF entry
+        existing <- DBI::dbGetQuery(
+          con,
+          "SELECT seq_type FROM flanking_sequences WHERE vcf_id = ?",
+          params = list(vcf_id)
+        )
+        
+        existing_types <- if (nrow(existing) > 0) existing$seq_type else character(0)
+        
+        # Determine what we need to create
+        need_raw <- (!translate_flanks || keep_raw_sequence) && !"raw" %in% existing_types
+        need_orf <- translate_flanks && !paste0("orf_", orf_return) %in% existing_types
+        
+        # Skip if we don't need to create anything
+        if (!need_raw && !need_orf) {
+          if (verbose) {
+            tryCatch({
+              pb$update(i / nrow(vcf_data))
+            }, error = function(e) {
+              # Progress bar might be corrupted, ignore update
+            })
+          }
+          next
+        }
+        
+        # Check if chromosome exists in reference sequences
+        if (!chrom %in% names(ref_seq_map)) {
+          if (verbose) message("Chromosome ", chrom, " not found in reference genome. Skipping.")
+          if (verbose) {
+            tryCatch({
+              pb$update(i / nrow(vcf_data))
+            }, error = function(e) {
+              # Progress bar might be corrupted, ignore update
+            })
+          }
+          next
+        }
+        
+        # Get sequence ID
+        seq_id <- seq_id_map[chrom]
+        
+        # Get reference sequence
+        ref_seq <- ref_seq_map[[chrom]]
+        seq_length <- nchar(ref_seq)
+        
+        # Extract flanking sequence
+        start_pos <- max(1, pos - flank_size)
+        end_pos <- min(seq_length, pos + flank_size)
+        
+        flanking_seq <- substr(ref_seq, start_pos, end_pos)
+        
+        # Store raw flanking sequence if needed
+        if (need_raw) {
+          DBI::dbExecute(
+            con,
+            "INSERT INTO flanking_sequences (vcf_id, sequence_id, flank_size, start_position, end_position, sequence, seq_type, seq_length)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params = list(vcf_id, seq_id, flank_size, start_pos, end_pos, flanking_seq, "raw", nchar(flanking_seq))
+          )
+          flanking_count <- flanking_count + 1
+        }
+        
+        # Extract and store ORF if needed
+        if (need_orf) {
+          orf_seq <- extract_longest_orf(flanking_seq, min_aa_length = orf_min_aa, 
+                                         return_type = orf_return, verbose = FALSE)
+          
+          if (!is.null(orf_seq) && nchar(orf_seq) > 0) {
+            DBI::dbExecute(
+              con,
+              "INSERT INTO flanking_sequences (vcf_id, sequence_id, flank_size, start_position, end_position, sequence, seq_type, seq_length)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              params = list(vcf_id, seq_id, flank_size, start_pos, end_pos, orf_seq, 
+                           paste0("orf_", orf_return), nchar(orf_seq))
+            )
+            orf_count <- orf_count + 1
+          } else if (!keep_raw_sequence && !"raw" %in% existing_types) {
+            # Fallback to raw sequence if no ORF found and raw not already stored
+            DBI::dbExecute(
+              con,
+              "INSERT INTO flanking_sequences (vcf_id, sequence_id, flank_size, start_position, end_position, sequence, seq_type, seq_length)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              params = list(vcf_id, seq_id, flank_size, start_pos, end_pos, flanking_seq, "raw", nchar(flanking_seq))
+            )
+            flanking_count <- flanking_count + 1
+          }
+        }
+        
+        # Update progress bar (sequential processing)
+        if (verbose) {
+          tryCatch({
+            pb$update(i / nrow(vcf_data))
+          }, error = function(e) {
+            # Progress bar might be corrupted, ignore update
+          })
+        }
+      }
+      
+      # Sequential processing summary
+      if (verbose) {
+        tryCatch({
+          pb$update(1.0)
+        }, error = function(e) {
+          # Progress bar might be corrupted, ignore final update
+        })
+        total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+        message(sprintf("\n=== Sequential Processing Summary ==="))
+        message(sprintf("Total processing time: %.1f seconds", total_duration))
+        message(sprintf("Overall throughput: %.1f sequences/second", nrow(vcf_data)/total_duration))
+        message(sprintf("Processing mode: Sequential (1 thread)"))
+      }
+    }
+    
+    # Commit transaction
+    DBI::dbExecute(con, "COMMIT")
+    
+    if (verbose) {
+      total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+      message(sprintf("\n=== Final Results ==="))
+      message(sprintf("Extracted %d flanking sequences", flanking_count))
+      if (translate_flanks) {
+        message(sprintf("Extracted %d ORF sequences", orf_count))
+      }
+      message(sprintf("Total processing time: %.1f seconds", total_duration))
+      message(sprintf("Success rate: %.1f%%", (flanking_count / nrow(vcf_data)) * 100))
+    }
+    
+    # Update analysis report if it exists
+    tryCatch({
+      # Get project ID from VCF file
+      project_info <- DBI::dbGetQuery(
+        con,
+        "SELECT if.project_id FROM input_files if 
+         JOIN vcf_data v ON if.file_id = v.file_id 
+         WHERE v.file_id = ? LIMIT 1",
+        params = list(vcf_file_id)
+      )
+      
+      if (nrow(project_info) > 0) {
+        # Get genome info
+        genome_info <- DBI::dbGetQuery(
+          con,
+          "SELECT g.genome_name, g.genome_build FROM genomes g WHERE g.genome_id = ?",
+          params = list(genome_id)
+        )
+        
+        success_rate <- round((flanking_count / nrow(vcf_data)) * 100, 1)
+        
+        flanking_message <- paste0(
+          "**Flanking Sequence Extraction Completed**\n\n",
+          "- **Reference genome:** ", genome_info$genome_name %||% "Unknown", 
+          if (!is.null(genome_info$genome_build)) paste0(" (", genome_info$genome_build, ")") else "", "\n",
+          "- **Flank size:** ±", format(flank_size, big.mark = ","), " bp\n",
+          "- **Total variants:** ", format(nrow(vcf_data), big.mark = ","), "\n",
+          "- **Successfully extracted:** ", format(flanking_count, big.mark = ","), " (", success_rate, "%)\n",
+          "- **Skipped variants:** ", format(nrow(vcf_data) - flanking_count, big.mark = ",")
+        )
+        
+        update_analysis_report(
+          con, project_info$project_id[1],
+          section = "flanking_extraction",
+          message = flanking_message,
+          verbose = FALSE
+        )
+      }
+    }, error = function(e) {
+      # Silently ignore if no report exists
+    })
+    
+    return(list(vcf_count = nrow(vcf_data), flanking_count = flanking_count, orf_count = orf_count))
+  }, error = function(e) {
+    # Rollback transaction on error
+    DBI::dbExecute(con, "ROLLBACK")
+    stop("Error extracting flanking sequences: ", e$message)
+  })
+}
+
+#' Get flanking sequences from the database
+#'
+#' @param con A database connection object.
+#' @param vcf_file_id The ID of the input file containing the VCF data.
+#' @param seq_type Type of sequence to retrieve: "raw", "orf_nuc", or "orf_aa". Default is "raw".
+#' @param as_dna_string_set Logical. If TRUE, return a DNAStringSet object. Default is TRUE.
+#'   If FALSE, return a data frame with sequence data.
+#' @param chromosome Optional. Limit retrieval to specific chromosome(s). Can be a single chromosome name or a vector of chromosome names. Default is NULL (all chromosomes).
+#'
+#' @return A DNAStringSet object or a data frame, depending on as_dna_string_set.
+#'
+#' @importFrom DBI dbGetQuery
+#' @importFrom Biostrings DNAStringSet
+#' @export
+get_flanking_sequences <- function(con, vcf_file_id, seq_type = "raw", as_dna_string_set = TRUE, chromosome = NULL) {
+  # Build query
+  if (is.null(chromosome)) {
+    query <- "
+      SELECT f.flanking_id, v.chromosome, v.position, f.flank_size, f.start_position, f.end_position, f.sequence, f.seq_type, f.seq_length
+      FROM flanking_sequences f
+      JOIN vcf_data v ON f.vcf_id = v.vcf_id
+      WHERE v.file_id = ? AND f.seq_type = ?
+      ORDER BY v.chromosome, v.position
+    "
+    params <- list(vcf_file_id, seq_type)
+  } else if (length(chromosome) == 1) {
+    query <- "
+      SELECT f.flanking_id, v.chromosome, v.position, f.flank_size, f.start_position, f.end_position, f.sequence, f.seq_type, f.seq_length
+      FROM flanking_sequences f
+      JOIN vcf_data v ON f.vcf_id = v.vcf_id
+      WHERE v.file_id = ? AND v.chromosome = ? AND f.seq_type = ?
+      ORDER BY v.position
+    "
+    params <- list(vcf_file_id, chromosome, seq_type)
+  } else {
+    # Handle multiple chromosomes
+    chrom_placeholders <- paste(rep("?", length(chromosome)), collapse = ", ")
+    query <- paste0("
+      SELECT f.flanking_id, v.chromosome, v.position, f.flank_size, f.start_position, f.end_position, f.sequence, f.seq_type, f.seq_length
+      FROM flanking_sequences f
+      JOIN vcf_data v ON f.vcf_id = v.vcf_id
+      WHERE v.file_id = ? AND v.chromosome IN (", chrom_placeholders, ") AND f.seq_type = ?
+      ORDER BY v.chromosome, v.position
+    ")
+    params <- c(list(vcf_file_id), as.list(chromosome), list(seq_type))
+  }
+  
+  # Execute query
+  flanking_data <- DBI::dbGetQuery(con, query, params = params)
+  
+  if (nrow(flanking_data) == 0) {
+    if (is.null(chromosome)) {
+      stop("No flanking sequences found for VCF file ID ", vcf_file_id, " with seq_type '", seq_type, "'")
+    } else {
+      stop("No flanking sequences found for VCF file ID ", vcf_file_id, " on chromosome(s): ", 
+           paste(chromosome, collapse = ", "), " with seq_type '", seq_type, "'")
+    }
+  }
+  
+  # Return as requested format
+  if (as_dna_string_set) {
+    # Create names for the sequences
+    names <- paste0(
+      flanking_data$chromosome, ":",
+      flanking_data$position, " (",
+      flanking_data$start_position, "-",
+      flanking_data$end_position, ")"
+    )
+    
+    # Create DNAStringSet object
+    flanking_seqs <- Biostrings::DNAStringSet(flanking_data$sequence)
+    names(flanking_seqs) <- names
+    
+    return(flanking_seqs)
+  } else {
+    return(flanking_data)
+  }
+}
+
+# NOTE: delete_flanking_sequences() has been moved to database_management.R
+# This consolidates all database deletion functions in a single location.

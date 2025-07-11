@@ -98,7 +98,7 @@ define_locus_statistics <- function(con, statistics, candidate_threshold = NULL,
     # Case 1: VCF file path - import and use
     if (file.exists(statistics)) {
       if (verbose) message("  - Importing VCF file: ", statistics)
-      import_result <- import_vcf_to_db(con, statistics)
+      import_result <- import_vcf(con, statistics)
       result$import_info <- import_result
       
       # Get coordinates from imported VCF
@@ -354,7 +354,7 @@ define_candidate_loci <- function(con, loci, method, verbose = TRUE) {
       # Determine file type and process accordingly
       if (grepl("\\.vcf(\\.gz)?$", loci, ignore.case = TRUE)) {
         # VCF file - import and extract coordinates
-        import_result <- import_vcf_to_db(con, loci)
+        import_result <- import_vcf(con, loci)
         result$import_info <- import_result
         
         # Get coordinates from imported VCF

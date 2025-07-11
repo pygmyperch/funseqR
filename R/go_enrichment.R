@@ -6,58 +6,6 @@
 #' on candidate loci vs background datasets, with visualization capabilities.
 #'
 
-#' Import candidate adaptive loci and link to existing annotations
-#'
-#' @param con Database connection object
-#' @param candidate_vcf_file Character. Path to candidate VCF file
-#' @param background_file_id Integer. File ID of the background/reference dataset
-#' @param verbose Logical. Print progress information. Default is TRUE
-#'
-#' @return List containing file_id, bed_file path, and annotation linkage results
-#'
-#' @details
-#' This function imports a candidate VCF file and links the variants to existing
-#' annotations in the database by matching genomic positions. It's designed for
-#' comparative analysis between candidate adaptive loci and a larger background dataset.
-#'
-#' @examples
-#' \dontrun{
-#' con <- connect_funseq_db("analysis.db")
-#' candidate_import <- import_candidate_loci(con, "candidates.vcf", 1)
-#' }
-#'
-#' @export
-import_candidate_loci <- function(con, candidate_vcf_file, background_file_id, verbose = TRUE) {
-
-  if (verbose) message("Importing candidate loci from: ", candidate_vcf_file)
-
-  # Import candidate VCF using existing function
-  candidate_import <- import_vcf_to_db(con, candidate_vcf_file)
-
-  if (verbose) message("Creating BED file for candidate loci...")
-
-  # Create BED file for candidate loci
-  candidate_bed <- vcf2bed_db(con, candidate_import$file_id)
-
-  if (verbose) message("Linking candidates to existing annotations...")
-
-  # Link candidates to existing annotations via genomic overlap
-  candidate_annotations <- link_candidates_to_annotations(con, candidate_import$file_id, background_file_id, verbose = verbose)
-
-  if (verbose) {
-    message("Import complete:")
-    message("  - Candidate file ID: ", candidate_import$file_id)
-    message("  - BED file created: ", length(candidate_bed), " genomic regions")
-    message("  - Linked annotations: ", nrow(candidate_annotations))
-  }
-
-  return(list(
-    file_id = candidate_import$file_id,
-    bed_file = candidate_bed,
-    linked_annotations = candidate_annotations,
-    import_summary = candidate_import
-  ))
-}
 
 #' Link candidate loci to existing annotations by genomic position
 #'
@@ -1417,7 +1365,7 @@ export_revigo_file <- function(con, source_type = c("all_annotations", "candidat
         loci_coords <- .parse_bed_file(candidate_loci, verbose)
       } else {
         # Assume VCF file - import and get coordinates
-        temp_import <- import_vcf_to_db(con, candidate_loci)
+        temp_import <- import_vcf(con, candidate_loci)
         vcf_coords <- DBI::dbGetQuery(con, "
           SELECT chromosome, position FROM vcf_data 
           WHERE file_id = ? ORDER BY vcf_id

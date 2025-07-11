@@ -121,9 +121,21 @@ run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
     if (verbose) message("  - Using background file: ", background_files$file_name[1], " (ID: ", background_file_id, ")")
   }
   
-  # Step 1: Import candidate loci
-  if (verbose) message("\n=== Step 1: Importing Candidate Loci ===")
-  candidate_import <- import_candidate_loci(con, candidate_vcf_file, background_file_id, verbose = verbose)
+  # Step 1: Import candidate loci (if needed) and get file info
+  if (verbose) message("\n=== Step 1: Processing Candidate Loci ===")
+  
+  # Check if it's a file path or existing file ID
+  if (is.character(candidate_vcf_file) && file.exists(candidate_vcf_file)) {
+    # Import candidate VCF file
+    candidate_import <- import_vcf(con, candidate_vcf_file)
+    candidate_file_id <- candidate_import$file_id
+  } else if (is.numeric(candidate_vcf_file)) {
+    # Use existing file ID
+    candidate_file_id <- candidate_vcf_file
+    candidate_import <- list(file_id = candidate_file_id)
+  } else {
+    stop("candidate_vcf_file must be a valid file path or existing file ID")
+  }
   
   # Step 2: Extract annotation data and perform enrichment
   if (verbose) message("\n=== Step 2: Extracting Annotation Data ===")
@@ -141,7 +153,7 @@ run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
   
   if (run_go) {
     if (verbose) message("  - Extracting GO terms...")
-    go_data <- extract_go_terms_for_enrichment(con, candidate_import$file_id, background_file_id, 
+    go_data <- extract_go_terms_for_enrichment(con, candidate_file_id, background_file_id, 
                                              blast_param_id = blast_param_id, verbose = verbose)
     annotation_data[["GO"]] <- go_data
     
@@ -166,7 +178,7 @@ run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
         # Store results in database if requested
         if (store_results && nrow(results) > 0) {
           analysis_id <- store_ora_results(
-            con, candidate_import$file_id, background_file_id,
+            con, candidate_file_id, background_file_id,
             results, "GO", ontology, 
             parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
             method = method,
@@ -184,7 +196,7 @@ run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
   
   if (run_kegg) {
     if (verbose) message("  - Extracting KEGG pathways...")
-    kegg_data <- extract_kegg_terms_for_enrichment(con, candidate_import$file_id, background_file_id, 
+    kegg_data <- extract_kegg_terms_for_enrichment(con, candidate_file_id, background_file_id, 
                                                  blast_param_id = blast_param_id, verbose = verbose)
     annotation_data[["KEGG"]] <- kegg_data
     
@@ -204,7 +216,7 @@ run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
       # Store results in database if requested
       if (store_results && nrow(kegg_results) > 0) {
         analysis_id <- store_ora_results(
-          con, candidate_import$file_id, background_file_id,
+          con, candidate_file_id, background_file_id,
           kegg_results, "KEGG", "PATHWAY", 
           parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
           method = method,
@@ -324,7 +336,7 @@ run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
   workflow_summary <- list(
     analysis_date = Sys.time(),
     candidate_file = candidate_vcf_file,
-    candidate_file_id = candidate_import$file_id,
+    candidate_file_id = candidate_file_id,
     background_file_id = background_file_id,
     annotation_type = annotation_type,
     foreground_genes = total_foreground,
@@ -337,7 +349,7 @@ run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
   # Step 6: Create locus information table
   if (verbose) message("\n=== Step 6: Creating Locus Information Table ===")
   
-  locus_info <- .create_locus_info_table(con, candidate_import$file_id, background_file_id, 
+  locus_info <- .create_locus_info_table(con, candidate_file_id, background_file_id, 
                                          blast_param_id, annotation_type, verbose)
   
   if (verbose) {

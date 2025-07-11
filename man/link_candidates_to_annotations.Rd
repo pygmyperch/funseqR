@@ -2,7 +2,7 @@
 % Please edit documentation in R/go_enrichment.R
 \name{link_candidates_to_annotations}
 \alias{link_candidates_to_annotations}
-\title{Link candidate loci to existing annotations by genomic position}
+\title{GO Enrichment Analysis Functions}
 \usage{
 link_candidates_to_annotations(
   con,
@@ -24,9 +24,12 @@ link_candidates_to_annotations(
 Data frame with candidate variants linked to annotations
 }
 \description{
-Link candidate loci to existing annotations by genomic position
+This file contains functions for performing Gene Ontology (GO) enrichment analysis
+on candidate loci vs background datasets, with visualization capabilities.
 }
 \details{
+Link candidate loci to existing annotations by genomic position
+
 Links candidate variants to existing functional annotations by matching
 chromosome and position coordinates. This assumes that both datasets
 use the same reference genome and coordinate system.

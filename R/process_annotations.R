@@ -1074,7 +1074,7 @@ compile_funseq_results <- function(con,
           candidate_loci <- .match_coordinates_to_loci(con, coords_result, verbose)
           
         } else {
-          warning("VCF file '", basename(candidate_input), "' not found in database. Use import_vcf_to_db() first.")
+          warning("VCF file '", basename(candidate_input), "' not found in database. Use import_vcf() first.")
         }
         
       } else if (grepl("\\.(bed|txt|csv)$", candidate_input, ignore.case = TRUE)) {
