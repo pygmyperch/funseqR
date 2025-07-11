@@ -194,28 +194,42 @@ define_locus_statistics <- function(con, statistics, candidate_threshold = NULL,
     stringsAsFactors = FALSE
   )
   
-  # Insert statistics using prepared statement for efficiency
-  stmt <- DBI::dbPrepareStatement(con, "
-    INSERT INTO locus_statistics (chromosome, position, statistic, created_date)
-    VALUES (?, ?, ?, ?)
-  ")
-  
+  # Insert statistics using batch insert for efficiency
   tryCatch({
     DBI::dbWithTransaction(con, {
-      for (i in 1:nrow(insert_data)) {
-        DBI::dbExecuteStatement(stmt, list(
-          insert_data$chromosome[i],
-          insert_data$position[i], 
-          insert_data$statistic[i],
-          as.character(insert_data$created_date[i])
-        ))
+      # Use batch insert with multiple values
+      batch_size <- 1000
+      num_batches <- ceiling(nrow(insert_data) / batch_size)
+      
+      for (batch in 1:num_batches) {
+        start_idx <- (batch - 1) * batch_size + 1
+        end_idx <- min(batch * batch_size, nrow(insert_data))
+        batch_data <- insert_data[start_idx:end_idx, ]
+        
+        # Create parameterized query for batch
+        placeholders <- paste0("(", paste(rep("?", 4), collapse = ", "), ")")
+        values_clause <- paste(rep(placeholders, nrow(batch_data)), collapse = ", ")
+        query <- paste0(
+          "INSERT INTO locus_statistics (chromosome, position, statistic, created_date) VALUES ",
+          values_clause
+        )
+        
+        # Flatten parameters for batch insert
+        params <- list()
+        for (i in 1:nrow(batch_data)) {
+          params <- c(params, list(
+            batch_data$chromosome[i],
+            batch_data$position[i],
+            batch_data$statistic[i],
+            as.character(batch_data$created_date[i])
+          ))
+        }
+        
+        DBI::dbExecute(con, query, params)
       }
     })
     result$statistics_stored <- nrow(insert_data)
     if (verbose) message("  - Stored ", result$statistics_stored, " locus statistics")
-    
-  }, finally = {
-    DBI::dbClearResult(stmt)
   })
   
   # Optionally define candidate loci based on threshold
@@ -243,29 +257,43 @@ define_locus_statistics <- function(con, statistics, candidate_threshold = NULL,
         stringsAsFactors = FALSE
       )
       
-      # Insert candidates
-      candidate_stmt <- DBI::dbPrepareStatement(con, "
-        INSERT INTO candidate_loci (chromosome, position, method, threshold, created_date)
-        VALUES (?, ?, ?, ?, ?)
-      ")
-      
+      # Insert candidates using batch insert
       tryCatch({
         DBI::dbWithTransaction(con, {
-          for (i in 1:nrow(candidate_insert)) {
-            DBI::dbExecuteStatement(candidate_stmt, list(
-              candidate_insert$chromosome[i],
-              candidate_insert$position[i],
-              candidate_insert$method[i],
-              candidate_insert$threshold[i],
-              as.character(candidate_insert$created_date[i])
-            ))
+          # Use batch insert for efficiency
+          batch_size <- 1000
+          num_batches <- ceiling(nrow(candidate_insert) / batch_size)
+          
+          for (batch in 1:num_batches) {
+            start_idx <- (batch - 1) * batch_size + 1
+            end_idx <- min(batch * batch_size, nrow(candidate_insert))
+            batch_data <- candidate_insert[start_idx:end_idx, ]
+            
+            # Create parameterized query for batch
+            placeholders <- paste0("(", paste(rep("?", 5), collapse = ", "), ")")
+            values_clause <- paste(rep(placeholders, nrow(batch_data)), collapse = ", ")
+            query <- paste0(
+              "INSERT INTO candidate_loci (chromosome, position, method, threshold, created_date) VALUES ",
+              values_clause
+            )
+            
+            # Flatten parameters for batch insert
+            params <- list()
+            for (i in 1:nrow(batch_data)) {
+              params <- c(params, list(
+                batch_data$chromosome[i],
+                batch_data$position[i],
+                batch_data$method[i],
+                batch_data$threshold[i],
+                as.character(batch_data$created_date[i])
+              ))
+            }
+            
+            DBI::dbExecute(con, query, params)
           }
         })
         result$candidates_defined <- nrow(candidate_insert)
         if (verbose) message("  - Defined ", result$candidates_defined, " candidate loci")
-        
-      }, finally = {
-        DBI::dbClearResult(candidate_stmt)
       })
       
     } else {
@@ -447,29 +475,43 @@ define_candidate_loci <- function(con, loci, method, verbose = TRUE) {
     stringsAsFactors = FALSE
   )
   
-  # Insert candidates
-  stmt <- DBI::dbPrepareStatement(con, "
-    INSERT INTO candidate_loci (chromosome, position, method, threshold, created_date)
-    VALUES (?, ?, ?, ?, ?)
-  ")
-  
+  # Insert candidates using batch insert
   tryCatch({
     DBI::dbWithTransaction(con, {
-      for (i in 1:nrow(candidate_insert)) {
-        DBI::dbExecuteStatement(stmt, list(
-          candidate_insert$chromosome[i],
-          candidate_insert$position[i],
-          candidate_insert$method[i],
-          candidate_insert$threshold[i],
-          as.character(candidate_insert$created_date[i])
-        ))
+      # Use batch insert for efficiency
+      batch_size <- 1000
+      num_batches <- ceiling(nrow(candidate_insert) / batch_size)
+      
+      for (batch in 1:num_batches) {
+        start_idx <- (batch - 1) * batch_size + 1
+        end_idx <- min(batch * batch_size, nrow(candidate_insert))
+        batch_data <- candidate_insert[start_idx:end_idx, ]
+        
+        # Create parameterized query for batch
+        placeholders <- paste0("(", paste(rep("?", 5), collapse = ", "), ")")
+        values_clause <- paste(rep(placeholders, nrow(batch_data)), collapse = ", ")
+        query <- paste0(
+          "INSERT INTO candidate_loci (chromosome, position, method, threshold, created_date) VALUES ",
+          values_clause
+        )
+        
+        # Flatten parameters for batch insert
+        params <- list()
+        for (i in 1:nrow(batch_data)) {
+          params <- c(params, list(
+            batch_data$chromosome[i],
+            batch_data$position[i],
+            batch_data$method[i],
+            batch_data$threshold[i],
+            as.character(batch_data$created_date[i])
+          ))
+        }
+        
+        DBI::dbExecute(con, query, params)
       }
     })
     result$candidates_defined <- nrow(candidate_insert)
     if (verbose) message("  - Stored ", result$candidates_defined, " candidate loci")
-    
-  }, finally = {
-    DBI::dbClearResult(stmt)
   })
   
   # Summary
