@@ -305,6 +305,83 @@ vcf_to_bed <- function(con, file_id, output_file = NULL, verbose = TRUE) {
   return(bed_data)
 }
 
+#' Get locus names in chromosome:position format
+#'
+#' This function retrieves chromosome and position information from VCF data
+#' and returns it in the chromosome:position format commonly used throughout funseqR.
+#'
+#' @param con A database connection object.
+#' @param file_id The ID of the VCF file to retrieve loci from.
+#' @param output_file Optional. Path to save the locus names as a text file (one per line). Default is NULL.
+#' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
+#'
+#' @return A data frame with columns:
+#'   \item{chromosome}{Chromosome name}
+#'   \item{position}{Position on chromosome}
+#'   \item{locus_name}{Chromosome:position string format}
+#'
+#' @details
+#' This function extracts locus identifiers in the standard funseqR format (chromosome:position)
+#' which is used throughout the package for functions like define_candidate_loci(),
+#' export_revigo_input(), and other locus-based operations.
+#'
+#' The returned dataframe contains both individual chromosome/position columns and
+#' a combined locus_name column for convenience.
+#'
+#' @examples
+#' \dontrun{
+#' con <- connect_funseq_db("analysis.db")
+#' 
+#' # Get locus names as dataframe
+#' loci <- get_locus_names(con, file_id = 1)
+#' head(loci)
+#' 
+#' # Save to file as well
+#' loci <- get_locus_names(con, file_id = 1, output_file = "loci.txt")
+#' 
+#' # Use locus names with other funseqR functions
+#' define_candidate_loci(con, loci$locus_name[1:100], method = "list")
+#' }
+#'
+#' @importFrom DBI dbGetQuery
+#' @export
+get_locus_names <- function(con, file_id, output_file = NULL, verbose = TRUE) {
+  
+  if (verbose) message("Retrieving locus names for file ID ", file_id, "...")
+  
+  # Get chromosome and position data
+  vcf_data <- DBI::dbGetQuery(
+    con,
+    "SELECT chromosome, position FROM vcf_data WHERE file_id = ? ORDER BY chromosome, position",
+    params = list(file_id)
+  )
+  
+  if (nrow(vcf_data) == 0) {
+    stop("No VCF data found for file ID ", file_id)
+  }
+  
+  # Create locus names in chromosome:position format
+  locus_names <- paste0(vcf_data$chromosome, ":", vcf_data$position)
+  
+  # Create result dataframe
+  result <- data.frame(
+    chromosome = vcf_data$chromosome,
+    position = vcf_data$position,
+    locus_name = locus_names,
+    stringsAsFactors = FALSE
+  )
+  
+  if (verbose) message("Retrieved ", nrow(result), " loci")
+  
+  # Write to file if requested
+  if (!is.null(output_file)) {
+    if (verbose) message("Writing locus names to: ", output_file)
+    writeLines(locus_names, output_file)
+  }
+  
+  return(result)
+}
+
 #' Get a count of VCF entries in the database
 #'
 #' @param con A database connection object.
