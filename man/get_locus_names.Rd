@@ -4,12 +4,20 @@
 \alias{get_locus_names}
 \title{Get locus names in chromosome:position format}
 \usage{
-get_locus_names(con, file_id, output_file = NULL, verbose = TRUE)
+get_locus_names(
+  con,
+  file_id,
+  candidates_only = FALSE,
+  output_file = NULL,
+  verbose = TRUE
+)
 }
 \arguments{
 \item{con}{A database connection object.}
 
 \item{file_id}{The ID of the VCF file to retrieve loci from.}
+
+\item{candidates_only}{Logical. If TRUE, return only candidate loci. If FALSE, return all loci. Default is FALSE.}
 
 \item{output_file}{Optional. Path to save the locus names as a text file (one per line). Default is NULL.}
 
@@ -24,6 +32,7 @@ A data frame with columns:
 \description{
 This function retrieves chromosome and position information from VCF data
 and returns it in the chromosome:position format commonly used throughout funseqR.
+Optionally restrict to candidate loci only.
 }
 \details{
 This function extracts locus identifiers in the standard funseqR format (chromosome:position)
@@ -32,20 +41,28 @@ export_revigo_input(), and other locus-based operations.
 
 The returned dataframe contains both individual chromosome/position columns and
 a combined locus_name column for convenience.
+
+When \code{candidates_only = TRUE}, only loci that have been defined as candidates
+(via define_locus_statistics() or define_candidate_loci()) are returned. If no
+candidates have been defined, the function exits gracefully with an informative message.
 }
 \examples{
 \dontrun{
 con <- connect_funseq_db("analysis.db")
 
-# Get locus names as dataframe
+# Get all locus names as dataframe
 loci <- get_locus_names(con, file_id = 1)
 head(loci)
 
 # Save to file as well
 loci <- get_locus_names(con, file_id = 1, output_file = "loci.txt")
 
-# Use locus names with other funseqR functions
-define_candidate_loci(con, loci$locus_name[1:100], method = "list")
+# Get only candidate loci (after defining candidates)
+candidates <- get_locus_names(con, file_id = 1, candidates_only = TRUE)
+
+# Save candidates to file
+candidates <- get_locus_names(con, file_id = 1, candidates_only = TRUE, 
+                              output_file = "candidates.txt")
 }
 
 }

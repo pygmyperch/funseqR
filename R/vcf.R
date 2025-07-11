@@ -309,9 +309,11 @@ vcf_to_bed <- function(con, file_id, output_file = NULL, verbose = TRUE) {
 #'
 #' This function retrieves chromosome and position information from VCF data
 #' and returns it in the chromosome:position format commonly used throughout funseqR.
+#' Optionally restrict to candidate loci only.
 #'
 #' @param con A database connection object.
 #' @param file_id The ID of the VCF file to retrieve loci from.
+#' @param candidates_only Logical. If TRUE, return only candidate loci. If FALSE, return all loci. Default is FALSE.
 #' @param output_file Optional. Path to save the locus names as a text file (one per line). Default is NULL.
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #'
@@ -328,36 +330,79 @@ vcf_to_bed <- function(con, file_id, output_file = NULL, verbose = TRUE) {
 #' The returned dataframe contains both individual chromosome/position columns and
 #' a combined locus_name column for convenience.
 #'
+#' When \code{candidates_only = TRUE}, only loci that have been defined as candidates
+#' (via define_locus_statistics() or define_candidate_loci()) are returned. If no
+#' candidates have been defined, the function exits gracefully with an informative message.
+#'
 #' @examples
 #' \dontrun{
 #' con <- connect_funseq_db("analysis.db")
 #' 
-#' # Get locus names as dataframe
+#' # Get all locus names as dataframe
 #' loci <- get_locus_names(con, file_id = 1)
 #' head(loci)
 #' 
 #' # Save to file as well
 #' loci <- get_locus_names(con, file_id = 1, output_file = "loci.txt")
 #' 
-#' # Use locus names with other funseqR functions
-#' define_candidate_loci(con, loci$locus_name[1:100], method = "list")
+#' # Get only candidate loci (after defining candidates)
+#' candidates <- get_locus_names(con, file_id = 1, candidates_only = TRUE)
+#' 
+#' # Save candidates to file
+#' candidates <- get_locus_names(con, file_id = 1, candidates_only = TRUE, 
+#'                               output_file = "candidates.txt")
 #' }
 #'
 #' @importFrom DBI dbGetQuery
 #' @export
-get_locus_names <- function(con, file_id, output_file = NULL, verbose = TRUE) {
+get_locus_names <- function(con, file_id, candidates_only = FALSE, output_file = NULL, verbose = TRUE) {
   
-  if (verbose) message("Retrieving locus names for file ID ", file_id, "...")
+  if (verbose) {
+    if (candidates_only) {
+      message("Retrieving candidate locus names for file ID ", file_id, "...")
+    } else {
+      message("Retrieving locus names for file ID ", file_id, "...")
+    }
+  }
   
   # Get chromosome and position data
-  vcf_data <- DBI::dbGetQuery(
-    con,
-    "SELECT chromosome, position FROM vcf_data WHERE file_id = ? ORDER BY vcf_id",
-    params = list(file_id)
-  )
-  
-  if (nrow(vcf_data) == 0) {
-    stop("No VCF data found for file ID ", file_id)
+  if (candidates_only) {
+    # Check if candidates exist
+    candidate_count <- DBI::dbGetQuery(
+      con,
+      "SELECT COUNT(*) as count FROM candidate_loci"
+    )$count
+    
+    if (candidate_count == 0) {
+      stop("No candidate loci have been defined. Please run define_locus_statistics() with a candidate_threshold or define_candidate_loci() first.")
+    }
+    
+    # Get candidate loci with VCF order preserved
+    vcf_data <- DBI::dbGetQuery(
+      con,
+      "SELECT v.chromosome, v.position 
+       FROM vcf_data v
+       INNER JOIN candidate_loci c ON v.chromosome = c.chromosome AND v.position = c.position
+       WHERE v.file_id = ? 
+       ORDER BY v.vcf_id",
+      params = list(file_id)
+    )
+    
+    if (nrow(vcf_data) == 0) {
+      stop("No candidate loci found for file ID ", file_id, ". Check that candidates were defined for the correct VCF file.")
+    }
+    
+  } else {
+    # Get all VCF data
+    vcf_data <- DBI::dbGetQuery(
+      con,
+      "SELECT chromosome, position FROM vcf_data WHERE file_id = ? ORDER BY vcf_id",
+      params = list(file_id)
+    )
+    
+    if (nrow(vcf_data) == 0) {
+      stop("No VCF data found for file ID ", file_id)
+    }
   }
   
   # Create locus names in chromosome:position format
@@ -371,7 +416,13 @@ get_locus_names <- function(con, file_id, output_file = NULL, verbose = TRUE) {
     stringsAsFactors = FALSE
   )
   
-  if (verbose) message("Retrieved ", nrow(result), " loci")
+  if (verbose) {
+    if (candidates_only) {
+      message("Retrieved ", nrow(result), " candidate loci")
+    } else {
+      message("Retrieved ", nrow(result), " loci")
+    }
+  }
   
   # Write to file if requested
   if (!is.null(output_file)) {
