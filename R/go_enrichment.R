@@ -1169,6 +1169,8 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
 #' @param source_type Character. Source of GO terms: "all_annotations", "candidate_loci", or "enriched_loci"
 #' @param analysis_ids Integer vector. ORA analysis IDs to export (required for "enriched_loci")
 #' @param candidate_loci Character, data.frame, or file path. Candidate loci specification (required for "candidate_loci")
+#' @param vcf_file_id Integer. VCF file ID for automatic y-value extraction (optional for "candidate_loci")
+#' @param full_y_values Numeric vector. Full y-values for all SNPs in VCF order (optional for "candidate_loci")
 #' @param candidate_locus_pvalues Numeric vector. P-values for each candidate locus, same order as candidate_loci (optional for "candidate_loci")
 #' @param include_pvalues Logical. Whether to include p-values in output (for "candidate_loci"). Default is TRUE
 #' @param significance_threshold Numeric. P-value threshold for enriched terms (for "enriched_loci"). Default is 0.05
@@ -1190,10 +1192,16 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
 #' Exports GO terms associated with user-specified candidate loci. Two output modes:
 #' \\itemize{
 #'   \\item \\code{include_pvalues = FALSE}: GO term IDs only
-#'   \\item \\code{include_pvalues = TRUE}: GO terms with p-values derived from candidate_locus_pvalues
+#'   \\item \\code{include_pvalues = TRUE}: GO terms with p-values derived from statistical evidence
 #' }
 #' When p-values are included, each GO term receives the minimum p-value among all associated loci,
 #' effectively weighting functional terms by the strength of statistical evidence for selection.
+#' 
+#' P-values can be provided in two ways:
+#' \\itemize{
+#'   \\item \\strong{Automatic extraction}: Provide \\code{vcf_file_id} and \\code{full_y_values} to automatically extract p-values for candidate loci from the full dataset
+#'   \\item \\strong{Direct specification}: Provide \\code{candidate_locus_pvalues} with p-values matching candidate loci order
+#' }
 #'
 #' \\strong{Enriched Loci} (\\code{source_type = "enriched_loci"}):
 #' Exports statistically enriched GO terms from ORA analysis with their real statistical p-values.
@@ -1207,6 +1215,15 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
 #'   \\item Coordinate strings: c("LG4:3814415", "LG8:22215908")
 #'   \\item Data.frame: data.frame(chromosome = c("LG4", "LG8"), position = c(3814415, 22215908))
 #'   \\item BED file path: "regions.bed"
+#'   \\item \\strong{NULL}: Automatically uses stored candidate loci from \\code{define_locus_statistics()} or \\code{define_candidate_loci()}
+#' }
+#' 
+#' \\strong{Streamlined Workflow Integration:}
+#' This function integrates with the streamlined workflow:
+#' \\itemize{
+#'   \\item When \\code{candidate_loci = NULL}, automatically uses stored candidate loci from database
+#'   \\item When \\code{include_pvalues = TRUE}, automatically uses stored statistics for p-values (if available)
+#'   \\item Falls back to manual specification if stored data not available
 #' }
 #'
 #' \\strong{Output Formats:}
@@ -1224,7 +1241,15 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
 #' export_revigo_file(con, source_type = "all_annotations",
 #'                    output_file = "all_functions.txt")
 #'
-#' # Export candidate loci functions weighted by selection evidence
+#' # Export candidate loci - automatic y-value extraction (recommended)
+#' export_revigo_file(con, source_type = "candidate_loci",
+#'                    candidate_loci = "candidates.vcf",
+#'                    vcf_file_id = 1,                    # full dataset
+#'                    full_y_values = my_rda_pvalues,    # all SNP p-values
+#'                    include_pvalues = TRUE,
+#'                    output_file = "candidate_functions.txt")
+#'
+#' # Export candidate loci - direct p-value specification
 #' export_revigo_file(con, source_type = "candidate_loci",
 #'                    candidate_loci = c("LG4:3814415", "LG8:22215908"),
 #'                    candidate_locus_pvalues = c(0.001, 0.003),
@@ -1243,11 +1268,20 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
 #'                    significance_threshold = 0.01,
 #'                    ontologies = c("BP", "MF"),
 #'                    output_file = "enriched_functions.txt")
+#' 
+#' # Streamlined workflow with stored data
+#' # Step 1: Define statistics and candidates
+#' define_locus_statistics(con, my_pvalue_data, candidate_threshold = 0.01)
+#' 
+#' # Step 2: Export candidates to ReviGO (uses stored data automatically)
+#' export_revigo_file(con, source_type = "candidate_loci",
+#'                    output_file = "candidates_for_revigo.txt")
 #' }
 #'
 #' @export
 export_revigo_file <- function(con, source_type = c("all_annotations", "candidate_loci", "enriched_loci"),
-                               analysis_ids = NULL, candidate_loci = NULL, candidate_locus_pvalues = NULL,
+                               analysis_ids = NULL, candidate_loci = NULL, 
+                               vcf_file_id = NULL, full_y_values = NULL, candidate_locus_pvalues = NULL,
                                include_pvalues = TRUE, significance_threshold = 0.05,
                                ontologies = NULL, output_file = NULL, verbose = TRUE) {
   
@@ -1263,11 +1297,31 @@ export_revigo_file <- function(con, source_type = c("all_annotations", "candidat
   }
   
   if (source_type == "candidate_loci" && is.null(candidate_loci)) {
-    stop("candidate_loci is required for source_type = 'candidate_loci'")
+    # Check if stored candidate loci exist
+    stored_candidates <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM candidate_loci")$count
+    if (stored_candidates == 0) {
+      stop("candidate_loci is required for source_type = 'candidate_loci' when no stored candidates exist. Use define_locus_statistics() or define_candidate_loci() first, or provide candidate_loci parameter.")
+    } else {
+      if (verbose) message("Using ", stored_candidates, " stored candidate loci from database")
+      # Create candidate_loci specification from stored data
+      candidate_loci <- "stored"  # Flag to use stored data
+    }
   }
   
-  if (source_type == "candidate_loci" && include_pvalues && is.null(candidate_locus_pvalues)) {
-    stop("candidate_locus_pvalues is required when source_type = 'candidate_loci' and include_pvalues = TRUE")
+  # Validate p-value specification for candidate_loci
+  if (source_type == "candidate_loci" && include_pvalues) {
+    has_direct_pvalues <- !is.null(candidate_locus_pvalues)
+    has_auto_extraction <- !is.null(vcf_file_id) && !is.null(full_y_values)
+    
+    if (!has_direct_pvalues && !has_auto_extraction) {
+      stop("When source_type = 'candidate_loci' and include_pvalues = TRUE, you must provide either:\n",
+           "  - candidate_locus_pvalues (direct specification), or\n",
+           "  - vcf_file_id and full_y_values (automatic extraction)")
+    }
+    
+    if (has_direct_pvalues && has_auto_extraction) {
+      if (verbose) message("Both candidate_locus_pvalues and automatic extraction provided. Using candidate_locus_pvalues directly.")
+    }
   }
   
   # Extract GO terms based on source type
@@ -1275,8 +1329,8 @@ export_revigo_file <- function(con, source_type = c("all_annotations", "candidat
     go_data <- .extract_all_go_annotations(con, ontologies, verbose)
     
   } else if (source_type == "candidate_loci") {
-    go_data <- .extract_candidate_go_annotations(con, candidate_loci, candidate_locus_pvalues, 
-                                                include_pvalues, ontologies, verbose)
+    go_data <- .extract_candidate_go_annotations(con, candidate_loci, vcf_file_id, full_y_values, 
+                                                candidate_locus_pvalues, include_pvalues, ontologies, verbose)
     
   } else if (source_type == "enriched_loci") {
     go_data <- .extract_enriched_go_terms(con, analysis_ids, significance_threshold, 
@@ -1343,15 +1397,20 @@ export_revigo_file <- function(con, source_type = c("all_annotations", "candidat
 
 #' Extract GO annotations for candidate loci
 #' @keywords internal
-.extract_candidate_go_annotations <- function(con, candidate_loci, candidate_locus_pvalues, 
-                                            include_pvalues, ontologies, verbose) {
+.extract_candidate_go_annotations <- function(con, candidate_loci, vcf_file_id, full_y_values,
+                                            candidate_locus_pvalues, include_pvalues, ontologies, verbose) {
   
   if (verbose) message("  - Extracting GO annotations for candidate loci...")
   
   # Parse candidate loci using existing infrastructure
   if (is.character(candidate_loci) && length(candidate_loci) == 1) {
-    # Check if it's a file path or VCF ID
-    if (file.exists(candidate_loci)) {
+    # Check for stored candidates flag
+    if (candidate_loci == "stored") {
+      if (verbose) message("    - Using stored candidate loci from database")
+      loci_coords <- DBI::dbGetQuery(con, "
+        SELECT chromosome, position FROM candidate_loci ORDER BY candidate_id
+      ")
+    } else if (file.exists(candidate_loci)) {
       if (verbose) message("    - Processing file: ", candidate_loci)
       if (grepl("\\.bed$", candidate_loci, ignore.case = TRUE)) {
         # BED file
@@ -1388,6 +1447,19 @@ export_revigo_file <- function(con, source_type = c("all_annotations", "candidat
   if (nrow(loci_coords) == 0) {
     if (verbose) message("    - No valid candidate loci found")
     return(data.frame(term_id = character(0), p_value = numeric(0)))
+  }
+  
+  # Extract y-values automatically if requested and not directly provided
+  if (include_pvalues && is.null(candidate_locus_pvalues)) {
+    # Try stored statistics first
+    stored_stats <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM locus_statistics")$count
+    if (stored_stats > 0) {
+      if (verbose) message("    - Extracting y-values for candidate loci from stored statistics...")
+      candidate_locus_pvalues <- .extract_candidate_yvalues_from_stored(con, loci_coords, verbose)
+    } else if (!is.null(vcf_file_id) && !is.null(full_y_values)) {
+      if (verbose) message("    - Extracting y-values for candidate loci from full dataset...")
+      candidate_locus_pvalues <- .extract_candidate_yvalues(con, loci_coords, vcf_file_id, full_y_values, verbose)
+    }
   }
   
   # Validate p-values length if provided
@@ -1566,5 +1638,98 @@ export_revigo_file <- function(con, source_type = c("all_annotations", "candidat
   writeLines(lines, output_file)
   
   if (verbose) message("    - Written ", length(lines) - ifelse(include_pvalues, 1, 0), " GO terms")
+}
+
+#' Extract y-values for candidate loci from full VCF dataset
+#' @keywords internal
+.extract_candidate_yvalues <- function(con, candidate_coords, vcf_file_id, full_y_values, verbose) {
+  
+  # Get full VCF coordinates in order (same approach as Manhattan plot)
+  vcf_coords <- DBI::dbGetQuery(con, "
+    SELECT vcf_id, chromosome, position, ref, alt
+    FROM vcf_data
+    WHERE file_id = ?
+    ORDER BY vcf_id
+  ", list(vcf_file_id))
+  
+  if (nrow(vcf_coords) == 0) {
+    stop("No VCF data found for file_id: ", vcf_file_id)
+  }
+  
+  # Validate y_values length (same validation as Manhattan plot)
+  if (length(full_y_values) != nrow(vcf_coords)) {
+    stop("Length mismatch: full_y_values has ", length(full_y_values),
+         " values but VCF has ", nrow(vcf_coords), " variants")
+  }
+  
+  if (verbose) message("      - Matching ", nrow(candidate_coords), " candidate loci against ", nrow(vcf_coords), " VCF variants")
+  
+  # Extract y-values for candidate loci
+  candidate_pvalues <- numeric(nrow(candidate_coords))
+  matched_count <- 0
+  
+  for (i in 1:nrow(candidate_coords)) {
+    chr <- candidate_coords$chromosome[i]
+    pos <- candidate_coords$position[i]
+    
+    # Find matching VCF entry
+    match_idx <- which(vcf_coords$chromosome == chr & vcf_coords$position == pos)
+    
+    if (length(match_idx) > 0) {
+      candidate_pvalues[i] <- full_y_values[match_idx[1]]
+      matched_count <- matched_count + 1
+    } else {
+      if (verbose) message("      - Warning: Candidate locus not found in VCF: ", chr, ":", pos)
+      candidate_pvalues[i] <- NA
+    }
+  }
+  
+  if (verbose) message("      - Successfully matched ", matched_count, "/", nrow(candidate_coords), " candidate loci")
+  
+  # Report NA values but don't remove them here - let the calling function handle it
+  if (any(is.na(candidate_pvalues))) {
+    na_count <- sum(is.na(candidate_pvalues))
+    if (verbose) message("      - Warning: ", na_count, " candidate loci not found in VCF and will be excluded from p-value analysis")
+  }
+  
+  return(candidate_pvalues)
+}
+
+# Helper function to extract y-values from stored statistics
+.extract_candidate_yvalues_from_stored <- function(con, candidate_coords, verbose) {
+  
+  if (verbose) message("      - Matching candidate loci to stored statistics...")
+  
+  candidate_pvalues <- numeric(nrow(candidate_coords))
+  matched_count <- 0
+  
+  for (i in 1:nrow(candidate_coords)) {
+    chr <- candidate_coords$chromosome[i]
+    pos <- candidate_coords$position[i]
+    
+    # Query stored statistics for this coordinate
+    stat_result <- DBI::dbGetQuery(con, "
+      SELECT statistic FROM locus_statistics 
+      WHERE chromosome = ? AND position = ?
+    ", list(chr, pos))
+    
+    if (nrow(stat_result) > 0) {
+      candidate_pvalues[i] <- stat_result$statistic[1]
+      matched_count <- matched_count + 1
+    } else {
+      if (verbose) message("      - Warning: Candidate locus not found in stored statistics: ", chr, ":", pos)
+      candidate_pvalues[i] <- NA
+    }
+  }
+  
+  if (verbose) message("      - Successfully matched ", matched_count, "/", nrow(candidate_coords), " candidate loci")
+  
+  # Report NA values
+  if (any(is.na(candidate_pvalues))) {
+    na_count <- sum(is.na(candidate_pvalues))
+    if (verbose) message("      - Warning: ", na_count, " candidate loci not found in stored statistics and will be excluded from p-value analysis")
+  }
+  
+  return(candidate_pvalues)
 }
 

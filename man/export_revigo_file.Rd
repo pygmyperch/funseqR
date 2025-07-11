@@ -9,6 +9,8 @@ export_revigo_file(
   source_type = c("all_annotations", "candidate_loci", "enriched_loci"),
   analysis_ids = NULL,
   candidate_loci = NULL,
+  vcf_file_id = NULL,
+  full_y_values = NULL,
   candidate_locus_pvalues = NULL,
   include_pvalues = TRUE,
   significance_threshold = 0.05,
@@ -25,6 +27,10 @@ export_revigo_file(
 \item{analysis_ids}{Integer vector. ORA analysis IDs to export (required for "enriched_loci")}
 
 \item{candidate_loci}{Character, data.frame, or file path. Candidate loci specification (required for "candidate_loci")}
+
+\item{vcf_file_id}{Integer. VCF file ID for automatic y-value extraction (optional for "candidate_loci")}
+
+\item{full_y_values}{Numeric vector. Full y-values for all SNPs in VCF order (optional for "candidate_loci")}
 
 \item{candidate_locus_pvalues}{Numeric vector. P-values for each candidate locus, same order as candidate_loci (optional for "candidate_loci")}
 
@@ -58,10 +64,16 @@ Useful for summarizing the complete functional landscape of your dataset.
 Exports GO terms associated with user-specified candidate loci. Two output modes:
 \\itemize{
 \\item \\code{include_pvalues = FALSE}: GO term IDs only
-\\item \\code{include_pvalues = TRUE}: GO terms with p-values derived from candidate_locus_pvalues
+\\item \\code{include_pvalues = TRUE}: GO terms with p-values derived from statistical evidence
 }
 When p-values are included, each GO term receives the minimum p-value among all associated loci,
 effectively weighting functional terms by the strength of statistical evidence for selection.
+
+P-values can be provided in two ways:
+\\itemize{
+\\item \\strong{Automatic extraction}: Provide \\code{vcf_file_id} and \\code{full_y_values} to automatically extract p-values for candidate loci from the full dataset
+\\item \\strong{Direct specification}: Provide \\code{candidate_locus_pvalues} with p-values matching candidate loci order
+}
 
 \\strong{Enriched Loci} (\\code{source_type = "enriched_loci"}):
 Exports statistically enriched GO terms from ORA analysis with their real statistical p-values.
@@ -75,6 +87,15 @@ The \\code{candidate_loci} parameter supports multiple input formats:
 \\item Coordinate strings: c("LG4:3814415", "LG8:22215908")
 \\item Data.frame: data.frame(chromosome = c("LG4", "LG8"), position = c(3814415, 22215908))
 \\item BED file path: "regions.bed"
+\\item \\strong{NULL}: Automatically uses stored candidate loci from \\code{define_locus_statistics()} or \\code{define_candidate_loci()}
+}
+
+\\strong{Streamlined Workflow Integration:}
+This function integrates with the streamlined workflow:
+\\itemize{
+\\item When \\code{candidate_loci = NULL}, automatically uses stored candidate loci from database
+\\item When \\code{include_pvalues = TRUE}, automatically uses stored statistics for p-values (if available)
+\\item Falls back to manual specification if stored data not available
 }
 
 \\strong{Output Formats:}
@@ -92,7 +113,15 @@ con <- connect_funseq_db("analysis.db")
 export_revigo_file(con, source_type = "all_annotations",
                    output_file = "all_functions.txt")
 
-# Export candidate loci functions weighted by selection evidence
+# Export candidate loci - automatic y-value extraction (recommended)
+export_revigo_file(con, source_type = "candidate_loci",
+                   candidate_loci = "candidates.vcf",
+                   vcf_file_id = 1,                    # full dataset
+                   full_y_values = my_rda_pvalues,    # all SNP p-values
+                   include_pvalues = TRUE,
+                   output_file = "candidate_functions.txt")
+
+# Export candidate loci - direct p-value specification
 export_revigo_file(con, source_type = "candidate_loci",
                    candidate_loci = c("LG4:3814415", "LG8:22215908"),
                    candidate_locus_pvalues = c(0.001, 0.003),
@@ -111,6 +140,14 @@ export_revigo_file(con, source_type = "enriched_loci",
                    significance_threshold = 0.01,
                    ontologies = c("BP", "MF"),
                    output_file = "enriched_functions.txt")
+
+# Streamlined workflow with stored data
+# Step 1: Define statistics and candidates
+define_locus_statistics(con, my_pvalue_data, candidate_threshold = 0.01)
+
+# Step 2: Export candidates to ReviGO (uses stored data automatically)
+export_revigo_file(con, source_type = "candidate_loci",
+                   output_file = "candidates_for_revigo.txt")
 }
 
 }

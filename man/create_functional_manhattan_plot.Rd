@@ -6,7 +6,7 @@
 \usage{
 create_functional_manhattan_plot(
   con,
-  y_values,
+  y_values = NULL,
   vcf_file_id,
   enrichment_data = NULL,
   y_label = "Statistical Value",
@@ -29,7 +29,7 @@ create_functional_manhattan_plot(
 
 create_functional_manhattan_plot(
   con,
-  y_values,
+  y_values = NULL,
   vcf_file_id,
   enrichment_data = NULL,
   y_label = "Statistical Value",
@@ -53,7 +53,7 @@ create_functional_manhattan_plot(
 \arguments{
 \item{con}{Database connection object}
 
-\item{y_values}{Numeric vector of values to plot on y-axis (same order as VCF file variants)}
+\item{y_values}{Numeric vector of values to plot on y-axis (same order as VCF file variants). If NULL, uses stored statistics from database}
 
 \item{vcf_file_id}{Integer. File ID of the VCF file used in the analysis}
 
@@ -262,6 +262,14 @@ manhattan_plot <- create_functional_manhattan_plot(
   vcf_file_id = 1,
   enrichment_data = enrichment_results,
   y_label = "Statistical Value"
+)
+
+# Use stored statistics (after define_locus_statistics())
+manhattan_plot_stored <- create_functional_manhattan_plot(
+  con,
+  vcf_file_id = 1,  # y_values = NULL uses stored statistics
+  enrichment_data = enrichment_results,
+  y_label = "P-value"
 )
 
 # Different labeling options for enriched loci

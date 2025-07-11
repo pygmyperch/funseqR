@@ -9,7 +9,7 @@
 #' with highlighted points corresponding to functionally enriched loci from GO analysis.
 #'
 #' @param con Database connection object
-#' @param y_values Numeric vector of values to plot on y-axis (same order as VCF file variants)
+#' @param y_values Numeric vector of values to plot on y-axis (same order as VCF file variants). If NULL, uses stored statistics from database
 #' @param vcf_file_id Integer. File ID of the VCF file used in the analysis
 #' @param enrichment_data Data.frame. Output from compile_funseq_results() with enrichment stage. If NULL, creates basic Manhattan plot. Default is NULL
 #' @param y_label Character. Label for y-axis. Default is "Statistical Value"
@@ -109,6 +109,14 @@
 #'   enrichment_data = enrichment_results,
 #'   y_label = "Statistical Value"
 #' )
+#' 
+#' # Use stored statistics (after define_locus_statistics())
+#' manhattan_plot_stored <- create_functional_manhattan_plot(
+#'   con,
+#'   vcf_file_id = 1,  # y_values = NULL uses stored statistics
+#'   enrichment_data = enrichment_results,
+#'   y_label = "P-value"
+#' )
 #'
 #' # Different labeling options for enriched loci
 #' # Use GO term names (default - descriptive but longer)
@@ -141,7 +149,7 @@
 #' }
 #'
 #' @export
-create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichment_data = NULL,
+create_functional_manhattan_plot <- function(con, y_values = NULL, vcf_file_id, enrichment_data = NULL,
                                            y_label = "Statistical Value",
                                            signif_threshold = 0.01,
                                            transform_y = "neg_log10",
@@ -182,10 +190,44 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
     stop("No VCF data found for file_id: ", vcf_file_id)
   }
 
-  # Validate y_values length
-  if (length(y_values) != nrow(vcf_coords)) {
-    stop("Length mismatch: y_values has ", length(y_values),
-         " values but VCF has ", nrow(vcf_coords), " variants")
+  # Handle y_values - either provided or retrieve from stored statistics
+  if (is.null(y_values)) {
+    if (verbose) message("  - Retrieving stored statistics from database...")
+    
+    # Check if stored statistics exist
+    stored_stats <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM locus_statistics")$count
+    if (stored_stats == 0) {
+      stop("No y_values provided and no stored statistics found. Use define_locus_statistics() first or provide y_values.")
+    }
+    
+    # Retrieve statistics matching VCF coordinates
+    stats_query <- DBI::dbGetQuery(con, "
+      SELECT v.vcf_id, v.chromosome, v.position, COALESCE(s.statistic, NA) as statistic
+      FROM vcf_data v
+      LEFT JOIN locus_statistics s ON (v.chromosome = s.chromosome AND v.position = s.position)
+      WHERE v.file_id = ?
+      ORDER BY v.vcf_id
+    ", list(vcf_file_id))
+    
+    # Check for missing statistics
+    missing_stats <- sum(is.na(stats_query$statistic))
+    if (missing_stats > 0) {
+      if (missing_stats == nrow(stats_query)) {
+        stop("No stored statistics match VCF coordinates. Ensure define_locus_statistics() used same coordinate system.")
+      } else {
+        warning("Missing statistics for ", missing_stats, " out of ", nrow(stats_query), " VCF variants. Using NA values.")
+      }
+    }
+    
+    y_values <- stats_query$statistic
+    if (verbose) message("  - Retrieved ", sum(!is.na(y_values)), " stored statistics (", missing_stats, " missing)")
+    
+  } else {
+    # Validate provided y_values length
+    if (length(y_values) != nrow(vcf_coords)) {
+      stop("Length mismatch: y_values has ", length(y_values),
+           " values but VCF has ", nrow(vcf_coords), " variants")
+    }
   }
 
   if (verbose) message("  - Processing ", nrow(vcf_coords), " variants")
@@ -624,7 +666,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
 #' chromosome names from database if available.
 #'
 #' @param con Database connection object
-#' @param y_values Numeric vector of values to plot on y-axis (same order as VCF file variants)
+#' @param y_values Numeric vector of values to plot on y-axis (same order as VCF file variants). If NULL, uses stored statistics from database
 #' @param vcf_file_id Integer. File ID of the VCF file
 #' @param y_label Character. Label for y-axis. Default is "Statistical Value"
 #' @param signif_threshold Numeric. Significance threshold line to draw. Default is 0.01
@@ -658,7 +700,7 @@ create_functional_manhattan_plot <- function(con, y_values, vcf_file_id, enrichm
 #' }
 #'
 #' @export
-create_manhattan_plot <- function(con, y_values, vcf_file_id,
+create_manhattan_plot <- function(con, y_values = NULL, vcf_file_id,
                                  y_label = "Statistical Value",
                                  signif_threshold = 0.01,
                                  transform_y = "neg_log10",

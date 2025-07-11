@@ -6,7 +6,7 @@
 \usage{
 create_manhattan_plot(
   con,
-  y_values,
+  y_values = NULL,
   vcf_file_id,
   y_label = "Statistical Value",
   signif_threshold = 0.01,
@@ -21,7 +21,7 @@ create_manhattan_plot(
 \arguments{
 \item{con}{Database connection object}
 
-\item{y_values}{Numeric vector of values to plot on y-axis (same order as VCF file variants)}
+\item{y_values}{Numeric vector of values to plot on y-axis (same order as VCF file variants). If NULL, uses stored statistics from database}
 
 \item{vcf_file_id}{Integer. File ID of the VCF file}
 

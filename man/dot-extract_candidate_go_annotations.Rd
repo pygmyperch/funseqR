@@ -7,6 +7,8 @@
 .extract_candidate_go_annotations(
   con,
   candidate_loci,
+  vcf_file_id,
+  full_y_values,
   candidate_locus_pvalues,
   include_pvalues,
   ontologies,

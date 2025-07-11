@@ -295,6 +295,31 @@ create_funseq_schema <- function(con, verbose = TRUE) {
     )
   ")
 
+  if (verbose) message("Creating locus_statistics table...")
+  DBI::dbExecute(con, "
+    CREATE TABLE locus_statistics (
+      statistic_id INTEGER PRIMARY KEY,
+      chromosome TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      statistic REAL NOT NULL,
+      created_date TEXT NOT NULL,
+      UNIQUE(chromosome, position)
+    )
+  ")
+
+  if (verbose) message("Creating candidate_loci table...")
+  DBI::dbExecute(con, "
+    CREATE TABLE candidate_loci (
+      candidate_id INTEGER PRIMARY KEY,
+      chromosome TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      method TEXT NOT NULL,
+      threshold REAL,
+      created_date TEXT NOT NULL,
+      UNIQUE(chromosome, position)
+    )
+  ")
+
   # Create indexes
   if (verbose) message("Creating indexes...")
 
@@ -354,6 +379,13 @@ create_funseq_schema <- function(con, verbose = TRUE) {
 
   # UniProt cache indexes
   DBI::dbExecute(con, "CREATE INDEX idx_uniprot_cache_accession ON uniprot_cache (accession)")
+
+  # Locus statistics and candidate loci indexes
+  DBI::dbExecute(con, "CREATE INDEX idx_locus_stats_chrom_pos ON locus_statistics (chromosome, position)")
+  DBI::dbExecute(con, "CREATE INDEX idx_locus_stats_statistic ON locus_statistics (statistic)")
+  DBI::dbExecute(con, "CREATE INDEX idx_candidate_loci_chrom_pos ON candidate_loci (chromosome, position)")
+  DBI::dbExecute(con, "CREATE INDEX idx_candidate_loci_method ON candidate_loci (method)")
+  DBI::dbExecute(con, "CREATE INDEX idx_candidate_loci_threshold ON candidate_loci (threshold)")
 
   if (verbose) message("Schema creation complete.")
 
