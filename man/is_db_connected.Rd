@@ -15,3 +15,4 @@ Logical. TRUE if the connection is open, FALSE otherwise.
 \description{
 Check if a database connection is open
 }
+\keyword{internal}

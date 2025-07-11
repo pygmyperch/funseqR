@@ -19,3 +19,4 @@ The number of VCF entries.
 \description{
 Get a count of VCF entries in the database
 }
+\keyword{internal}

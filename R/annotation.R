@@ -4,7 +4,7 @@
 #'
 #' @param verbose Logical. If TRUE, print progress information
 #' @return Logical. TRUE if the connection is successful
-#' @export
+#' @keywords internal
 test_uniprot_connection <- function(verbose = FALSE) {
   # Use a different test approach that matches our successful configurations
   if (verbose) message("Testing UniProt API connection with working endpoints...")
@@ -155,7 +155,7 @@ test_uniprot_connection <- function(verbose = FALSE) {
 #' \dontrun{
 #' # Connect to database and get BLAST results
 #' con <- connect_funseq_db("analysis.db")
-#' blast_results <- perform_blast(con, vcf_file_id, db_path, db_name, "blastx")
+#' blast_results <- blast_sequences(con, vcf_file_id, db_path, db_name, "blastx")
 #' 
 #' # Balanced annotation (default - recommended for most analyses)
 #' annotation_results <- annotate_blast_results(con, blast_results$blast_param_id)
@@ -571,7 +571,7 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 1, e_value_th
 #'   \item{kegg_refs}{A data frame of KEGG references (if include_kegg is TRUE).}
 #'
 #' @importFrom DBI dbGetQuery
-#' @export
+#' @keywords internal
 get_annotations <- function(con, blast_param_id, include_go = TRUE, include_kegg = TRUE, include_vcf_info = TRUE) {
   # Check if BLAST parameters exist
   params <- DBI::dbGetQuery(
@@ -663,7 +663,7 @@ get_annotations <- function(con, blast_param_id, include_go = TRUE, include_kegg
 #' @return A list containing counts of annotations, GO terms, and KEGG references.
 #'
 #' @importFrom DBI dbGetQuery
-#' @export
+#' @keywords internal
 count_annotations <- function(con, blast_param_id = NULL) {
   if (!is.null(blast_param_id)) {
     # Count annotations for specific BLAST parameters
@@ -736,7 +736,7 @@ ensure_uniprot_cache_table <- function(con, verbose = FALSE) {
 #' @param accession The UniProt accession number
 #' @param debug If TRUE, print debugging information
 #' @return The cached UniProt data or NULL if not found
-#' @export
+#' @keywords internal
 get_cached_uniprot_data <- function(con, accession, debug = FALSE) {
   if (is.null(con) || !DBI::dbIsValid(con)) {
     if (debug) message("Invalid database connection")
@@ -810,7 +810,7 @@ get_cached_uniprot_data <- function(con, accession, debug = FALSE) {
 #' @param response The UniProt API response
 #' @param debug If TRUE, print debugging information
 #' @return TRUE if storage successful, FALSE otherwise
-#' @export
+#' @keywords internal
 store_uniprot_data <- function(con, accession, response, debug = FALSE) {
   # Initialize json_data to a fallback value
   json_data <- paste0('{"accession":"', accession, '","empty":true,"timestamp":"',

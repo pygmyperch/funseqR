@@ -21,7 +21,7 @@
 #' chromosome and position coordinates. This assumes that both datasets
 #' use the same reference genome and coordinate system.
 #'
-#' @export
+#' @keywords internal
 link_candidates_to_annotations <- function(con, candidate_file_id, background_file_id, verbose = TRUE) {
 
   if (verbose) message("Querying database for annotation linkages...")
@@ -91,7 +91,7 @@ link_candidates_to_annotations <- function(con, candidate_file_id, background_fi
 #' str(go_data_orf)
 #' }
 #'
-#' @export
+#' @keywords internal
 extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_file_id, 
                                            blast_param_id = NULL, verbose = TRUE) {
 
@@ -301,7 +301,7 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
 #' head(bp_results)
 #' }
 #'
-#' @export
+#' @keywords internal
 perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_genes = 500, significance_threshold = 0.05, method = "clusterprofiler", verbose = TRUE) {
 
   if (verbose) message("Performing GO enrichment analysis for ontology: ", ontology, " using ", method, " method")
@@ -587,7 +587,7 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
 #'
 #' @return List containing foreground and background KEGG pathway data
 #'
-#' @export
+#' @keywords internal
 extract_kegg_terms_for_enrichment <- function(con, foreground_file_id, background_file_id, 
                                             blast_param_id = NULL, verbose = TRUE) {
 
@@ -763,7 +763,7 @@ extract_kegg_terms_for_enrichment <- function(con, foreground_file_id, backgroun
 #'
 #' @return Data frame with enrichment results, sorted by adjusted p-value
 #'
-#' @export
+#' @keywords internal
 perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, significance_threshold = 0.05, method = "clusterprofiler", verbose = TRUE) {
 
   if (verbose) message("Performing KEGG pathway enrichment analysis using ", method, " method")
@@ -912,44 +912,6 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
   return(funseqr_results)
 }
 
-#' Retrieve stored ORA results
-#'
-#' @param con Database connection object
-#' @param analysis_id Integer. Analysis ID to retrieve
-#' @param significance_filter Character. Filter by significance level. Default is NULL (no filter)
-#'
-#' @return List containing analysis metadata and results
-#'
-#' @export
-get_ora_results <- function(con, analysis_id, significance_filter = NULL) {
-
-  # Get analysis metadata
-  analysis_query <- "SELECT * FROM ora_analyses WHERE analysis_id = ?"
-  analysis_info <- DBI::dbGetQuery(con, analysis_query, list(analysis_id))
-
-  if (nrow(analysis_info) == 0) {
-    stop("No ORA analysis found with ID: ", analysis_id)
-  }
-
-  # Get results
-  results_query <- "
-    SELECT * FROM ora_results
-    WHERE analysis_id = ?
-    ORDER BY p_adjusted, fold_enrichment DESC
-  "
-
-  results <- DBI::dbGetQuery(con, results_query, list(analysis_id))
-
-  # Apply significance filter if requested
-  if (!is.null(significance_filter)) {
-    results <- results[results$significance_level %in% significance_filter, ]
-  }
-
-  return(list(
-    analysis_info = as.list(analysis_info[1, ]),
-    results = results
-  ))
-}
 
 
 
@@ -1153,7 +1115,7 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
 #'
 #' \\strong{Enriched Loci} (\\code{source_type = "enriched_loci"}):
 #' Exports statistically enriched GO terms from ORA analysis with their real statistical p-values.
-#' Uses results from \\code{run_ORA()} analysis.
+#' Uses results from \\code{ora()} analysis.
 #'
 #' \\strong{Input Formats:}
 #' The \\code{candidate_loci} parameter supports multiple input formats:
@@ -1186,48 +1148,48 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
 #' con <- connect_funseq_db("analysis.db")
 #'
 #' # Export all GO annotations (functional landscape summary)
-#' export_revigo_file(con, source_type = "all_annotations",
-#'                    output_file = "all_functions.txt")
+#' export_revigo_input(con, source_type = "all_annotations",
+#'                     output_file = "all_functions.txt")
 #'
 #' # Export candidate loci - automatic y-value extraction (recommended)
-#' export_revigo_file(con, source_type = "candidate_loci",
-#'                    candidate_loci = "candidates.vcf",
-#'                    vcf_file_id = 1,                    # full dataset
-#'                    full_y_values = my_rda_pvalues,    # all SNP p-values
-#'                    include_pvalues = TRUE,
-#'                    output_file = "candidate_functions.txt")
+#' export_revigo_input(con, source_type = "candidate_loci",
+#'                     candidate_loci = "candidates.vcf",
+#'                     vcf_file_id = 1,                    # full dataset
+#'                     full_y_values = my_rda_pvalues,    # all SNP p-values
+#'                     include_pvalues = TRUE,
+#'                     output_file = "candidate_functions.txt")
 #'
 #' # Export candidate loci - direct p-value specification
-#' export_revigo_file(con, source_type = "candidate_loci",
-#'                    candidate_loci = c("LG4:3814415", "LG8:22215908"),
-#'                    candidate_locus_pvalues = c(0.001, 0.003),
-#'                    include_pvalues = TRUE,
-#'                    output_file = "candidate_functions.txt")
+#' export_revigo_input(con, source_type = "candidate_loci",
+#'                     candidate_loci = c("LG4:3814415", "LG8:22215908"),
+#'                     candidate_locus_pvalues = c(0.001, 0.003),
+#'                     include_pvalues = TRUE,
+#'                     output_file = "candidate_functions.txt")
 #'
 #' # Export candidate loci functions without p-values
-#' export_revigo_file(con, source_type = "candidate_loci",
-#'                    candidate_loci = "candidates.vcf",
-#'                    include_pvalues = FALSE,
-#'                    output_file = "candidate_go_terms.txt")
+#' export_revigo_input(con, source_type = "candidate_loci",
+#'                     candidate_loci = "candidates.vcf",
+#'                     include_pvalues = FALSE,
+#'                     output_file = "candidate_go_terms.txt")
 #'
 #' # Export enriched terms from ORA analysis
-#' export_revigo_file(con, source_type = "enriched_loci",
-#'                    analysis_ids = c(1, 2, 3),
-#'                    significance_threshold = 0.01,
-#'                    ontologies = c("BP", "MF"),
-#'                    output_file = "enriched_functions.txt")
+#' export_revigo_input(con, source_type = "enriched_loci",
+#'                     analysis_ids = c(1, 2, 3),
+#'                     significance_threshold = 0.01,
+#'                     ontologies = c("BP", "MF"),
+#'                     output_file = "enriched_functions.txt")
 #' 
 #' # Streamlined workflow with stored data
 #' # Step 1: Define statistics and candidates
 #' define_locus_statistics(con, my_pvalue_data, candidate_threshold = 0.01)
 #' 
 #' # Step 2: Export candidates to ReviGO (uses stored data automatically)
-#' export_revigo_file(con, source_type = "candidate_loci",
-#'                    output_file = "candidates_for_revigo.txt")
+#' export_revigo_input(con, source_type = "candidate_loci",
+#'                     output_file = "candidates_for_revigo.txt")
 #' }
 #'
 #' @export
-export_revigo_file <- function(con, source_type = c("all_annotations", "candidate_loci", "enriched_loci"),
+export_revigo_input <- function(con, source_type = c("all_annotations", "candidate_loci", "enriched_loci"),
                                analysis_ids = NULL, candidate_loci = NULL, 
                                vcf_file_id = NULL, full_y_values = NULL, candidate_locus_pvalues = NULL,
                                include_pvalues = TRUE, significance_threshold = 0.05,
@@ -1311,7 +1273,7 @@ export_revigo_file <- function(con, source_type = c("all_annotations", "candidat
   }
 }
 
-# Helper functions for export_revigo_file()
+# Helper functions for export_revigo_input()
 
 #' Extract all GO annotations from database
 #' @keywords internal

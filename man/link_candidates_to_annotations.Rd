@@ -34,3 +34,4 @@ Links candidate variants to existing functional annotations by matching
 chromosome and position coordinates. This assumes that both datasets
 use the same reference genome and coordinate system.
 }
+\keyword{internal}

@@ -48,3 +48,4 @@ table(consolidated$chromosome)
 }
 
 }
+\keyword{internal}

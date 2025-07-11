@@ -30,3 +30,4 @@ The number of BLAST results imported.
 This function imports BLAST results from a file into the database with proper
 mapping between query sequence IDs and flanking sequence IDs.
 }
+\keyword{internal}

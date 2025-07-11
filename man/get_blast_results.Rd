@@ -29,3 +29,4 @@ A data frame containing the BLAST results.
 \description{
 This function retrieves BLAST results from the database.
 }
+\keyword{internal}

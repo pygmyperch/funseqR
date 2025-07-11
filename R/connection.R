@@ -119,7 +119,7 @@ connect_funseq_db <- function(db_path, verbose = TRUE) {
 #'
 #' @importFrom DBI dbIsValid
 #'
-#' @export
+#' @keywords internal
 is_db_connected <- function(con) {
   return(DBI::dbIsValid(con))
 }
@@ -133,7 +133,7 @@ is_db_connected <- function(con) {
 #'
 #' @importFrom DBI dbDisconnect
 #'
-#' @export
+#' @keywords internal
 close_funseq_db <- function(con, verbose = TRUE) {
   if (DBI::dbIsValid(con)) {
     DBI::dbDisconnect(con)
@@ -153,7 +153,7 @@ close_funseq_db <- function(con, verbose = TRUE) {
 #'
 #' @importFrom DBI dbGetInfo
 #'
-#' @export
+#' @keywords internal
 get_db_path <- function(con) {
   if (!DBI::dbIsValid(con)) {
     stop("Invalid database connection.")

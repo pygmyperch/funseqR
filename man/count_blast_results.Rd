@@ -17,3 +17,4 @@ The number of BLAST results.
 \description{
 Count BLAST results in the database
 }
+\keyword{internal}

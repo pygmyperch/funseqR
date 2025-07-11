@@ -41,3 +41,4 @@ Import a reference genome into the database
 
 This function reads a reference genome file (FASTA) and stores its contents in the database.
 }
+\keyword{internal}

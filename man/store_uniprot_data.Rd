@@ -21,3 +21,4 @@ TRUE if storage successful, FALSE otherwise
 \description{
 Store UniProt data in cache with robust error handling
 }
+\keyword{internal}

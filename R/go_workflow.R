@@ -56,19 +56,19 @@
 #' con <- connect_funseq_db("analysis.db")
 #' 
 #' # Run both GO and KEGG enrichment (default)
-#' results <- run_ORA(con, "candidates.vcf")
+#' results <- ora(con, "candidates.vcf")
 #' 
 #' # Run only GO enrichment
-#' go_results <- run_ORA(con, "candidates.vcf", annotation_type = "GO")
+#' go_results <- ora(con, "candidates.vcf", annotation_type = "GO")
 #' 
 #' # Run only KEGG enrichment
-#' kegg_results <- run_ORA(con, "candidates.vcf", annotation_type = "KEGG")
+#' kegg_results <- ora(con, "candidates.vcf", annotation_type = "KEGG")
 #' 
 #' # Use custom significance threshold
-#' results_lenient <- run_ORA(con, "candidates.vcf", significance_threshold = 0.1)
+#' results_lenient <- ora(con, "candidates.vcf", significance_threshold = 0.1)
 #' 
 #' # Use only ORF-based annotations for both GO and KEGG
-#' results_orf <- run_ORA(con, "candidates.vcf", blast_param_id = 1)
+#' results_orf <- ora(con, "candidates.vcf", blast_param_id = 1)
 #' 
 #' print(results$summary)
 #' print(results$plots$GO_BP_bubble)
@@ -76,7 +76,7 @@
 #' }
 #'
 #' @export
-run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
+ora <- function(con, candidate_vcf_file, background_file_id = NULL,
                    blast_param_id = NULL, annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
                    ontologies = c("BP", "MF", "CC"), 
                    min_genes = 5, max_genes = 500, significance_threshold = 0.05,
@@ -396,7 +396,7 @@ run_ORA <- function(con, candidate_vcf_file, background_file_id = NULL,
 #' Generates R Markdown code that can be included in analysis reports.
 #' Automatically detects candidate and background files and runs the analysis.
 #'
-#' @export
+#' @keywords internal
 generate_go_enrichment_report_section <- function(con, project_id, 
                                                   candidate_file_pattern = "candidate|adaptive|outlier",
                                                   max_terms_plot = 15, include_treemap = TRUE) {
@@ -524,7 +524,7 @@ generate_go_enrichment_report_section <- function(con, project_id,
 #' Extracts loci that are associated with significantly enriched functional terms
 #' from ORA (Over-Representation Analysis) results.
 #'
-#' @param ora_results List. Results from run_ORA() function
+#' @param ora_results List. Results from ora() function
 #' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
 #' @param annotation_types Character vector. Which annotation types to consider: "GO", "KEGG", "Pfam", "InterPro", "eggNOG", or "all". Default is "all"
 #' @param dataset_type Character. Filter by dataset type: "candidate", "background", or "both". Default is "both"
@@ -554,7 +554,7 @@ generate_go_enrichment_report_section <- function(con, project_id,
 #' @examples
 #' \dontrun{
 #' # Run ORA analysis
-#' ora_results <- run_ORA(con, "candidates.vcf", annotation_type = "both")
+#' ora_results <- ora(con, "candidates.vcf", annotation_type = "both")
 #' 
 #' # Get all enriched loci
 #' enriched <- filter_enriched_loci(ora_results)
@@ -572,7 +572,7 @@ generate_go_enrichment_report_section <- function(con, project_id,
 #' print(enriched$summary)
 #' }
 #'
-#' @export
+#' @keywords internal
 filter_enriched_loci <- function(ora_results, significance_threshold = 0.05, 
                                  annotation_types = "all", dataset_type = "both",
                                  return_summary = TRUE, verbose = TRUE) {

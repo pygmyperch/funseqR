@@ -136,7 +136,7 @@ retrieves and caches UniProt data. Subsequent runs will be much faster using cac
 \dontrun{
 # Connect to database and get BLAST results
 con <- connect_funseq_db("analysis.db")
-blast_results <- perform_blast(con, vcf_file_id, db_path, db_name, "blastx")
+blast_results <- blast_sequences(con, vcf_file_id, db_path, db_name, "blastx")
 
 # Balanced annotation (default - recommended for most analyses)
 annotation_results <- annotate_blast_results(con, blast_results$blast_param_id)

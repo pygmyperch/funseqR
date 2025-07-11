@@ -96,3 +96,4 @@ results <- define_locus_statistics(
 }
 
 }
+\keyword{internal}

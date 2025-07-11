@@ -32,3 +32,4 @@ A list containing:
 \description{
 This function retrieves annotations from the database.
 }
+\keyword{internal}

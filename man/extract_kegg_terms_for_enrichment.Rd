@@ -30,3 +30,4 @@ List containing foreground and background KEGG pathway data
 \description{
 Extract KEGG pathways for foreground and background gene sets
 }
+\keyword{internal}

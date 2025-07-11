@@ -22,7 +22,7 @@
 #' commit_transaction(con)
 #' }
 #'
-#' @export
+#' @keywords internal
 begin_transaction <- function(con) {
   DBI::dbExecute(con, "BEGIN TRANSACTION")
   return(invisible(NULL))
@@ -42,7 +42,7 @@ begin_transaction <- function(con) {
 #' commit_transaction(con)
 #' }
 #'
-#' @export
+#' @keywords internal
 commit_transaction <- function(con) {
   DBI::dbExecute(con, "COMMIT")
   return(invisible(NULL))
@@ -62,7 +62,7 @@ commit_transaction <- function(con) {
 #' rollback_transaction(con)
 #' }
 #'
-#' @export
+#' @keywords internal
 rollback_transaction <- function(con) {
   DBI::dbExecute(con, "ROLLBACK")
   return(invisible(NULL))
@@ -113,7 +113,7 @@ rollback_transaction <- function(con) {
 #' close_funseq_db(con)
 #' }
 #'
-#' @export
+#' @keywords internal
 delete_ora_results <- function(con, analysis_id, confirm = TRUE, verbose = TRUE) {
   
   # Validate input
@@ -244,7 +244,7 @@ delete_ora_results <- function(con, analysis_id, confirm = TRUE, verbose = TRUE)
 #' close_funseq_db(con)
 #' }
 #'
-#' @export
+#' @keywords internal
 delete_blast_results <- function(con, blast_param_id, confirm = TRUE, verbose = TRUE) {
   # Check if BLAST parameters exist
   params <- DBI::dbGetQuery(
@@ -327,7 +327,7 @@ delete_blast_results <- function(con, blast_param_id, confirm = TRUE, verbose = 
 #' close_funseq_db(con)
 #' }
 #'
-#' @export
+#' @keywords internal
 delete_vcf_data <- function(con, file_id, confirm = TRUE, verbose = TRUE) {
   # Check if file exists
   file_info <- DBI::dbGetQuery(
@@ -430,7 +430,7 @@ delete_vcf_data <- function(con, file_id, confirm = TRUE, verbose = TRUE) {
 #' close_funseq_db(con)
 #' }
 #'
-#' @export
+#' @keywords internal
 delete_flanking_sequences <- function(con, vcf_file_id, confirm = TRUE, verbose = TRUE) {
   # Check if VCF file exists
   file_info <- DBI::dbGetQuery(
@@ -515,7 +515,7 @@ delete_flanking_sequences <- function(con, vcf_file_id, confirm = TRUE, verbose 
 #' close_funseq_db(con)
 #' }
 #'
-#' @export
+#' @keywords internal
 delete_annotations <- function(con, blast_param_id, confirm = TRUE, verbose = TRUE) {
   # Check if BLAST parameters exist
   params <- DBI::dbGetQuery(
@@ -649,7 +649,7 @@ delete_annotations <- function(con, blast_param_id, confirm = TRUE, verbose = TR
 #' drop_temp_table(con, "temp_analysis_table")
 #' }
 #'
-#' @export
+#' @keywords internal
 drop_temp_table <- function(con, table_name, verbose = FALSE) {
   tryCatch({
     DBI::dbExecute(con, paste0("DROP TABLE IF EXISTS ", table_name))

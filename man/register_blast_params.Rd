@@ -41,3 +41,4 @@ Register BLAST parameters in the database
 
 This function stores BLAST search parameters in the database.
 }
+\keyword{internal}

@@ -15,3 +15,4 @@ Logical. TRUE if the connection is successful
 \description{
 Test connection to the UniProt API using working endpoints
 }
+\keyword{internal}

@@ -34,3 +34,4 @@ Register an input file in the database
 
 This function adds information about an input file to the database.
 }
+\keyword{internal}

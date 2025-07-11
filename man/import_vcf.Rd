@@ -27,3 +27,4 @@ Import a VCF file into the database
 This function reads a VCF file and stores its contents in the database.
 It can be used as an alternative to the original read_vcf function.
 }
+\keyword{internal}

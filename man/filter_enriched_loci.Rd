@@ -14,7 +14,7 @@ filter_enriched_loci(
 )
 }
 \arguments{
-\item{ora_results}{List. Results from run_ORA() function}
+\item{ora_results}{List. Results from ora() function}
 
 \item{significance_threshold}{Numeric. FDR threshold for significance. Default is 0.05}
 
@@ -54,7 +54,7 @@ The function:
 \examples{
 \dontrun{
 # Run ORA analysis
-ora_results <- run_ORA(con, "candidates.vcf", annotation_type = "both")
+ora_results <- ora(con, "candidates.vcf", annotation_type = "both")
 
 # Get all enriched loci
 enriched <- filter_enriched_loci(ora_results)
@@ -73,3 +73,4 @@ print(enriched$summary)
 }
 
 }
+\keyword{internal}

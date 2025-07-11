@@ -33,3 +33,4 @@ Generate GO enrichment report section
 Generates R Markdown code that can be included in analysis reports.
 Automatically detects candidate and background files and runs the analysis.
 }
+\keyword{internal}

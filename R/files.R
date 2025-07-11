@@ -18,7 +18,7 @@
 #' @return The ID of the newly registered file.
 #'
 #' @importFrom DBI dbExecute dbGetQuery
-#' @export
+#' @keywords internal
 register_input_file <- function(con, file_path, file_type, calculate_hash = TRUE, verbose = TRUE) {
 
   # Check if file exists

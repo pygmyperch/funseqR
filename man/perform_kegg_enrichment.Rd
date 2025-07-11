@@ -32,3 +32,4 @@ Data frame with enrichment results, sorted by adjusted p-value
 \description{
 Perform KEGG pathway enrichment analysis
 }
+\keyword{internal}

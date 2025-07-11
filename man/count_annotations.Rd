@@ -17,3 +17,4 @@ A list containing counts of annotations, GO terms, and KEGG references.
 \description{
 Count annotations in the database
 }
+\keyword{internal}

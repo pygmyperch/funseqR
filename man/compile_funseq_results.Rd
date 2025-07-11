@@ -107,7 +107,7 @@ results <- compile_funseq_results(
   export_csv = "step1_annotations.csv"
 )
 
-# Stage 2: Add enrichment results (after running run_ORA)
+# Stage 2: Add enrichment results (after running ora())
 results <- compile_funseq_results(
   con,
   stage = "enrichment", 

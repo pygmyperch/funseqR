@@ -78,7 +78,7 @@
 #'   export_csv = "step1_annotations.csv"
 #' )
 #' 
-#' # Stage 2: Add enrichment results (after running run_ORA)
+#' # Stage 2: Add enrichment results (after running ora())
 #' results <- compile_funseq_results(
 #'   con,
 #'   stage = "enrichment", 
@@ -125,7 +125,7 @@ compile_funseq_results <- function(con,
       stop("'data' parameter is required for enrichment stage. Provide results from annotations stage.")
     }
     if (is.null(analysis_ids)) {
-      stop("'analysis_ids' parameter is required for enrichment stage. Provide ORA analysis IDs from run_ORA().")
+      stop("'analysis_ids' parameter is required for enrichment stage. Provide ORA analysis IDs from ora().")
     }
     result <- .compile_enrichment_stage(con, data, analysis_ids, significance_threshold, verbose)
     

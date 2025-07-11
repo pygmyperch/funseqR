@@ -19,7 +19,7 @@
 #' @importFrom vcfR read.vcfR getCHROM getPOS getID getREF getALT getQUAL getFILTER getINFO
 #' @importFrom DBI dbExecute dbGetQuery
 #' @importFrom progress progress_bar
-#' @export
+#' @keywords internal
 import_vcf <- function(con, vcf_file, verbose = TRUE) {
   # Register input file
   if (verbose) message("Registering VCF file...")
@@ -199,7 +199,7 @@ import_vcf <- function(con, vcf_file, verbose = TRUE) {
 #' @return A data frame containing the VCF data.
 #'
 #' @importFrom DBI dbGetQuery
-#' @export
+#' @keywords internal
 get_vcf_data <- function(con, file_id, limit = NULL, offset = 0) {
   # Check if file exists
   file_info <- DBI::dbGetQuery(
@@ -236,7 +236,7 @@ get_vcf_data <- function(con, file_id, limit = NULL, offset = 0) {
 #' @return A data frame containing the VCF data.
 #'
 #' @importFrom DBI dbGetQuery
-#' @export
+#' @keywords internal
 get_vcf_by_position <- function(con, file_id, chromosome, start_pos, end_pos) {
   # Check if file exists
   file_info <- DBI::dbGetQuery(
@@ -314,7 +314,7 @@ vcf_to_bed <- function(con, file_id, output_file = NULL, verbose = TRUE) {
 #' @return The number of VCF entries.
 #'
 #' @importFrom DBI dbGetQuery
-#' @export
+#' @keywords internal
 count_vcf_entries <- function(con, file_id = NULL, project_id = NULL) {
   if (!is.null(file_id)) {
     # Count entries for a specific file
@@ -376,7 +376,7 @@ count_vcf_entries <- function(con, file_id = NULL, project_id = NULL) {
 #' }
 #'
 #' @importFrom DBI dbGetQuery dbExecute
-#' @export
+#' @keywords internal
 define_chromosomes <- function(con, main_chromosomes = NULL, verbose = TRUE) {
   
   if (!DBI::dbIsValid(con)) {
@@ -551,7 +551,7 @@ get_main_chromosomes <- function(con) {
 #' table(consolidated$chromosome)
 #' }
 #'
-#' @export
+#' @keywords internal
 consolidate_scaffolds <- function(vcf_data, keep_chromosomes, pseudo_name = "US", verbose = FALSE) {
   
   if (!is.data.frame(vcf_data)) {

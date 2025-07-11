@@ -26,3 +26,4 @@ drop_temp_table(con, "temp_analysis_table")
 }
 
 }
+\keyword{internal}

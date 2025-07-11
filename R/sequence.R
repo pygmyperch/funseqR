@@ -23,7 +23,7 @@
 #' @importFrom Biostrings readDNAStringSet
 #' @importFrom DBI dbExecute dbGetQuery
 #' @importFrom progress progress_bar
-#' @export
+#' @keywords internal
 import_reference <- function(con, genome_file, genome_name = NULL, genome_build = NULL, 
                                 store_sequences = TRUE, verbose = TRUE) {
   # Register input file
@@ -288,7 +288,7 @@ get_reference_genome <- function(con, genome_id, as_dna_string_set = TRUE, inclu
 #' @importFrom progress progress_bar
 #' @importFrom Biostrings subseq
 #' @importFrom parallel mclapply
-#' @export
+#' @keywords internal
 import_flanking_seqs <- function(con, vcf_file_id, genome_id, flank_size = 500, 
                                  translate_flanks = FALSE, orf_min_aa = 30, 
                                  orf_return = "nuc", keep_raw_sequence = TRUE,

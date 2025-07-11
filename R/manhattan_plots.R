@@ -91,7 +91,7 @@
 #' )
 #'
 #' # Step 2: Run ORA analysis
-#' ORA_results <- run_ORA(con, "candidates.vcf", annotation_type = "GO")
+#' ORA_results <- ora(con, "candidates.vcf", annotation_type = "GO")
 #'
 #' # Step 3: Add enrichment results
 #' enrichment_results <- compile_funseq_results(
@@ -102,7 +102,7 @@
 #' )
 #'
 #' # Create Manhattan plot with enriched loci highlighted (candidate loci only)
-#' manhattan_plot <- create_functional_manhattan_plot(
+#' manhattan_plot <- manhattan_plot(
 #'   con,
 #'   y_values = my_statistical_values,  # Your p-values, q-values, etc.
 #'   vcf_file_id = 1,
@@ -111,7 +111,7 @@
 #' )
 #' 
 #' # Use stored statistics (after define_locus_statistics())
-#' manhattan_plot_stored <- create_functional_manhattan_plot(
+#' manhattan_plot_stored <- manhattan_plot(
 #'   con,
 #'   vcf_file_id = 1,  # y_values = NULL uses stored statistics
 #'   enrichment_data = enrichment_results,
@@ -120,25 +120,25 @@
 #'
 #' # Different labeling options for enriched loci
 #' # Use GO term names (default - descriptive but longer)
-#' plot_go_names <- create_functional_manhattan_plot(
+#' plot_go_names <- manhattan_plot(
 #'   con, y_values = my_statistical_values, vcf_file_id = 1,
 #'   enrichment_data = enrichment_results, label_type = "go_term"
 #' )
 #'
 #' # Use GO term IDs (compact format for cleaner plots)
-#' plot_go_ids <- create_functional_manhattan_plot(
+#' plot_go_ids <- manhattan_plot(
 #'   con, y_values = my_statistical_values, vcf_file_id = 1,
 #'   enrichment_data = enrichment_results, label_type = "go_id"
 #' )
 #'
 #' # Use gene names (intermediate length)
-#' plot_genes <- create_functional_manhattan_plot(
+#' plot_genes <- manhattan_plot(
 #'   con, y_values = my_statistical_values, vcf_file_id = 1,
 #'   enrichment_data = enrichment_results, label_type = "gene_name"
 #' )
 #'
 #' # Label top 10 candidates with mixed functional/position labels
-#' plot_top_candidates <- create_functional_manhattan_plot(
+#' plot_top_candidates <- manhattan_plot(
 #'   con, y_values = my_statistical_values, vcf_file_id = 1,
 #'   enrichment_data = enrichment_results,
 #'   label_top_candidates = 10, label_type = "gene_name"
@@ -149,7 +149,7 @@
 #' }
 #'
 #' @export
-create_functional_manhattan_plot <- function(con, y_values = NULL, vcf_file_id, enrichment_data = NULL,
+manhattan_plot <- function(con, y_values = NULL, vcf_file_id, enrichment_data = NULL,
                                            y_label = "Statistical Value",
                                            signif_threshold = 0.01,
                                            transform_y = "neg_log10",
@@ -660,75 +660,6 @@ create_functional_manhattan_plot <- function(con, y_values = NULL, vcf_file_id, 
   return(p)
 }
 
-#' Simple Manhattan plot without functional annotation
-#'
-#' Creates a basic Manhattan plot without functional highlighting. Uses consolidated
-#' chromosome names from database if available.
-#'
-#' @param con Database connection object
-#' @param y_values Numeric vector of values to plot on y-axis (same order as VCF file variants). If NULL, uses stored statistics from database
-#' @param vcf_file_id Integer. File ID of the VCF file
-#' @param y_label Character. Label for y-axis. Default is "Statistical Value"
-#' @param signif_threshold Numeric. Significance threshold line to draw. Default is 0.01
-#' @param transform_y Character. Transform y-values: "none", "neg_log10", or "log10". Default is "neg_log10"
-#' @param chr_colors Character vector. Two colors for alternating chromosomes. Default is snapper colors
-#' @param point_size Numeric. Size of points. Default is 1.2
-#' @param numeric_x_labels Logical. Use numeric labels (1,2,3,...,U) instead of chromosome names. Default is FALSE
-#' @param signif_line_color Character. Color for significance threshold line. Default is "red"
-#' @param verbose Logical. Print progress information. Default is TRUE
-#'
-#' @return ggplot2 object
-#'
-#' @examples
-#' \dontrun{
-#' # Basic Manhattan plot
-#' manhattan_plot <- create_manhattan_plot(
-#'   con,
-#'   y_values = rda.simple.pq$q.values,
-#'   vcf_file_id = 1,
-#'   y_label = "RDA q-value"
-#' )
-#'
-#' # Manhattan plot with numeric x-axis labels
-#' manhattan_plot_numeric <- create_manhattan_plot(
-#'   con,
-#'   y_values = rda.simple.pq$q.values,
-#'   vcf_file_id = 1,
-#'   y_label = "RDA q-value",
-#'   numeric_x_labels = TRUE
-#' )
-#' }
-#'
-#' @export
-create_manhattan_plot <- function(con, y_values = NULL, vcf_file_id,
-                                 y_label = "Statistical Value",
-                                 signif_threshold = 0.01,
-                                 transform_y = "neg_log10",
-                                 chr_colors = c("#A1B1CC", "#0E7EC0"),
-                                 point_size = 1.2,
-                                 numeric_x_labels = FALSE,
-                                 signif_line_color = "red",
-                                 verbose = TRUE) {
-
-  # Call the functional version with NULL enrichment data
-  create_functional_manhattan_plot(
-    con = con,
-    y_values = y_values,
-    vcf_file_id = vcf_file_id,
-    enrichment_data = NULL,
-    y_label = y_label,
-    signif_threshold = signif_threshold,
-    transform_y = transform_y,
-    highlight_color = NULL,
-    chr_colors = chr_colors,
-    point_size = point_size,
-    label_type = "position",
-    label_top_candidates = 0,
-    numeric_x_labels = numeric_x_labels,
-    signif_line_color = signif_line_color,
-    verbose = verbose
-  )
-}
 
 # INTERNAL HELPER FUNCTIONS
 

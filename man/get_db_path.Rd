@@ -15,3 +15,4 @@ Character string. The path to the database file.
 \description{
 Get the path of a database from its connection
 }
+\keyword{internal}

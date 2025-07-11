@@ -50,3 +50,4 @@ str(go_data_orf)
 }
 
 }
+\keyword{internal}

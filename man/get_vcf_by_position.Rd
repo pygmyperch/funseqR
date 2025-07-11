@@ -23,3 +23,4 @@ A data frame containing the VCF data.
 \description{
 This function retrieves VCF data for a specific chromosome and position range.
 }
+\keyword{internal}

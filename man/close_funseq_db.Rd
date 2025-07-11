@@ -17,3 +17,4 @@ Logical. TRUE if the connection was successfully closed, FALSE otherwise.
 \description{
 Close a database connection
 }
+\keyword{internal}

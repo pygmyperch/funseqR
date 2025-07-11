@@ -21,7 +21,7 @@
 #' @return The ID of the newly registered BLAST parameters.
 #'
 #' @importFrom DBI dbExecute dbGetQuery
-#' @export
+#' @keywords internal
 register_blast_params <- function(con, blast_type, db_name, db_path,
                            e_value, max_hits, verbose = TRUE) {
 
@@ -83,7 +83,7 @@ list_blast_params <- function(con) {
 #'
 #' @importFrom DBI dbExecute dbGetQuery
 #' @importFrom progress progress_bar
-#' @export
+#' @keywords internal
 import_blast_results <- function(con, blast_param_id, results_file, vcf_file_id, verbose = TRUE) {
   # Check if BLAST parameters exist
   params <- DBI::dbGetQuery(
@@ -364,7 +364,7 @@ import_blast_results <- function(con, blast_param_id, results_file, vcf_file_id,
 #' @importFrom DBI dbExecute dbGetQuery
 #' @importFrom Biostrings writeXStringSet
 #' @export
-perform_blast <- function(con, vcf_file_id, db_path, db_name,
+blast_sequences <- function(con, vcf_file_id, db_path, db_name,
                              blast_type = c("blastn", "blastx", "diamond_blastn", "diamond_blastx"),
                              e_value = 1e-5, max_hits = 5, threads = 1,
                              output_dir = getwd(), taxids = NULL,
@@ -610,7 +610,7 @@ perform_blast <- function(con, vcf_file_id, db_path, db_name,
 #' @return A data frame containing the BLAST results.
 #'
 #' @importFrom DBI dbGetQuery
-#' @export
+#' @keywords internal
 get_blast_results <- function(con, blast_param_id, e_value_threshold = NULL,
                           max_hits_per_query = NULL, include_vcf_info = TRUE) {
   # Check if BLAST parameters exist
@@ -681,7 +681,7 @@ get_blast_results <- function(con, blast_param_id, e_value_threshold = NULL,
 #' @return The number of BLAST results.
 #'
 #' @importFrom DBI dbGetQuery
-#' @export
+#' @keywords internal
 count_blast_results <- function(con, blast_param_id = NULL) {
   if (!is.null(blast_param_id)) {
     # Count results for specific BLAST parameters

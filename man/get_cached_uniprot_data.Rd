@@ -19,3 +19,4 @@ The cached UniProt data or NULL if not found
 \description{
 Get cached UniProt data
 }
+\keyword{internal}
