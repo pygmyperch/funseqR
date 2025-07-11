@@ -352,7 +352,7 @@ get_locus_names <- function(con, file_id, output_file = NULL, verbose = TRUE) {
   # Get chromosome and position data
   vcf_data <- DBI::dbGetQuery(
     con,
-    "SELECT chromosome, position FROM vcf_data WHERE file_id = ? ORDER BY chromosome, position",
+    "SELECT chromosome, position FROM vcf_data WHERE file_id = ? ORDER BY vcf_id",
     params = list(file_id)
   )
   
