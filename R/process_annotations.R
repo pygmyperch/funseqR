@@ -8,7 +8,8 @@
 #' @param stage Character. Analysis stage: "annotations", "enrichment", or "descriptive"
 #' @param data Data.frame. Existing results to enhance (required for "enrichment" and "descriptive" stages)
 #' @param include Character vector. Types of annotations to include: "GO", "KEGG", "Pfam", "InterPro", "eggNOG"
-#' @param candidate_loci Character or data.frame. Candidate loci specification (same as process_annotations)
+#' @param candidate_loci Character or data.frame. Candidate loci specification: "stored" (default) 
+#'   uses candidates from database, or file path/data frame for backwards compatibility
 #' @param blast_param_id Integer. Optional. Specific BLAST parameter set to use
 #' @param analysis_ids Integer vector. ORA analysis IDs to retrieve (for "enrichment" stage)
 #' @param significance_threshold Numeric. FDR threshold for enrichment (default 0.05)
@@ -69,12 +70,11 @@
 #' \dontrun{
 #' # Progressive workflow - build results step by step
 #' 
-#' # Stage 1: Generate base annotation data
+#' # Stage 1: Generate base annotation data (streamlined - uses stored candidates)
 #' results <- compile_funseq_results(
 #'   con, 
 #'   stage = "annotations",
 #'   include = c("GO", "KEGG"),
-#'   candidate_loci = "candidates.vcf",
 #'   export_csv = "step1_annotations.csv"
 #' )
 #' 
@@ -95,6 +95,14 @@
 #' 
 #' # View enrichment summary
 #' table(results$dataset_type, results$enriched)
+#' 
+#' # Backwards compatibility - use VCF file
+#' results_vcf <- compile_funseq_results(
+#'   con, 
+#'   stage = "annotations",
+#'   include = c("GO", "KEGG"),
+#'   candidate_loci = "candidates.vcf"
+#' )
 #' }
 #'
 #' @importFrom dplyr group_by summarise first rowwise ungroup mutate left_join
@@ -104,7 +112,7 @@ compile_funseq_results <- function(con,
                                   stage = c("annotations", "enrichment", "descriptive"),
                                   data = NULL,
                                   include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"),
-                                  candidate_loci = NULL,
+                                  candidate_loci = "stored",
                                   blast_param_id = NULL,
                                   analysis_ids = NULL,
                                   significance_threshold = 0.05,
@@ -271,10 +279,11 @@ compile_funseq_results <- function(con,
     result_data <- .process_eggnog_annotations(con, result_data, base_where, params, verbose)
   }
   
-  # Add candidate loci flagging if requested
-  if (!is.null(candidate_loci)) {
-    if (verbose) message("    - Identifying candidate loci...")
-    candidate_locus_ids <- .identify_candidate_loci(con, candidate_loci, verbose)
+  # Add candidate loci flagging
+  if (verbose) message("    - Identifying candidate loci...")
+  candidate_locus_ids <- .identify_candidate_loci(con, candidate_loci, verbose)
+  
+  if (length(candidate_locus_ids) > 0) {
     result_data$dataset_type <- ifelse(result_data$locus_id %in% candidate_locus_ids, "candidate", "background")
     
     if (verbose) {
@@ -284,6 +293,7 @@ compile_funseq_results <- function(con,
     }
   } else {
     result_data$dataset_type <- "background"
+    if (verbose) message("    - No candidate loci found, all loci marked as background")
   }
   
   # Remove the annotation_ids helper column
@@ -1049,8 +1059,26 @@ compile_funseq_results <- function(con,
   
   # Handle different input types
   if (is.character(candidate_input) && length(candidate_input) == 1) {
-    # Assume it's a file path
-    if (file.exists(candidate_input)) {
+    # Check for stored candidates first
+    if (candidate_input == "stored") {
+      if (verbose) message("    - Using stored candidate loci from database")
+      
+      # Query stored candidates
+      stored_candidates <- DBI::dbGetQuery(con, "
+        SELECT chromosome, position FROM candidate_loci ORDER BY candidate_id
+      ")
+      
+      if (nrow(stored_candidates) == 0) {
+        stop("No candidate loci found in database. Run define_locus_statistics() or define_candidate_loci() first.")
+      }
+      
+      if (verbose) message("    - Found ", nrow(stored_candidates), " stored candidate loci")
+      
+      # Convert coordinates to locus_ids
+      candidate_loci <- .match_coordinates_to_loci(con, stored_candidates, verbose)
+      
+    } else if (file.exists(candidate_input)) {
+      # Assume it's a file path
       # Check file extension
       if (grepl("\\.vcf$", candidate_input, ignore.case = TRUE)) {
         # VCF file - get file_id and extract loci

@@ -9,7 +9,7 @@ compile_funseq_results(
   stage = c("annotations", "enrichment", "descriptive"),
   data = NULL,
   include = c("GO", "KEGG", "Pfam", "InterPro", "eggNOG"),
-  candidate_loci = NULL,
+  candidate_loci = "stored",
   blast_param_id = NULL,
   analysis_ids = NULL,
   significance_threshold = 0.05,
@@ -26,7 +26,8 @@ compile_funseq_results(
 
 \item{include}{Character vector. Types of annotations to include: "GO", "KEGG", "Pfam", "InterPro", "eggNOG"}
 
-\item{candidate_loci}{Character or data.frame. Candidate loci specification (same as process_annotations)}
+\item{candidate_loci}{Character or data.frame. Candidate loci specification: "stored" (default)
+uses candidates from database, or file path/data frame for backwards compatibility}
 
 \item{blast_param_id}{Integer. Optional. Specific BLAST parameter set to use}
 
@@ -98,12 +99,11 @@ This distinction is important because candidate loci drove the enrichment signal
 \dontrun{
 # Progressive workflow - build results step by step
 
-# Stage 1: Generate base annotation data
+# Stage 1: Generate base annotation data (streamlined - uses stored candidates)
 results <- compile_funseq_results(
   con, 
   stage = "annotations",
   include = c("GO", "KEGG"),
-  candidate_loci = "candidates.vcf",
   export_csv = "step1_annotations.csv"
 )
 
@@ -124,6 +124,14 @@ candidate_enriched <- enriched_results[enriched_results$dataset_type == "candida
 
 # View enrichment summary
 table(results$dataset_type, results$enriched)
+
+# Backwards compatibility - use VCF file
+results_vcf <- compile_funseq_results(
+  con, 
+  stage = "annotations",
+  include = c("GO", "KEGG"),
+  candidate_loci = "candidates.vcf"
+)
 }
 
 }

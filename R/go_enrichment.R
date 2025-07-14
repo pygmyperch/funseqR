@@ -97,6 +97,21 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_
 
   if (verbose) message("Extracting GO terms for enrichment analysis...")
 
+  # Handle stored candidates case
+  if (foreground_file_id == "stored") {
+    if (verbose) message("  - Using stored candidate loci from database")
+    
+    # Check if candidates exist
+    candidate_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM candidate_loci")$count
+    if (candidate_count == 0) {
+      stop("No candidate loci found in database. Run define_locus_statistics() or define_candidate_loci() first.")
+    }
+    
+    # Extract GO annotations for stored candidates
+    result <- .extract_stored_candidate_go_annotations(con, background_file_id, blast_param_id, verbose)
+    return(result)
+  }
+
   # First check if foreground file has direct annotations (complete analysis)
   # or if it's a candidate file that needs to use linkage data
   if (is.null(blast_param_id)) {
@@ -592,6 +607,21 @@ extract_kegg_terms_for_enrichment <- function(con, foreground_file_id, backgroun
                                             blast_param_id = NULL, verbose = TRUE) {
 
   if (verbose) message("Extracting KEGG pathways for enrichment analysis...")
+
+  # Handle stored candidates case
+  if (foreground_file_id == "stored") {
+    if (verbose) message("  - Using stored candidate loci from database")
+    
+    # Check if candidates exist
+    candidate_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM candidate_loci")$count
+    if (candidate_count == 0) {
+      stop("No candidate loci found in database. Run define_locus_statistics() or define_candidate_loci() first.")
+    }
+    
+    # Extract KEGG annotations for stored candidates
+    result <- .extract_stored_candidate_kegg_annotations(con, background_file_id, blast_param_id, verbose)
+    return(result)
+  }
 
   # First check if foreground file has direct annotations
   if (is.null(blast_param_id)) {
@@ -1641,5 +1671,217 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
   }
   
   return(candidate_pvalues)
+}
+
+#' Extract GO annotations for stored candidates
+#' @keywords internal
+.extract_stored_candidate_go_annotations <- function(con, background_file_id, blast_param_id = NULL, verbose = TRUE) {
+  
+  if (verbose) message("  - Extracting GO annotations for stored candidates...")
+  
+  # Build base conditions for BLAST filtering
+  blast_condition <- if (!is.null(blast_param_id)) {
+    "AND br.blast_param_id = ?"
+  } else {
+    ""
+  }
+  
+  # Query for candidate (foreground) data - use stored candidates
+  candidate_query <- paste0("
+    SELECT DISTINCT 
+      gt.go_id as term_id,
+      a.uniprot_accession as gene_id,
+      gt.go_term as term_name,
+      gt.go_category as ontology,
+      vd.chromosome,
+      vd.position
+    FROM candidate_loci cl
+    JOIN vcf_data vd ON cl.chromosome = vd.chromosome AND cl.position = vd.position
+    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
+    JOIN annotations a ON br.blast_result_id = a.blast_result_id
+    JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+    WHERE vd.file_id = ?
+    ORDER BY gt.go_id, a.uniprot_accession
+  ")
+  
+  # Execute candidate query
+  candidate_params <- if (!is.null(blast_param_id)) {
+    list(blast_param_id, background_file_id)
+  } else {
+    list(background_file_id)
+  }
+  
+  candidate_data <- DBI::dbGetQuery(con, candidate_query, candidate_params)
+  
+  # Query for background data (same as original function)
+  background_query <- paste0("
+    SELECT DISTINCT 
+      gt.go_id as term_id,
+      a.uniprot_accession as gene_id,
+      gt.go_term as term_name,
+      gt.go_category as ontology,
+      vd.chromosome,
+      vd.position
+    FROM vcf_data vd
+    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
+    JOIN annotations a ON br.blast_result_id = a.blast_result_id
+    JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+    WHERE vd.file_id = ?
+    ORDER BY gt.go_id, a.uniprot_accession
+  ")
+  
+  background_data <- DBI::dbGetQuery(con, background_query, candidate_params)
+  
+  if (verbose) {
+    message("    - Found ", nrow(candidate_data), " candidate GO associations")
+    message("    - Found ", nrow(background_data), " background GO associations")
+  }
+  
+  # Format results same as original function
+  if (nrow(candidate_data) == 0) {
+    warning("No GO annotations found for stored candidate loci")
+    return(list(
+      foreground = list(genes = character(0), terms = character(0)),
+      background = list(genes = character(0), terms = character(0)),
+      term2gene_fg = data.frame(term = character(0), gene = character(0)),
+      term2gene_bg = data.frame(term = character(0), gene = character(0)),
+      gene2name = data.frame(gene = character(0), name = character(0))
+    ))
+  }
+  
+  # Process the data into the expected format
+  fg_genes <- unique(candidate_data$gene_id)
+  fg_terms <- unique(candidate_data$term_id)
+  bg_genes <- unique(background_data$gene_id)
+  bg_terms <- unique(background_data$term_id)
+  
+  term2gene_fg <- candidate_data[, c("term_id", "gene_id")]
+  names(term2gene_fg) <- c("term", "gene")
+  
+  term2gene_bg <- background_data[, c("term_id", "gene_id")]
+  names(term2gene_bg) <- c("term", "gene")
+  
+  # Create gene2name mapping (simplified)
+  all_genes <- unique(c(candidate_data$gene_id, background_data$gene_id))
+  gene2name <- data.frame(
+    gene = all_genes,
+    name = all_genes,  # Use gene ID as name for simplicity
+    stringsAsFactors = FALSE
+  )
+  
+  return(list(
+    foreground = list(genes = fg_genes, terms = fg_terms),
+    background = list(genes = bg_genes, terms = bg_terms),
+    term2gene_fg = term2gene_fg,
+    term2gene_bg = term2gene_bg,
+    gene2name = gene2name
+  ))
+}
+
+#' Extract KEGG annotations for stored candidates
+#' @keywords internal
+.extract_stored_candidate_kegg_annotations <- function(con, background_file_id, blast_param_id = NULL, verbose = TRUE) {
+  
+  if (verbose) message("  - Extracting KEGG annotations for stored candidates...")
+  
+  # Build base conditions for BLAST filtering
+  blast_condition <- if (!is.null(blast_param_id)) {
+    "AND br.blast_param_id = ?"
+  } else {
+    ""
+  }
+  
+  # Query for candidate (foreground) data - use stored candidates
+  candidate_query <- paste0("
+    SELECT DISTINCT 
+      kr.kegg_id as term_id,
+      a.uniprot_accession as gene_id,
+      kr.pathway_name as term_name,
+      vd.chromosome,
+      vd.position
+    FROM candidate_loci cl
+    JOIN vcf_data vd ON cl.chromosome = vd.chromosome AND cl.position = vd.position
+    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
+    JOIN annotations a ON br.blast_result_id = a.blast_result_id
+    JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
+    WHERE vd.file_id = ?
+    ORDER BY kr.kegg_id, a.uniprot_accession
+  ")
+  
+  # Execute candidate query
+  candidate_params <- if (!is.null(blast_param_id)) {
+    list(blast_param_id, background_file_id)
+  } else {
+    list(background_file_id)
+  }
+  
+  candidate_data <- DBI::dbGetQuery(con, candidate_query, candidate_params)
+  
+  # Query for background data
+  background_query <- paste0("
+    SELECT DISTINCT 
+      kr.kegg_id as term_id,
+      a.uniprot_accession as gene_id,
+      kr.pathway_name as term_name,
+      vd.chromosome,
+      vd.position
+    FROM vcf_data vd
+    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
+    JOIN annotations a ON br.blast_result_id = a.blast_result_id
+    JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
+    WHERE vd.file_id = ?
+    ORDER BY kr.kegg_id, a.uniprot_accession
+  ")
+  
+  background_data <- DBI::dbGetQuery(con, background_query, candidate_params)
+  
+  if (verbose) {
+    message("    - Found ", nrow(candidate_data), " candidate KEGG associations")
+    message("    - Found ", nrow(background_data), " background KEGG associations")
+  }
+  
+  # Format results same as original function
+  if (nrow(candidate_data) == 0) {
+    warning("No KEGG annotations found for stored candidate loci")
+    return(list(
+      foreground = list(genes = character(0), terms = character(0)),
+      background = list(genes = character(0), terms = character(0)),
+      term2gene_fg = data.frame(term = character(0), gene = character(0)),
+      term2gene_bg = data.frame(term = character(0), gene = character(0)),
+      gene2name = data.frame(gene = character(0), name = character(0))
+    ))
+  }
+  
+  # Process the data into the expected format
+  fg_genes <- unique(candidate_data$gene_id)
+  fg_terms <- unique(candidate_data$term_id)
+  bg_genes <- unique(background_data$gene_id)
+  bg_terms <- unique(background_data$term_id)
+  
+  term2gene_fg <- candidate_data[, c("term_id", "gene_id")]
+  names(term2gene_fg) <- c("term", "gene")
+  
+  term2gene_bg <- background_data[, c("term_id", "gene_id")]
+  names(term2gene_bg) <- c("term", "gene")
+  
+  # Create gene2name mapping (simplified)
+  all_genes <- unique(c(candidate_data$gene_id, background_data$gene_id))
+  gene2name <- data.frame(
+    gene = all_genes,
+    name = all_genes,  # Use gene ID as name for simplicity
+    stringsAsFactors = FALSE
+  )
+  
+  return(list(
+    foreground = list(genes = fg_genes, terms = fg_terms),
+    background = list(genes = bg_genes, terms = bg_terms),
+    term2gene_fg = term2gene_fg,
+    term2gene_bg = term2gene_bg,
+    gene2name = gene2name
+  ))
 }
 

@@ -6,7 +6,8 @@
 #' Over-Representation Analysis (ORA) workflow for GO and KEGG enrichment
 #'
 #' @param con Database connection object
-#' @param candidate_vcf_file Character. Path to candidate VCF file
+#' @param candidate_vcf_file Character. Candidate specification: "stored" (default) uses candidates 
+#'   from database, or path to candidate VCF file for backwards compatibility
 #' @param background_file_id Integer. File ID of background dataset (or NULL to auto-detect)
 #' @param blast_param_id Integer. Optional. Specific BLAST run ID to use for both datasets.
 #'   If NULL, uses all available annotations. Default is NULL.
@@ -55,20 +56,20 @@
 #' \dontrun{
 #' con <- connect_funseq_db("analysis.db")
 #' 
-#' # Run both GO and KEGG enrichment (default)
-#' results <- ora(con, "candidates.vcf")
+#' # Streamlined workflow - uses stored candidates (default)
+#' results <- ora(con)
 #' 
-#' # Run only GO enrichment
-#' go_results <- ora(con, "candidates.vcf", annotation_type = "GO")
+#' # Run only GO enrichment with stored candidates
+#' go_results <- ora(con, annotation_type = "GO")
 #' 
-#' # Run only KEGG enrichment
-#' kegg_results <- ora(con, "candidates.vcf", annotation_type = "KEGG")
-#' 
-#' # Use custom significance threshold
-#' results_lenient <- ora(con, "candidates.vcf", significance_threshold = 0.1)
+#' # Use custom significance threshold with stored candidates
+#' results_lenient <- ora(con, significance_threshold = 0.1)
 #' 
 #' # Use only ORF-based annotations for both GO and KEGG
-#' results_orf <- ora(con, "candidates.vcf", blast_param_id = 1)
+#' results_orf <- ora(con, blast_param_id = 1)
+#' 
+#' # Backwards compatibility - use VCF file
+#' results_vcf <- ora(con, candidate_vcf_file = "candidates.vcf")
 #' 
 #' print(results$summary)
 #' print(results$plots$GO_BP_bubble)
@@ -76,7 +77,7 @@
 #' }
 #'
 #' @export
-ora <- function(con, candidate_vcf_file, background_file_id = NULL,
+ora <- function(con, candidate_vcf_file = "stored", background_file_id = NULL,
                    blast_param_id = NULL, annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
                    ontologies = c("BP", "MF", "CC"), 
                    min_genes = 5, max_genes = 500, significance_threshold = 0.05,
@@ -121,20 +122,39 @@ ora <- function(con, candidate_vcf_file, background_file_id = NULL,
     if (verbose) message("  - Using background file: ", background_files$file_name[1], " (ID: ", background_file_id, ")")
   }
   
-  # Step 1: Import candidate loci (if needed) and get file info
+  # Step 1: Process candidate loci
   if (verbose) message("\n=== Step 1: Processing Candidate Loci ===")
   
-  # Check if it's a file path or existing file ID
-  if (is.character(candidate_vcf_file) && file.exists(candidate_vcf_file)) {
-    # Import candidate VCF file
+  # Handle stored candidates (streamlined workflow)
+  if (candidate_vcf_file == "stored") {
+    if (verbose) message("  - Using stored candidate loci from database")
+    
+    # Check if candidates exist in database
+    candidate_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM candidate_loci")$count
+    if (candidate_count == 0) {
+      stop("No candidate loci found in database. Please run define_locus_statistics() with a candidate_threshold or define_candidate_loci() first.")
+    }
+    
+    if (verbose) message("  - Found ", candidate_count, " stored candidate loci")
+    
+    # For stored candidates, we'll use a special marker and handle this in the enrichment functions
+    candidate_file_id <- "stored"
+    candidate_import <- list(file_id = "stored", vcf_count = candidate_count)
+    
+  } else if (is.character(candidate_vcf_file) && file.exists(candidate_vcf_file)) {
+    # Import candidate VCF file (backwards compatibility)
+    if (verbose) message("  - Importing candidate VCF file: ", candidate_vcf_file)
     candidate_import <- import_vcf(con, candidate_vcf_file)
     candidate_file_id <- candidate_import$file_id
+    
   } else if (is.numeric(candidate_vcf_file)) {
-    # Use existing file ID
+    # Use existing file ID (backwards compatibility)
+    if (verbose) message("  - Using existing file ID: ", candidate_vcf_file)
     candidate_file_id <- candidate_vcf_file
     candidate_import <- list(file_id = candidate_file_id)
+    
   } else {
-    stop("candidate_vcf_file must be a valid file path or existing file ID")
+    stop("candidate_vcf_file must be 'stored', a valid file path, or existing file ID")
   }
   
   # Step 2: Extract annotation data and perform enrichment

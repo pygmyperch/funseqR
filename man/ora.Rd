@@ -6,7 +6,7 @@
 \usage{
 ora(
   con,
-  candidate_vcf_file,
+  candidate_vcf_file = "stored",
   background_file_id = NULL,
   blast_param_id = NULL,
   annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
@@ -23,7 +23,8 @@ ora(
 \arguments{
 \item{con}{Database connection object}
 
-\item{candidate_vcf_file}{Character. Path to candidate VCF file}
+\item{candidate_vcf_file}{Character. Candidate specification: "stored" (default) uses candidates
+from database, or path to candidate VCF file for backwards compatibility}
 
 \item{background_file_id}{Integer. File ID of background dataset (or NULL to auto-detect)}
 
@@ -93,20 +94,20 @@ dataset, with proper labeling of candidate vs. background loci (no duplicates).
 \dontrun{
 con <- connect_funseq_db("analysis.db")
 
-# Run both GO and KEGG enrichment (default)
-results <- ora(con, "candidates.vcf")
+# Streamlined workflow - uses stored candidates (default)
+results <- ora(con)
 
-# Run only GO enrichment
-go_results <- ora(con, "candidates.vcf", annotation_type = "GO")
+# Run only GO enrichment with stored candidates
+go_results <- ora(con, annotation_type = "GO")
 
-# Run only KEGG enrichment
-kegg_results <- ora(con, "candidates.vcf", annotation_type = "KEGG")
-
-# Use custom significance threshold
-results_lenient <- ora(con, "candidates.vcf", significance_threshold = 0.1)
+# Use custom significance threshold with stored candidates
+results_lenient <- ora(con, significance_threshold = 0.1)
 
 # Use only ORF-based annotations for both GO and KEGG
-results_orf <- ora(con, "candidates.vcf", blast_param_id = 1)
+results_orf <- ora(con, blast_param_id = 1)
+
+# Backwards compatibility - use VCF file
+results_vcf <- ora(con, candidate_vcf_file = "candidates.vcf")
 
 print(results$summary)
 print(results$plots$GO_BP_bubble)
