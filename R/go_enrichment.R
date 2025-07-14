@@ -856,7 +856,8 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
   # Filter pathways
   pathways <- kegg_data$all_pathways
   
-  if (nrow(pathways) == 0) {
+  # Check for NULL or empty pathways
+  if (is.null(pathways) || nrow(pathways) == 0) {
     return(list(term2gene = data.frame(term = character(0), gene = character(0)),
                 term2name = data.frame(term = character(0), name = character(0))))
   }
