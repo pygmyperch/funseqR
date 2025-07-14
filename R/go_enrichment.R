@@ -485,7 +485,8 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
   # Filter GO terms by category
   ontology_terms <- go_data$all_go_terms[go_data$all_go_terms$go_category == category_code, ]
   
-  if (nrow(ontology_terms) == 0) {
+  # Check for NULL or empty result
+  if (is.null(ontology_terms) || nrow(ontology_terms) == 0) {
     return(list(term2gene = data.frame(term = character(0), gene = character(0)),
                 term2name = data.frame(term = character(0), name = character(0))))
   }
