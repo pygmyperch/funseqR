@@ -920,9 +920,15 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
   
   # Identify candidate loci from the candidate file using helper function
   if (verbose) message("    - Identifying candidate loci...")
-  candidate_file_query <- "SELECT file_name FROM input_files WHERE file_id = ?"
-  candidate_file_name <- DBI::dbGetQuery(con, candidate_file_query, list(candidate_file_id))$file_name[1]
-  candidate_locus_ids <- .identify_candidate_loci(con, candidate_file_name, verbose = verbose)
+  
+  # Handle stored candidates case
+  if (candidate_file_id == "stored") {
+    candidate_locus_ids <- .identify_candidate_loci(con, "stored", verbose = verbose)
+  } else {
+    candidate_file_query <- "SELECT file_name FROM input_files WHERE file_id = ?"
+    candidate_file_name <- DBI::dbGetQuery(con, candidate_file_query, list(candidate_file_id))$file_name[1]
+    candidate_locus_ids <- .identify_candidate_loci(con, candidate_file_name, verbose = verbose)
+  }
   
   if (verbose) message("    - Found ", length(candidate_locus_ids), " candidate loci out of ", 
                        length(unique(locus_data$locus_id)), " total loci")
