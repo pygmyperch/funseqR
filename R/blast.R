@@ -28,28 +28,38 @@ register_blast_params <- function(con, blast_type, db_name, db_path,
   # Validate blast_type
   blast_type <- match.arg(blast_type, c("blastn", "blastx", "diamond_blastn", "diamond_blastx"))
 
-  # Register BLAST parameters
-  current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  # For "one database = one analysis" model, always use blast_param_id = 1
+  # Check if blast_parameters record exists, if not create it
+  existing_params <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM blast_parameters WHERE blast_param_id = 1")$count
 
-  DBI::dbExecute(
-    con,
-    "INSERT INTO blast_parameters (blast_type, db_name, db_path, e_value, max_hits, execution_date)
-     VALUES (?, ?, ?, ?, ?, ?)",
-    params = list(blast_type, db_name, db_path, e_value, max_hits, current_time)
-  )
+  if (existing_params == 0) {
+    # Create the single blast_parameters record with ID = 1
+    current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    
+    DBI::dbExecute(
+      con,
+      "INSERT INTO blast_parameters (blast_param_id, blast_type, db_name, db_path, e_value, max_hits, execution_date)
+       VALUES (1, ?, ?, ?, ?, ?, ?)",
+      params = list(blast_type, db_name, db_path, e_value, max_hits, current_time)
+    )
+    
+    if (verbose) message("Created BLAST parameters record with ID 1")
+  } else {
+    # Update existing record with current parameters
+    current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    
+    DBI::dbExecute(
+      con,
+      "UPDATE blast_parameters 
+       SET blast_type = ?, db_name = ?, db_path = ?, e_value = ?, max_hits = ?, execution_date = ?
+       WHERE blast_param_id = 1",
+      params = list(blast_type, db_name, db_path, e_value, max_hits, current_time)
+    )
+    
+    if (verbose) message("Updated BLAST parameters record with ID 1")
+  }
 
-  # Get the ID of the newly registered parameters
-  param_id <- DBI::dbGetQuery(
-    con,
-    "SELECT blast_param_id FROM blast_parameters
-     WHERE execution_date = ?
-     ORDER BY blast_param_id DESC LIMIT 1",
-    params = list(current_time)
-  )$blast_param_id[1]
-
-  if (verbose) message("Registered BLAST parameters with ID ", param_id)
-
-  return(param_id)
+  return(1L)
 }
 
 #' List all BLAST parameters in the database

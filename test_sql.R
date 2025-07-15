@@ -17,7 +17,8 @@ analysis_query <- "
 "
 
 # Test parameters (exactly as they would be in the function)
-db_blast_param_id <- NULL
+# For "one database = one analysis" model, always use blast_param_id = 1
+db_blast_param_id <- 1L
 db_annotation_type <- "GO"
 db_term_type <- "BP"
 timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")

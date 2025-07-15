@@ -993,8 +993,8 @@ store_ora_results <- function(con,
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   "
   
-  # For stored candidates workflow, blast_param_id is always NULL (one database = one analysis)
-  db_blast_param_id <- NULL
+  # For "one database = one analysis" model, always use blast_param_id = 1
+  db_blast_param_id <- 1L
   
   # Ensure all parameters are scalars
   total_fg <- if(nrow(enrichment_results) > 0) as.integer(enrichment_results$total_foreground[1]) else 0L
