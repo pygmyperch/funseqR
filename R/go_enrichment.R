@@ -108,7 +108,7 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id,
     }
     
     # Extract GO annotations for stored candidates
-    result <- .extract_stored_candidate_go_annotations(con, background_file_id, blast_param_id, verbose)
+    result <- .extract_stored_candidate_go_annotations(con, blast_param_id, verbose)
     return(result)
   }
 
@@ -620,7 +620,7 @@ extract_kegg_terms_for_enrichment <- function(con, foreground_file_id,
     }
     
     # Extract KEGG annotations for stored candidates
-    result <- .extract_stored_candidate_kegg_annotations(con, background_file_id, blast_param_id, verbose)
+    result <- .extract_stored_candidate_kegg_annotations(con, blast_param_id, verbose)
     return(result)
   }
 
@@ -1692,7 +1692,7 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
 
 #' Extract GO annotations for stored candidates
 #' @keywords internal
-.extract_stored_candidate_go_annotations <- function(con, background_file_id, blast_param_id = NULL, verbose = TRUE) {
+.extract_stored_candidate_go_annotations <- function(con, blast_param_id = NULL, verbose = TRUE) {
   
   if (verbose) message("  - Extracting GO annotations for stored candidates...")
   
@@ -1808,7 +1808,7 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
 
 #' Extract KEGG annotations for stored candidates
 #' @keywords internal
-.extract_stored_candidate_kegg_annotations <- function(con, background_file_id, blast_param_id = NULL, verbose = TRUE) {
+.extract_stored_candidate_kegg_annotations <- function(con, blast_param_id = NULL, verbose = TRUE) {
   
   if (verbose) message("  - Extracting KEGG annotations for stored candidates...")
   

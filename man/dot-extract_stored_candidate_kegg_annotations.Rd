@@ -6,7 +6,6 @@
 \usage{
 .extract_stored_candidate_kegg_annotations(
   con,
-  background_file_id,
   blast_param_id = NULL,
   verbose = TRUE
 )
