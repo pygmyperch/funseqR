@@ -7,7 +7,6 @@
 ora(
   con,
   candidate_vcf_file = "stored",
-  blast_param_id = NULL,
   annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
   ontologies = c("BP", "MF", "CC"),
   min_genes = 5,
@@ -24,9 +23,6 @@ ora(
 
 \item{candidate_vcf_file}{Character. Candidate specification: "stored" (default) uses candidates
 from database, or path to candidate VCF file for backwards compatibility}
-
-\item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets.
-If NULL, uses all available annotations. Default is NULL.}
 
 \item{annotation_type}{Character. Type of annotations to analyze: "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "both", or "all". Default is "both"}
 
@@ -45,6 +41,9 @@ If NULL, uses all available annotations. Default is NULL.}
 \item{create_plots}{Logical. Generate visualization plots. Default is TRUE}
 
 \item{verbose}{Logical. Print progress information. Default is TRUE}
+
+\item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets.
+If NULL, uses all available annotations. Default is NULL.}
 }
 \value{
 List containing all analysis results, plots, locus information, and summary tables:

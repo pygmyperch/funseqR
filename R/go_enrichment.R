@@ -92,8 +92,7 @@ link_candidates_to_annotations <- function(con, candidate_file_id, background_fi
 #' }
 #'
 #' @keywords internal
-extract_go_terms_for_enrichment <- function(con, foreground_file_id, 
-                                           blast_param_id = NULL, verbose = TRUE) {
+extract_go_terms_for_enrichment <- function(con, foreground_file_id, verbose = TRUE) {
 
   if (verbose) message("Extracting GO terms for enrichment analysis...")
 
@@ -108,7 +107,7 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id,
     }
     
     # Extract GO annotations for stored candidates
-    result <- .extract_stored_candidate_go_annotations(con, blast_param_id, verbose)
+    result <- .extract_stored_candidate_go_annotations(con, verbose)
     return(result)
   }
 
@@ -604,8 +603,7 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
 #' @return List containing foreground and background KEGG pathway data
 #'
 #' @keywords internal
-extract_kegg_terms_for_enrichment <- function(con, foreground_file_id, 
-                                            blast_param_id = NULL, verbose = TRUE) {
+extract_kegg_terms_for_enrichment <- function(con, foreground_file_id, verbose = TRUE) {
 
   if (verbose) message("Extracting KEGG pathways for enrichment analysis...")
 
@@ -620,7 +618,7 @@ extract_kegg_terms_for_enrichment <- function(con, foreground_file_id,
     }
     
     # Extract KEGG annotations for stored candidates
-    result <- .extract_stored_candidate_kegg_annotations(con, blast_param_id, verbose)
+    result <- .extract_stored_candidate_kegg_annotations(con, verbose)
     return(result)
   }
 
@@ -964,7 +962,7 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
 #'
 store_ora_results <- function(con,
                              enrichment_results, annotation_type, term_type, parameters = NULL, method = "clusterprofiler", 
-                             blast_param_id = NULL, verbose = TRUE) {
+                             verbose = TRUE) {
 
   if (verbose) message("Storing ", annotation_type, " ", term_type, " enrichment results in database...")
 
@@ -995,8 +993,8 @@ store_ora_results <- function(con,
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   "
   
-  # Ensure blast_param_id is scalar if not NULL
-  db_blast_param_id <- if(is.null(blast_param_id)) NULL else as.integer(blast_param_id[1])
+  # For stored candidates workflow, blast_param_id is always NULL (one database = one analysis)
+  db_blast_param_id <- NULL
   
   # Ensure all parameters are scalars
   total_fg <- if(nrow(enrichment_results) > 0) as.integer(enrichment_results$total_foreground[1]) else 0L
@@ -1692,19 +1690,12 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
 
 #' Extract GO annotations for stored candidates
 #' @keywords internal
-.extract_stored_candidate_go_annotations <- function(con, blast_param_id = NULL, verbose = TRUE) {
+.extract_stored_candidate_go_annotations <- function(con, verbose = TRUE) {
   
   if (verbose) message("  - Extracting GO annotations for stored candidates...")
   
-  # Build base conditions for BLAST filtering
-  blast_condition <- if (!is.null(blast_param_id)) {
-    "AND br.blast_param_id = ?"
-  } else {
-    ""
-  }
-  
   # Query for candidate (foreground) data - use stored candidates
-  candidate_query <- paste0("
+  candidate_query <- "
     SELECT DISTINCT
       a.uniprot_accession,
       gt.go_id,
@@ -1714,22 +1705,15 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
     FROM candidate_loci cl
     JOIN vcf_data vd ON cl.chromosome = vd.chromosome AND cl.position = vd.position
     JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
-    JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN go_terms gt ON a.annotation_id = gt.annotation_id
-  ")
+  "
   
-  # Execute candidate query
-  candidate_params <- if (!is.null(blast_param_id)) {
-    list(blast_param_id)
-  } else {
-    list()
-  }
-  
-  foreground_go <- DBI::dbGetQuery(con, candidate_query, candidate_params)
+  foreground_go <- DBI::dbGetQuery(con, candidate_query)
   
   # Query for background data - all annotations excluding candidates
-  background_query <- paste0("
+  background_query <- "
     SELECT DISTINCT
       a.uniprot_accession,
       gt.go_id,
@@ -1738,16 +1722,16 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
       gt.go_evidence
     FROM vcf_data vd
     JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
-    JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN go_terms gt ON a.annotation_id = gt.annotation_id
     WHERE NOT EXISTS (
       SELECT 1 FROM candidate_loci cl 
       WHERE cl.chromosome = vd.chromosome AND cl.position = vd.position
     )
-  ")
+  "
   
-  background_go <- DBI::dbGetQuery(con, background_query, candidate_params)
+  background_go <- DBI::dbGetQuery(con, background_query)
   
   if (verbose) {
     message("    - Found ", nrow(foreground_go), " candidate GO associations")
@@ -1810,19 +1794,12 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
 
 #' Extract KEGG annotations for stored candidates
 #' @keywords internal
-.extract_stored_candidate_kegg_annotations <- function(con, blast_param_id = NULL, verbose = TRUE) {
+.extract_stored_candidate_kegg_annotations <- function(con, verbose = TRUE) {
   
   if (verbose) message("  - Extracting KEGG annotations for stored candidates...")
   
-  # Build base conditions for BLAST filtering
-  blast_condition <- if (!is.null(blast_param_id)) {
-    "AND br.blast_param_id = ?"
-  } else {
-    ""
-  }
-  
   # Query for candidate (foreground) data - use stored candidates
-  candidate_query <- paste0("
+  candidate_query <- "
     SELECT DISTINCT
       a.uniprot_accession,
       kr.kegg_id,
@@ -1830,38 +1807,31 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
     FROM candidate_loci cl
     JOIN vcf_data vd ON cl.chromosome = vd.chromosome AND cl.position = vd.position
     JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
-    JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
-  ")
+  "
   
-  # Execute candidate query
-  candidate_params <- if (!is.null(blast_param_id)) {
-    list(blast_param_id)
-  } else {
-    list()
-  }
-  
-  foreground_kegg <- DBI::dbGetQuery(con, candidate_query, candidate_params)
+  foreground_kegg <- DBI::dbGetQuery(con, candidate_query)
   
   # Query for background data - all annotations excluding candidates
-  background_query <- paste0("
+  background_query <- "
     SELECT DISTINCT
       a.uniprot_accession,
       kr.kegg_id,
       kr.pathway_name
     FROM vcf_data vd
     JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
-    JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
     WHERE NOT EXISTS (
       SELECT 1 FROM candidate_loci cl 
       WHERE cl.chromosome = vd.chromosome AND cl.position = vd.position
     )
-  ")
+  "
   
-  background_kegg <- DBI::dbGetQuery(con, background_query, candidate_params)
+  background_kegg <- DBI::dbGetQuery(con, background_query)
   
   if (verbose) {
     message("    - Found ", nrow(foreground_kegg), " candidate KEGG associations")

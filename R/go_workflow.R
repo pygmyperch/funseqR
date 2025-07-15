@@ -77,7 +77,7 @@
 #'
 #' @export
 ora <- function(con, candidate_vcf_file = "stored",
-                   blast_param_id = NULL, annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
+                   annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
                    ontologies = c("BP", "MF", "CC"), 
                    min_genes = 5, max_genes = 500, significance_threshold = 0.05,
                    method = "clusterprofiler", store_results = TRUE, create_plots = TRUE, verbose = TRUE) {
@@ -87,18 +87,7 @@ ora <- function(con, candidate_vcf_file = "stored",
   
   if (verbose) message("=== Starting Over-Representation Analysis (ORA) ===")
   if (verbose) message("Annotation types: ", annotation_type)
-  
-  # Report BLAST run configuration
-  if (!is.null(blast_param_id)) {
-    if (verbose) {
-      message("BLAST run filtering:")
-      message("  - Using BLAST run ID: ", blast_param_id)
-    }
-  } else {
-    if (verbose) {
-      message("Using all available annotations")
-    }
-  }
+  if (verbose) message("Using all available annotations (one database = one analysis project)")
   
   # Note: Background data comes from the same annotation database, no file needed
   
@@ -153,8 +142,7 @@ ora <- function(con, candidate_vcf_file = "stored",
   
   if (run_go) {
     if (verbose) message("  - Extracting GO terms...")
-    go_data <- extract_go_terms_for_enrichment(con, candidate_file_id, 
-                                             blast_param_id = blast_param_id, verbose = verbose)
+    go_data <- extract_go_terms_for_enrichment(con, candidate_file_id, verbose = verbose)
     annotation_data[["GO"]] <- go_data
     
     if (length(go_data$foreground$genes) == 0) {
@@ -182,7 +170,6 @@ ora <- function(con, candidate_vcf_file = "stored",
             results, "GO", ontology, 
             parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
             method = method,
-            blast_param_id = blast_param_id,
             verbose = verbose
           )
           go_ids[[ontology]] <- analysis_id
@@ -196,8 +183,7 @@ ora <- function(con, candidate_vcf_file = "stored",
   
   if (run_kegg) {
     if (verbose) message("  - Extracting KEGG pathways...")
-    kegg_data <- extract_kegg_terms_for_enrichment(con, candidate_file_id, 
-                                                 blast_param_id = blast_param_id, verbose = verbose)
+    kegg_data <- extract_kegg_terms_for_enrichment(con, candidate_file_id, verbose = verbose)
     annotation_data[["KEGG"]] <- kegg_data
     
     if (length(kegg_data$foreground$genes) == 0) {
@@ -220,7 +206,6 @@ ora <- function(con, candidate_vcf_file = "stored",
           kegg_results, "KEGG", "PATHWAY", 
           parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
           method = method,
-          blast_param_id = blast_param_id,
           verbose = verbose
         )
         enrichment_ids[["KEGG"]] <- list(PATHWAY = analysis_id)

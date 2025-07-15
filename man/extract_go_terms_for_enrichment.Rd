@@ -4,12 +4,7 @@
 \alias{extract_go_terms_for_enrichment}
 \title{Extract GO terms for foreground and background gene sets}
 \usage{
-extract_go_terms_for_enrichment(
-  con,
-  foreground_file_id,
-  blast_param_id = NULL,
-  verbose = TRUE
-)
+extract_go_terms_for_enrichment(con, foreground_file_id, verbose = TRUE)
 }
 \arguments{
 \item{con}{Database connection object}
@@ -17,10 +12,10 @@ extract_go_terms_for_enrichment(
 \item{foreground_file_id}{Character. Candidate specification: "stored" uses stored candidates,
 or integer file ID for backwards compatibility}
 
+\item{verbose}{Logical. Print progress information. Default is TRUE}
+
 \item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets.
 If NULL, uses all available annotations. Default is NULL.}
-
-\item{verbose}{Logical. Print progress information. Default is TRUE}
 }
 \value{
 List containing foreground and background GO term data

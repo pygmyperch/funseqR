@@ -4,11 +4,7 @@
 \alias{.extract_stored_candidate_kegg_annotations}
 \title{Extract KEGG annotations for stored candidates}
 \usage{
-.extract_stored_candidate_kegg_annotations(
-  con,
-  blast_param_id = NULL,
-  verbose = TRUE
-)
+.extract_stored_candidate_kegg_annotations(con, verbose = TRUE)
 }
 \description{
 Extract KEGG annotations for stored candidates

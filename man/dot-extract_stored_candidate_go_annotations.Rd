@@ -4,11 +4,7 @@
 \alias{.extract_stored_candidate_go_annotations}
 \title{Extract GO annotations for stored candidates}
 \usage{
-.extract_stored_candidate_go_annotations(
-  con,
-  blast_param_id = NULL,
-  verbose = TRUE
-)
+.extract_stored_candidate_go_annotations(con, verbose = TRUE)
 }
 \description{
 Extract GO annotations for stored candidates

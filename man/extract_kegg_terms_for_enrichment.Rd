@@ -4,12 +4,7 @@
 \alias{extract_kegg_terms_for_enrichment}
 \title{Extract KEGG pathways for foreground and background gene sets}
 \usage{
-extract_kegg_terms_for_enrichment(
-  con,
-  foreground_file_id,
-  blast_param_id = NULL,
-  verbose = TRUE
-)
+extract_kegg_terms_for_enrichment(con, foreground_file_id, verbose = TRUE)
 }
 \arguments{
 \item{con}{Database connection object}
@@ -17,10 +12,10 @@ extract_kegg_terms_for_enrichment(
 \item{foreground_file_id}{Character. Candidate specification: "stored" uses stored candidates,
 or integer file ID for backwards compatibility}
 
+\item{verbose}{Logical. Print progress information. Default is TRUE}
+
 \item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets.
 If NULL, uses all available annotations. Default is NULL.}
-
-\item{verbose}{Logical. Print progress information. Default is TRUE}
 }
 \value{
 List containing foreground and background KEGG pathway data

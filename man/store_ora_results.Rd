@@ -11,7 +11,6 @@ store_ora_results(
   term_type,
   parameters = NULL,
   method = "clusterprofiler",
-  blast_param_id = NULL,
   verbose = TRUE
 )
 }
@@ -28,9 +27,9 @@ store_ora_results(
 
 \item{method}{Character. Enrichment method used. Default is "clusterprofiler"}
 
-\item{blast_param_id}{Integer. Optional BLAST run ID used. Default is NULL}
-
 \item{verbose}{Logical. Print progress information. Default is TRUE}
+
+\item{blast_param_id}{Integer. Optional BLAST run ID used. Default is NULL}
 }
 \value{
 Integer. The analysis_id of the stored analysis
