@@ -6,7 +6,6 @@
 \usage{
 store_ora_results(
   con,
-  background_file_id,
   enrichment_results,
   annotation_type,
   term_type,
@@ -18,8 +17,6 @@ store_ora_results(
 }
 \arguments{
 \item{con}{Database connection object}
-
-\item{background_file_id}{Integer. File ID of background dataset}
 
 \item{enrichment_results}{Data frame. Results from perform_go_enrichment() or perform_kegg_enrichment()}
 

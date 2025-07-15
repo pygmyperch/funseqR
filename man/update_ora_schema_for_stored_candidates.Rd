@@ -19,9 +19,9 @@ Centralized functions for database deletion, transaction management, and cleanup
 These functions provide safe, consistent interfaces for managing funseqR database contents.
 }
 \details{
-Update database schema to remove foreground_file_id from ORA analyses
+Update database schema to remove file IDs from ORA analyses
 
-Updates the ora_analyses table to remove the foreground_file_id column completely,
-since the stored candidates workflow doesn't use file IDs for candidates.
-This eliminates the need to store NULL values for unused fields.
+Updates the ora_analyses table to remove both foreground_file_id and background_file_id
+columns completely, since the stored candidates workflow doesn't use file IDs at all.
+Both foreground and background data come from the same annotations database.
 }

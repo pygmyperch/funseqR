@@ -7,7 +7,6 @@
 extract_kegg_terms_for_enrichment(
   con,
   foreground_file_id,
-  background_file_id,
   blast_param_id = NULL,
   verbose = TRUE
 )
@@ -15,9 +14,8 @@ extract_kegg_terms_for_enrichment(
 \arguments{
 \item{con}{Database connection object}
 
-\item{foreground_file_id}{Integer. File ID of candidate/foreground dataset}
-
-\item{background_file_id}{Integer. File ID of background dataset}
+\item{foreground_file_id}{Character. Candidate specification: "stored" uses stored candidates,
+or integer file ID for backwards compatibility}
 
 \item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets.
 If NULL, uses all available annotations. Default is NULL.}

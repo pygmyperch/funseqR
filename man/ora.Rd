@@ -7,7 +7,6 @@
 ora(
   con,
   candidate_vcf_file = "stored",
-  background_file_id = NULL,
   blast_param_id = NULL,
   annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
   ontologies = c("BP", "MF", "CC"),
@@ -25,8 +24,6 @@ ora(
 
 \item{candidate_vcf_file}{Character. Candidate specification: "stored" (default) uses candidates
 from database, or path to candidate VCF file for backwards compatibility}
-
-\item{background_file_id}{Integer. File ID of background dataset (or NULL to auto-detect)}
 
 \item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets.
 If NULL, uses all available annotations. Default is NULL.}

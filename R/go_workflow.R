@@ -8,7 +8,6 @@
 #' @param con Database connection object
 #' @param candidate_vcf_file Character. Candidate specification: "stored" (default) uses candidates 
 #'   from database, or path to candidate VCF file for backwards compatibility
-#' @param background_file_id Integer. File ID of background dataset (or NULL to auto-detect)
 #' @param blast_param_id Integer. Optional. Specific BLAST run ID to use for both datasets.
 #'   If NULL, uses all available annotations. Default is NULL.
 #' @param annotation_type Character. Type of annotations to analyze: "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "both", or "all". Default is "both"
@@ -77,7 +76,7 @@
 #' }
 #'
 #' @export
-ora <- function(con, candidate_vcf_file = "stored", background_file_id = NULL,
+ora <- function(con, candidate_vcf_file = "stored",
                    blast_param_id = NULL, annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
                    ontologies = c("BP", "MF", "CC"), 
                    min_genes = 5, max_genes = 500, significance_threshold = 0.05,
@@ -101,26 +100,7 @@ ora <- function(con, candidate_vcf_file = "stored", background_file_id = NULL,
     }
   }
   
-  # Auto-detect background file if not provided
-  if (is.null(background_file_id)) {
-    if (verbose) message("Auto-detecting background dataset...")
-    
-    # Get all VCF files excluding the candidate file
-    input_files <- DBI::dbGetQuery(con, 
-      "SELECT file_id, file_name FROM input_files WHERE file_type = 'vcf'")
-    
-    # Exclude files with "candidate" or similar in the name
-    candidate_patterns <- c("candidate", "adaptive", "outlier", "fst", "selection")
-    background_files <- input_files[!grepl(paste(candidate_patterns, collapse = "|"), 
-                                          tolower(input_files$file_name)), ]
-    
-    if (nrow(background_files) == 0) {
-      stop("No suitable background dataset found. Please specify background_file_id.")
-    }
-    
-    background_file_id <- background_files$file_id[1]
-    if (verbose) message("  - Using background file: ", background_files$file_name[1], " (ID: ", background_file_id, ")")
-  }
+  # Note: Background data comes from the same annotation database, no file needed
   
   # Step 1: Process candidate loci
   if (verbose) message("\n=== Step 1: Processing Candidate Loci ===")
@@ -173,7 +153,7 @@ ora <- function(con, candidate_vcf_file = "stored", background_file_id = NULL,
   
   if (run_go) {
     if (verbose) message("  - Extracting GO terms...")
-    go_data <- extract_go_terms_for_enrichment(con, candidate_file_id, background_file_id, 
+    go_data <- extract_go_terms_for_enrichment(con, candidate_file_id, 
                                              blast_param_id = blast_param_id, verbose = verbose)
     annotation_data[["GO"]] <- go_data
     
@@ -198,7 +178,7 @@ ora <- function(con, candidate_vcf_file = "stored", background_file_id = NULL,
         # Store results in database if requested
         if (store_results && nrow(results) > 0) {
           analysis_id <- store_ora_results(
-            con, background_file_id,
+            con,
             results, "GO", ontology, 
             parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
             method = method,
@@ -216,7 +196,7 @@ ora <- function(con, candidate_vcf_file = "stored", background_file_id = NULL,
   
   if (run_kegg) {
     if (verbose) message("  - Extracting KEGG pathways...")
-    kegg_data <- extract_kegg_terms_for_enrichment(con, candidate_file_id, background_file_id, 
+    kegg_data <- extract_kegg_terms_for_enrichment(con, candidate_file_id, 
                                                  blast_param_id = blast_param_id, verbose = verbose)
     annotation_data[["KEGG"]] <- kegg_data
     
@@ -236,7 +216,7 @@ ora <- function(con, candidate_vcf_file = "stored", background_file_id = NULL,
       # Store results in database if requested
       if (store_results && nrow(kegg_results) > 0) {
         analysis_id <- store_ora_results(
-          con, background_file_id,
+          con,
           kegg_results, "KEGG", "PATHWAY", 
           parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
           method = method,

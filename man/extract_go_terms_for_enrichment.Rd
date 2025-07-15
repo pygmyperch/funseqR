@@ -7,7 +7,6 @@
 extract_go_terms_for_enrichment(
   con,
   foreground_file_id,
-  background_file_id,
   blast_param_id = NULL,
   verbose = TRUE
 )
@@ -15,9 +14,8 @@ extract_go_terms_for_enrichment(
 \arguments{
 \item{con}{Database connection object}
 
-\item{foreground_file_id}{Integer. File ID of candidate/foreground dataset}
-
-\item{background_file_id}{Integer. File ID of background dataset}
+\item{foreground_file_id}{Character. Candidate specification: "stored" uses stored candidates,
+or integer file ID for backwards compatibility}
 
 \item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets.
 If NULL, uses all available annotations. Default is NULL.}
@@ -32,7 +30,8 @@ Extract GO terms for foreground and background gene sets
 }
 \details{
 Extracts GO terms associated with proteins from both foreground (candidate)
-and background datasets. Creates gene-to-GO mappings required for enrichment testing.
+and background datasets. For stored candidates workflow, background data comes
+from all annotations in the database excluding candidate loci.
 
 When blast_param_id is specified, only annotations from that specific BLAST run
 are used for both datasets. This ensures methodological consistency and allows
@@ -40,12 +39,11 @@ comparison of different search strategies (e.g., ORF sequences vs raw sequences)
 }
 \examples{
 \dontrun{
-# Use all available annotations
-go_data <- extract_go_terms_for_enrichment(con, foreground_file_id, background_file_id)
+# Use stored candidates with all available annotations
+go_data <- extract_go_terms_for_enrichment(con, "stored")
 
-# Use specific BLAST run (e.g., ORF-based search)
-go_data_orf <- extract_go_terms_for_enrichment(con, foreground_file_id, background_file_id,
-                                               blast_param_id = 1)
+# Use stored candidates with specific BLAST run (e.g., ORF-based search)
+go_data_orf <- extract_go_terms_for_enrichment(con, "stored", blast_param_id = 1)
 str(go_data_orf)
 }
 

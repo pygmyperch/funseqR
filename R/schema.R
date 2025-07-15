@@ -243,7 +243,6 @@ create_schema <- function(con, verbose = TRUE) {
   DBI::dbExecute(con, "
     CREATE TABLE ora_analyses (
       analysis_id INTEGER PRIMARY KEY,
-      background_file_id INTEGER NOT NULL,
       blast_param_id INTEGER,
       annotation_type TEXT NOT NULL,
       term_type TEXT NOT NULL,
@@ -252,7 +251,6 @@ create_schema <- function(con, verbose = TRUE) {
       total_background_genes INTEGER,
       analysis_parameters TEXT,
       enrichment_method TEXT DEFAULT 'clusterprofiler',
-      FOREIGN KEY (background_file_id) REFERENCES input_files (file_id),
       FOREIGN KEY (blast_param_id) REFERENCES blast_parameters (blast_param_id)
     )
   ")
@@ -363,7 +361,6 @@ create_schema <- function(con, verbose = TRUE) {
   DBI::dbExecute(con, "CREATE INDEX idx_blast_db_meta_date ON blast_database_metadata (extraction_date)")
 
   # ORA enrichment indexes
-  DBI::dbExecute(con, "CREATE INDEX idx_ora_bg_file ON ora_analyses (background_file_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_ora_blast_param ON ora_analyses (blast_param_id)")
   DBI::dbExecute(con, "CREATE INDEX idx_ora_annotation_type ON ora_analyses (annotation_type)")
   DBI::dbExecute(con, "CREATE INDEX idx_ora_term_type ON ora_analyses (term_type)")

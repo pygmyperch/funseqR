@@ -64,8 +64,8 @@ link_candidates_to_annotations <- function(con, candidate_file_id, background_fi
 #' Extract GO terms for foreground and background gene sets
 #'
 #' @param con Database connection object
-#' @param foreground_file_id Integer. File ID of candidate/foreground dataset
-#' @param background_file_id Integer. File ID of background dataset
+#' @param foreground_file_id Character. Candidate specification: "stored" uses stored candidates,
+#'   or integer file ID for backwards compatibility
 #' @param blast_param_id Integer. Optional. Specific BLAST run ID to use for both datasets.
 #'   If NULL, uses all available annotations. Default is NULL.
 #' @param verbose Logical. Print progress information. Default is TRUE
@@ -74,7 +74,8 @@ link_candidates_to_annotations <- function(con, candidate_file_id, background_fi
 #'
 #' @details
 #' Extracts GO terms associated with proteins from both foreground (candidate)
-#' and background datasets. Creates gene-to-GO mappings required for enrichment testing.
+#' and background datasets. For stored candidates workflow, background data comes
+#' from all annotations in the database excluding candidate loci.
 #' 
 #' When blast_param_id is specified, only annotations from that specific BLAST run
 #' are used for both datasets. This ensures methodological consistency and allows
@@ -82,17 +83,16 @@ link_candidates_to_annotations <- function(con, candidate_file_id, background_fi
 #'
 #' @examples
 #' \dontrun{
-#' # Use all available annotations
-#' go_data <- extract_go_terms_for_enrichment(con, foreground_file_id, background_file_id)
+#' # Use stored candidates with all available annotations
+#' go_data <- extract_go_terms_for_enrichment(con, "stored")
 #' 
-#' # Use specific BLAST run (e.g., ORF-based search)
-#' go_data_orf <- extract_go_terms_for_enrichment(con, foreground_file_id, background_file_id,
-#'                                                blast_param_id = 1)
+#' # Use stored candidates with specific BLAST run (e.g., ORF-based search)
+#' go_data_orf <- extract_go_terms_for_enrichment(con, "stored", blast_param_id = 1)
 #' str(go_data_orf)
 #' }
 #'
 #' @keywords internal
-extract_go_terms_for_enrichment <- function(con, foreground_file_id, background_file_id, 
+extract_go_terms_for_enrichment <- function(con, foreground_file_id, 
                                            blast_param_id = NULL, verbose = TRUE) {
 
   if (verbose) message("Extracting GO terms for enrichment analysis...")
@@ -595,8 +595,8 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
 #' Extract KEGG pathways for foreground and background gene sets
 #'
 #' @param con Database connection object
-#' @param foreground_file_id Integer. File ID of candidate/foreground dataset
-#' @param background_file_id Integer. File ID of background dataset
+#' @param foreground_file_id Character. Candidate specification: "stored" uses stored candidates,
+#'   or integer file ID for backwards compatibility
 #' @param blast_param_id Integer. Optional. Specific BLAST run ID to use for both datasets.
 #'   If NULL, uses all available annotations. Default is NULL.
 #' @param verbose Logical. Print progress information. Default is TRUE
@@ -604,7 +604,7 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
 #' @return List containing foreground and background KEGG pathway data
 #'
 #' @keywords internal
-extract_kegg_terms_for_enrichment <- function(con, foreground_file_id, background_file_id, 
+extract_kegg_terms_for_enrichment <- function(con, foreground_file_id, 
                                             blast_param_id = NULL, verbose = TRUE) {
 
   if (verbose) message("Extracting KEGG pathways for enrichment analysis...")
@@ -952,7 +952,6 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
 #' Store ORA analysis results in the database
 #'
 #' @param con Database connection object
-#' @param background_file_id Integer. File ID of background dataset
 #' @param enrichment_results Data frame. Results from perform_go_enrichment() or perform_kegg_enrichment()
 #' @param annotation_type Character. Type of annotation: "GO" or "KEGG"
 #' @param term_type Character. Term type: "BP", "MF", "CC" for GO or "PATHWAY" for KEGG
@@ -963,7 +962,7 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
 #'
 #' @return Integer. The analysis_id of the stored analysis
 #'
-store_ora_results <- function(con, background_file_id,
+store_ora_results <- function(con,
                              enrichment_results, annotation_type, term_type, parameters = NULL, method = "clusterprofiler", 
                              blast_param_id = NULL, verbose = TRUE) {
 
@@ -991,13 +990,10 @@ store_ora_results <- function(con, background_file_id,
   # Insert analysis record
   analysis_query <- "
     INSERT INTO ora_analyses
-    (background_file_id, blast_param_id, annotation_type, term_type, analysis_date,
+    (blast_param_id, annotation_type, term_type, analysis_date,
      total_foreground_genes, total_background_genes, analysis_parameters, enrichment_method)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   "
-  
-  # Ensure background_file_id is a scalar integer
-  db_background_file_id <- as.integer(background_file_id[1])  # Take first element if vector
   
   # Ensure blast_param_id is scalar if not NULL
   db_blast_param_id <- if(is.null(blast_param_id)) NULL else as.integer(blast_param_id[1])
@@ -1012,7 +1008,6 @@ store_ora_results <- function(con, background_file_id,
   db_method <- as.character(method[1])
   
   DBI::dbExecute(con, analysis_query, list(
-    db_background_file_id,
     db_blast_param_id,
     db_annotation_type,
     db_term_type,
