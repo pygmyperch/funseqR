@@ -952,7 +952,6 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
 #' Store ORA analysis results in the database
 #'
 #' @param con Database connection object
-#' @param foreground_file_id Integer. File ID of foreground dataset
 #' @param background_file_id Integer. File ID of background dataset
 #' @param enrichment_results Data frame. Results from perform_go_enrichment() or perform_kegg_enrichment()
 #' @param annotation_type Character. Type of annotation: "GO" or "KEGG"
@@ -964,7 +963,7 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
 #'
 #' @return Integer. The analysis_id of the stored analysis
 #'
-store_ora_results <- function(con, foreground_file_id, background_file_id,
+store_ora_results <- function(con, background_file_id,
                              enrichment_results, annotation_type, term_type, parameters = NULL, method = "clusterprofiler", 
                              blast_param_id = NULL, verbose = TRUE) {
 
@@ -992,13 +991,10 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
   # Insert analysis record
   analysis_query <- "
     INSERT INTO ora_analyses
-    (foreground_file_id, background_file_id, blast_param_id, annotation_type, term_type, analysis_date,
+    (background_file_id, blast_param_id, annotation_type, term_type, analysis_date,
      total_foreground_genes, total_background_genes, analysis_parameters, enrichment_method)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   "
-
-  # Handle stored candidates case - use NULL for foreground_file_id
-  db_foreground_file_id <- if (foreground_file_id == "stored") NULL else foreground_file_id
   
   # Ensure background_file_id is a scalar integer
   db_background_file_id <- as.integer(background_file_id[1])  # Take first element if vector
@@ -1015,30 +1011,7 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
   db_term_type <- as.character(term_type[1])
   db_method <- as.character(method[1])
   
-  # Debug: Print all parameter values and their lengths
-  if (verbose) {
-    param_list <- list(
-      db_foreground_file_id,
-      db_background_file_id,
-      db_blast_param_id,
-      db_annotation_type,
-      db_term_type,
-      format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
-      total_fg,
-      total_bg,
-      as.character(params_json),
-      db_method
-    )
-    
-    for (i in seq_along(param_list)) {
-      param_val <- param_list[[i]]
-      cat("DEBUG: Parameter", i, "- Value:", if(is.null(param_val)) "NULL" else param_val, 
-          "- Length:", length(param_val), "- Class:", class(param_val), "\n")
-    }
-  }
-  
   DBI::dbExecute(con, analysis_query, list(
-    db_foreground_file_id,
     db_background_file_id,
     db_blast_param_id,
     db_annotation_type,

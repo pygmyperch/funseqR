@@ -198,7 +198,7 @@ ora <- function(con, candidate_vcf_file = "stored", background_file_id = NULL,
         # Store results in database if requested
         if (store_results && nrow(results) > 0) {
           analysis_id <- store_ora_results(
-            con, candidate_file_id, background_file_id,
+            con, background_file_id,
             results, "GO", ontology, 
             parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
             method = method,
@@ -236,7 +236,7 @@ ora <- function(con, candidate_vcf_file = "stored", background_file_id = NULL,
       # Store results in database if requested
       if (store_results && nrow(kegg_results) > 0) {
         analysis_id <- store_ora_results(
-          con, candidate_file_id, background_file_id,
+          con, background_file_id,
           kegg_results, "KEGG", "PATHWAY", 
           parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
           method = method,

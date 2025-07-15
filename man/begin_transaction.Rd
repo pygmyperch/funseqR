@@ -2,7 +2,7 @@
 % Please edit documentation in R/database_management.R
 \name{begin_transaction}
 \alias{begin_transaction}
-\title{Database Management Functions}
+\title{Begin a transaction in the database}
 \usage{
 begin_transaction(con)
 }
@@ -13,10 +13,6 @@ begin_transaction(con)
 Invisible NULL.
 }
 \description{
-Centralized functions for database deletion, transaction management, and cleanup operations.
-These functions provide safe, consistent interfaces for managing funseqR database contents.
-}
-\details{
 Begin a transaction in the database
 }
 \examples{

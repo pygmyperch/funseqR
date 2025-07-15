@@ -6,7 +6,6 @@
 \usage{
 store_ora_results(
   con,
-  foreground_file_id,
   background_file_id,
   enrichment_results,
   annotation_type,
@@ -19,8 +18,6 @@ store_ora_results(
 }
 \arguments{
 \item{con}{Database connection object}
-
-\item{foreground_file_id}{Integer. File ID of foreground dataset}
 
 \item{background_file_id}{Integer. File ID of background dataset}
 
