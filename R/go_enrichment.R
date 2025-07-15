@@ -993,17 +993,21 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
   # Handle stored candidates case - use NULL for foreground_file_id
   db_foreground_file_id <- if (foreground_file_id == "stored") NULL else foreground_file_id
   
+  # Ensure all parameters are scalars
+  total_fg <- if(nrow(enrichment_results) > 0) as.integer(enrichment_results$total_foreground[1]) else 0L
+  total_bg <- if(nrow(enrichment_results) > 0) as.integer(enrichment_results$total_background[1]) else 0L
+  
   DBI::dbExecute(con, analysis_query, list(
     db_foreground_file_id,
-    background_file_id,
-    blast_param_id,
-    annotation_type,
-    term_type,
+    as.integer(background_file_id),
+    if(is.null(blast_param_id)) NULL else as.integer(blast_param_id),
+    as.character(annotation_type),
+    as.character(term_type),
     format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
-    if(nrow(enrichment_results) > 0) enrichment_results$total_foreground[1] else 0,
-    if(nrow(enrichment_results) > 0) enrichment_results$total_background[1] else 0,
-    params_json,
-    method
+    total_fg,
+    total_bg,
+    as.character(params_json),
+    as.character(method)
   ))
 
   # Get the analysis ID
