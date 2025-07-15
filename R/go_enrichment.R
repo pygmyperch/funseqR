@@ -990,8 +990,11 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   "
 
+  # Handle stored candidates case - use NULL for foreground_file_id
+  db_foreground_file_id <- if (foreground_file_id == "stored") NULL else foreground_file_id
+  
   DBI::dbExecute(con, analysis_query, list(
-    foreground_file_id,
+    db_foreground_file_id,
     background_file_id,
     blast_param_id,
     annotation_type,
