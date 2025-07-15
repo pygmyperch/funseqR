@@ -1717,19 +1717,18 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
     JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN go_terms gt ON a.annotation_id = gt.annotation_id
-    WHERE vd.file_id = ?
   ")
   
   # Execute candidate query
   candidate_params <- if (!is.null(blast_param_id)) {
-    list(blast_param_id, background_file_id)
+    list(blast_param_id)
   } else {
-    list(background_file_id)
+    list()
   }
   
   foreground_go <- DBI::dbGetQuery(con, candidate_query, candidate_params)
   
-  # Query for background data (same as original function)
+  # Query for background data - all annotations excluding candidates
   background_query <- paste0("
     SELECT DISTINCT
       a.uniprot_accession,
@@ -1742,7 +1741,10 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
     JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN go_terms gt ON a.annotation_id = gt.annotation_id
-    WHERE vd.file_id = ?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM candidate_loci cl 
+      WHERE cl.chromosome = vd.chromosome AND cl.position = vd.position
+    )
   ")
   
   background_go <- DBI::dbGetQuery(con, background_query, candidate_params)
@@ -1831,19 +1833,18 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
     JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
-    WHERE vd.file_id = ?
   ")
   
   # Execute candidate query
   candidate_params <- if (!is.null(blast_param_id)) {
-    list(blast_param_id, background_file_id)
+    list(blast_param_id)
   } else {
-    list(background_file_id)
+    list()
   }
   
   foreground_kegg <- DBI::dbGetQuery(con, candidate_query, candidate_params)
   
-  # Query for background data
+  # Query for background data - all annotations excluding candidates
   background_query <- paste0("
     SELECT DISTINCT
       a.uniprot_accession,
@@ -1854,7 +1855,10 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
     JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
-    WHERE vd.file_id = ?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM candidate_loci cl 
+      WHERE cl.chromosome = vd.chromosome AND cl.position = vd.position
+    )
   ")
   
   background_kegg <- DBI::dbGetQuery(con, background_query, candidate_params)
