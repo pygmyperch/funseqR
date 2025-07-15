@@ -1000,21 +1000,54 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
   # Handle stored candidates case - use NULL for foreground_file_id
   db_foreground_file_id <- if (foreground_file_id == "stored") NULL else foreground_file_id
   
+  # Ensure background_file_id is a scalar integer
+  db_background_file_id <- as.integer(background_file_id[1])  # Take first element if vector
+  
+  # Ensure blast_param_id is scalar if not NULL
+  db_blast_param_id <- if(is.null(blast_param_id)) NULL else as.integer(blast_param_id[1])
+  
   # Ensure all parameters are scalars
   total_fg <- if(nrow(enrichment_results) > 0) as.integer(enrichment_results$total_foreground[1]) else 0L
   total_bg <- if(nrow(enrichment_results) > 0) as.integer(enrichment_results$total_background[1]) else 0L
   
+  # Ensure text parameters are scalar
+  db_annotation_type <- as.character(annotation_type[1])
+  db_term_type <- as.character(term_type[1])
+  db_method <- as.character(method[1])
+  
+  # Debug: Print all parameter values and their lengths
+  if (verbose) {
+    param_list <- list(
+      db_foreground_file_id,
+      db_background_file_id,
+      db_blast_param_id,
+      db_annotation_type,
+      db_term_type,
+      format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+      total_fg,
+      total_bg,
+      as.character(params_json),
+      db_method
+    )
+    
+    for (i in seq_along(param_list)) {
+      param_val <- param_list[[i]]
+      cat("DEBUG: Parameter", i, "- Value:", if(is.null(param_val)) "NULL" else param_val, 
+          "- Length:", length(param_val), "- Class:", class(param_val), "\n")
+    }
+  }
+  
   DBI::dbExecute(con, analysis_query, list(
     db_foreground_file_id,
-    as.integer(background_file_id),
-    if(is.null(blast_param_id)) NULL else as.integer(blast_param_id),
-    as.character(annotation_type),
-    as.character(term_type),
+    db_background_file_id,
+    db_blast_param_id,
+    db_annotation_type,
+    db_term_type,
     format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
     total_fg,
     total_bg,
     as.character(params_json),
-    as.character(method)
+    db_method
   ))
 
   # Get the analysis ID
