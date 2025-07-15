@@ -981,6 +981,13 @@ store_ora_results <- function(con, foreground_file_id, background_file_id,
     parameters <- list()
   }
   params_json <- jsonlite::toJSON(parameters, auto_unbox = TRUE)
+  
+  # Ensure params_json is a single character string (not length 0 vector)
+  if (length(params_json) == 0) {
+    params_json <- "{}"
+  } else {
+    params_json <- as.character(params_json)[1]
+  }
 
   # Insert analysis record
   analysis_query <- "
