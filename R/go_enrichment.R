@@ -1005,6 +1005,20 @@ store_ora_results <- function(con,
   db_term_type <- as.character(term_type[1])
   db_method <- as.character(method[1])
   
+  # DEBUG: Print all parameter values and types
+  if (verbose) {
+    message("DEBUG: Parameter values and types:")
+    message("  1. db_blast_param_id: ", if(is.null(db_blast_param_id)) "NULL" else db_blast_param_id, " (class: ", class(db_blast_param_id), ", length: ", length(db_blast_param_id), ")")
+    message("  2. db_annotation_type: '", db_annotation_type, "' (class: ", class(db_annotation_type), ", length: ", length(db_annotation_type), ")")
+    message("  3. db_term_type: '", db_term_type, "' (class: ", class(db_term_type), ", length: ", length(db_term_type), ")")
+    message("  4. timestamp: '", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "'")
+    message("  5. total_fg: ", total_fg, " (class: ", class(total_fg), ", length: ", length(total_fg), ")")
+    message("  6. total_bg: ", total_bg, " (class: ", class(total_bg), ", length: ", length(total_bg), ")")
+    message("  7. params_json: '", as.character(params_json), "' (class: ", class(as.character(params_json)), ", length: ", length(as.character(params_json)), ")")
+    message("  8. db_method: '", db_method, "' (class: ", class(db_method), ", length: ", length(db_method), ")")
+    message("DEBUG: SQL query: ", analysis_query)
+  }
+  
   DBI::dbExecute(con, analysis_query, list(
     db_blast_param_id,
     db_annotation_type,
@@ -1034,9 +1048,13 @@ store_ora_results <- function(con,
       term_name_col <- "pathway_name"
     }
     
-    # Debug: Check data types before storage
+    # Debug: Check data types and columns before storage
     if (verbose && nrow(enrichment_results) > 0) {
       sample_row <- enrichment_results[1, ]
+      message("DEBUG: Enrichment results columns: ", paste(colnames(enrichment_results), collapse = ", "))
+      message("DEBUG: Expected term_id_col: '", term_id_col, "', term_name_col: '", term_name_col, "'")
+      message("DEBUG: term_id value: '", if(term_id_col %in% colnames(enrichment_results)) row[[term_id_col]] else "COLUMN_MISSING", "'")
+      message("DEBUG: term_name value: '", if(term_name_col %in% colnames(enrichment_results)) row[[term_name_col]] else "COLUMN_MISSING", "'")
       message("DEBUG: Storage data types - p_value: ", class(sample_row$p_value), 
               ", p_adjusted: ", class(sample_row$p_adjusted))
       message("DEBUG: Sample p_adjusted value: ", sample_row$p_adjusted)
@@ -1047,6 +1065,20 @@ store_ora_results <- function(con,
       row <- enrichment_results[i, ]
       
       if (has_clusterprofiler_cols) {
+        # Safety checks for parameters
+        term_id_value <- row[[term_id_col]]
+        term_name_value <- row[[term_name_col]]
+        
+        # Ensure parameters have proper length and aren't NA
+        if (is.null(term_id_value) || length(term_id_value) == 0 || is.na(term_id_value)) {
+          if (verbose) message("  - Skipping row with missing/invalid term_id: ", term_id_value)
+          next
+        }
+        if (is.null(term_name_value) || length(term_name_value) == 0 || is.na(term_name_value)) {
+          if (verbose) message("  - Skipping row with missing/invalid term_name: ", term_name_value)
+          next
+        }
+        
         # Insert with all clusterProfiler fields using explicit column names
         DBI::dbExecute(con, "
           INSERT INTO ora_results 
@@ -1057,8 +1089,8 @@ store_ora_results <- function(con,
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           list(
             analysis_id,
-            as.character(row[[term_id_col]]),
-            as.character(row[[term_name_col]]),
+            as.character(term_id_value),
+            as.character(term_name_value),
             annotation_type,
             term_type,
             as.integer(row$foreground_count),
@@ -1077,6 +1109,19 @@ store_ora_results <- function(con,
           )
         )
       } else {
+        # Safety checks for parameters (same as above)
+        term_id_value <- row[[term_id_col]]
+        term_name_value <- row[[term_name_col]]
+        
+        if (is.null(term_id_value) || length(term_id_value) == 0 || is.na(term_id_value)) {
+          if (verbose) message("  - Skipping row with missing/invalid term_id: ", term_id_value)
+          next
+        }
+        if (is.null(term_name_value) || length(term_name_value) == 0 || is.na(term_name_value)) {
+          if (verbose) message("  - Skipping row with missing/invalid term_name: ", term_name_value)
+          next
+        }
+        
         # Legacy format without clusterProfiler extra fields
         DBI::dbExecute(con, "
           INSERT INTO ora_results 
@@ -1086,8 +1131,8 @@ store_ora_results <- function(con,
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           list(
             analysis_id,
-            as.character(row[[term_id_col]]),
-            as.character(row[[term_name_col]]),
+            as.character(term_id_value),
+            as.character(term_name_value),
             annotation_type,
             term_type,
             as.integer(row$foreground_count),
