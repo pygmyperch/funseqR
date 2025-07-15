@@ -1690,13 +1690,12 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
   
   # Query for candidate (foreground) data - use stored candidates
   candidate_query <- paste0("
-    SELECT DISTINCT 
-      gt.go_id as term_id,
-      a.uniprot_accession as gene_id,
-      gt.go_term as term_name,
-      gt.go_category as ontology,
-      vd.chromosome,
-      vd.position
+    SELECT DISTINCT
+      a.uniprot_accession,
+      gt.go_id,
+      gt.go_term,
+      gt.go_category,
+      gt.go_evidence
     FROM candidate_loci cl
     JOIN vcf_data vd ON cl.chromosome = vd.chromosome AND cl.position = vd.position
     JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
@@ -1704,7 +1703,6 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN go_terms gt ON a.annotation_id = gt.annotation_id
     WHERE vd.file_id = ?
-    ORDER BY gt.go_id, a.uniprot_accession
   ")
   
   # Execute candidate query
@@ -1714,71 +1712,82 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
     list(background_file_id)
   }
   
-  candidate_data <- DBI::dbGetQuery(con, candidate_query, candidate_params)
+  foreground_go <- DBI::dbGetQuery(con, candidate_query, candidate_params)
   
   # Query for background data (same as original function)
   background_query <- paste0("
-    SELECT DISTINCT 
-      gt.go_id as term_id,
-      a.uniprot_accession as gene_id,
-      gt.go_term as term_name,
-      gt.go_category as ontology,
-      vd.chromosome,
-      vd.position
+    SELECT DISTINCT
+      a.uniprot_accession,
+      gt.go_id,
+      gt.go_term,
+      gt.go_category,
+      gt.go_evidence
     FROM vcf_data vd
     JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
     JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN go_terms gt ON a.annotation_id = gt.annotation_id
     WHERE vd.file_id = ?
-    ORDER BY gt.go_id, a.uniprot_accession
   ")
   
-  background_data <- DBI::dbGetQuery(con, background_query, candidate_params)
+  background_go <- DBI::dbGetQuery(con, background_query, candidate_params)
   
   if (verbose) {
-    message("    - Found ", nrow(candidate_data), " candidate GO associations")
-    message("    - Found ", nrow(background_data), " background GO associations")
+    message("    - Found ", nrow(foreground_go), " candidate GO associations")
+    message("    - Found ", nrow(background_go), " background GO associations")
   }
   
-  # Format results same as original function
-  if (nrow(candidate_data) == 0) {
+  # Format results same as main function
+  if (nrow(foreground_go) == 0) {
     warning("No GO annotations found for stored candidate loci")
     return(list(
-      foreground = list(genes = character(0), terms = character(0)),
-      background = list(genes = character(0), terms = character(0)),
-      term2gene_fg = data.frame(term = character(0), gene = character(0)),
-      term2gene_bg = data.frame(term = character(0), gene = character(0)),
-      gene2name = data.frame(gene = character(0), name = character(0))
+      foreground = list(
+        genes = character(0),
+        gene2go = list(),
+        go_terms = data.frame()
+      ),
+      background = list(
+        genes = character(0),
+        gene2go = list(),
+        go_terms = data.frame()
+      ),
+      all_go_terms = data.frame()
     ))
   }
   
-  # Process the data into the expected format
-  fg_genes <- unique(candidate_data$gene_id)
-  fg_terms <- unique(candidate_data$term_id)
-  bg_genes <- unique(background_data$gene_id)
-  bg_terms <- unique(background_data$term_id)
-  
-  term2gene_fg <- candidate_data[, c("term_id", "gene_id")]
-  names(term2gene_fg) <- c("term", "gene")
-  
-  term2gene_bg <- background_data[, c("term_id", "gene_id")]
-  names(term2gene_bg) <- c("term", "gene")
-  
-  # Create gene2name mapping (simplified)
-  all_genes <- unique(c(candidate_data$gene_id, background_data$gene_id))
-  gene2name <- data.frame(
-    gene = all_genes,
-    name = all_genes,  # Use gene ID as name for simplicity
-    stringsAsFactors = FALSE
+  # Create gene-to-GO mapping lists (same as main function)
+  foreground_gene2go <- split(foreground_go$go_id, foreground_go$uniprot_accession)
+  background_gene2go <- split(background_go$go_id, background_go$uniprot_accession)
+
+  # Get unique GO terms and their details (same as main function)
+  all_go_terms <- rbind(
+    foreground_go[, c("go_id", "go_term", "go_category")],
+    background_go[, c("go_id", "go_term", "go_category")]
   )
-  
+  all_go_terms <- all_go_terms[!duplicated(all_go_terms), ]
+
+  if (verbose) {
+    message("GO term extraction complete:")
+    message("  - Foreground genes: ", length(unique(foreground_go$uniprot_accession)))
+    message("  - Background genes: ", length(unique(background_go$uniprot_accession)))
+    message("  - Total unique GO terms: ", nrow(all_go_terms))
+    message("  - Biological Process terms: ", sum(all_go_terms$go_category == "P"))
+    message("  - Molecular Function terms: ", sum(all_go_terms$go_category == "F"))
+    message("  - Cellular Component terms: ", sum(all_go_terms$go_category == "C"))
+  }
+
   return(list(
-    foreground = list(genes = fg_genes, terms = fg_terms),
-    background = list(genes = bg_genes, terms = bg_terms),
-    term2gene_fg = term2gene_fg,
-    term2gene_bg = term2gene_bg,
-    gene2name = gene2name
+    foreground = list(
+      genes = unique(foreground_go$uniprot_accession),
+      gene2go = foreground_gene2go,
+      go_terms = foreground_go
+    ),
+    background = list(
+      genes = unique(background_go$uniprot_accession),
+      gene2go = background_gene2go,
+      go_terms = background_go
+    ),
+    all_go_terms = all_go_terms
   ))
 }
 
@@ -1797,12 +1806,10 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
   
   # Query for candidate (foreground) data - use stored candidates
   candidate_query <- paste0("
-    SELECT DISTINCT 
-      kr.kegg_id as term_id,
-      a.uniprot_accession as gene_id,
-      kr.pathway_name as term_name,
-      vd.chromosome,
-      vd.position
+    SELECT DISTINCT
+      a.uniprot_accession,
+      kr.kegg_id,
+      kr.pathway_name
     FROM candidate_loci cl
     JOIN vcf_data vd ON cl.chromosome = vd.chromosome AND cl.position = vd.position
     JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
@@ -1810,7 +1817,6 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
     WHERE vd.file_id = ?
-    ORDER BY kr.kegg_id, a.uniprot_accession
   ")
   
   # Execute candidate query
@@ -1820,70 +1826,77 @@ export_revigo_input <- function(con, source_type = c("all_annotations", "candida
     list(background_file_id)
   }
   
-  candidate_data <- DBI::dbGetQuery(con, candidate_query, candidate_params)
+  foreground_kegg <- DBI::dbGetQuery(con, candidate_query, candidate_params)
   
   # Query for background data
   background_query <- paste0("
-    SELECT DISTINCT 
-      kr.kegg_id as term_id,
-      a.uniprot_accession as gene_id,
-      kr.pathway_name as term_name,
-      vd.chromosome,
-      vd.position
+    SELECT DISTINCT
+      a.uniprot_accession,
+      kr.kegg_id,
+      kr.pathway_name
     FROM vcf_data vd
     JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
     JOIN blast_results br ON fs.flanking_id = br.flanking_id ", blast_condition, "
     JOIN annotations a ON br.blast_result_id = a.blast_result_id
     JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
     WHERE vd.file_id = ?
-    ORDER BY kr.kegg_id, a.uniprot_accession
   ")
   
-  background_data <- DBI::dbGetQuery(con, background_query, candidate_params)
+  background_kegg <- DBI::dbGetQuery(con, background_query, candidate_params)
   
   if (verbose) {
-    message("    - Found ", nrow(candidate_data), " candidate KEGG associations")
-    message("    - Found ", nrow(background_data), " background KEGG associations")
+    message("    - Found ", nrow(foreground_kegg), " candidate KEGG associations")
+    message("    - Found ", nrow(background_kegg), " background KEGG associations")
   }
   
-  # Format results same as original function
-  if (nrow(candidate_data) == 0) {
+  # Format results same as main function
+  if (nrow(foreground_kegg) == 0) {
     warning("No KEGG annotations found for stored candidate loci")
     return(list(
-      foreground = list(genes = character(0), terms = character(0)),
-      background = list(genes = character(0), terms = character(0)),
-      term2gene_fg = data.frame(term = character(0), gene = character(0)),
-      term2gene_bg = data.frame(term = character(0), gene = character(0)),
-      gene2name = data.frame(gene = character(0), name = character(0))
+      foreground = list(
+        genes = character(0),
+        gene2pathway = list(),
+        pathways = data.frame()
+      ),
+      background = list(
+        genes = character(0),
+        gene2pathway = list(),
+        pathways = data.frame()
+      ),
+      all_pathways = data.frame()
     ))
   }
   
-  # Process the data into the expected format
-  fg_genes <- unique(candidate_data$gene_id)
-  fg_terms <- unique(candidate_data$term_id)
-  bg_genes <- unique(background_data$gene_id)
-  bg_terms <- unique(background_data$term_id)
-  
-  term2gene_fg <- candidate_data[, c("term_id", "gene_id")]
-  names(term2gene_fg) <- c("term", "gene")
-  
-  term2gene_bg <- background_data[, c("term_id", "gene_id")]
-  names(term2gene_bg) <- c("term", "gene")
-  
-  # Create gene2name mapping (simplified)
-  all_genes <- unique(c(candidate_data$gene_id, background_data$gene_id))
-  gene2name <- data.frame(
-    gene = all_genes,
-    name = all_genes,  # Use gene ID as name for simplicity
-    stringsAsFactors = FALSE
+  # Create gene-to-pathway mapping lists (same as main function)
+  foreground_gene2pathway <- split(foreground_kegg$kegg_id, foreground_kegg$uniprot_accession)
+  background_gene2pathway <- split(background_kegg$kegg_id, background_kegg$uniprot_accession)
+
+  # Get unique pathways and their details (same as main function)
+  all_pathways <- rbind(
+    foreground_kegg[, c("kegg_id", "pathway_name")],
+    background_kegg[, c("kegg_id", "pathway_name")]
   )
-  
+  all_pathways <- all_pathways[!duplicated(all_pathways), ]
+
+  if (verbose) {
+    message("KEGG pathway extraction complete:")
+    message("  - Foreground genes: ", length(unique(foreground_kegg$uniprot_accession)))
+    message("  - Background genes: ", length(unique(background_kegg$uniprot_accession)))
+    message("  - Total unique pathways: ", nrow(all_pathways))
+  }
+
   return(list(
-    foreground = list(genes = fg_genes, terms = fg_terms),
-    background = list(genes = bg_genes, terms = bg_terms),
-    term2gene_fg = term2gene_fg,
-    term2gene_bg = term2gene_bg,
-    gene2name = gene2name
+    foreground = list(
+      genes = unique(foreground_kegg$uniprot_accession),
+      gene2pathway = foreground_gene2pathway,
+      pathways = foreground_kegg
+    ),
+    background = list(
+      genes = unique(background_kegg$uniprot_accession),
+      gene2pathway = background_gene2pathway,
+      pathways = background_kegg
+    ),
+    all_pathways = all_pathways
   ))
 }
 
