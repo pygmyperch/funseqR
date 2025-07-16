@@ -82,15 +82,15 @@ create_schema <- function(con, verbose = TRUE) {
     CREATE TABLE flanking_sequences (
       flanking_id INTEGER PRIMARY KEY,
       vcf_id INTEGER NOT NULL,
-      sequence_id INTEGER NOT NULL,
-      flank_size INTEGER NOT NULL,
+      chromosome TEXT NOT NULL,
+      position INTEGER NOT NULL,
       start_position INTEGER NOT NULL,
       end_position INTEGER NOT NULL,
-      sequence TEXT NOT NULL,
-      seq_type TEXT NOT NULL DEFAULT 'raw',
-      seq_length INTEGER,
-      FOREIGN KEY (vcf_id) REFERENCES vcf_data (vcf_id),
-      FOREIGN KEY (sequence_id) REFERENCES reference_sequences (sequence_id)
+      raw_sequence TEXT,
+      orf_nucleotide TEXT,
+      orf_amino_acid TEXT,
+      created_date TEXT NOT NULL,
+      FOREIGN KEY (vcf_id) REFERENCES vcf_data (vcf_id)
     )
   ")
   
