@@ -1053,8 +1053,8 @@ store_ora_results <- function(con,
       sample_row <- enrichment_results[1, ]
       message("DEBUG: Enrichment results columns: ", paste(colnames(enrichment_results), collapse = ", "))
       message("DEBUG: Expected term_id_col: '", term_id_col, "', term_name_col: '", term_name_col, "'")
-      message("DEBUG: term_id value: '", if(term_id_col %in% colnames(enrichment_results)) row[[term_id_col]] else "COLUMN_MISSING", "'")
-      message("DEBUG: term_name value: '", if(term_name_col %in% colnames(enrichment_results)) row[[term_name_col]] else "COLUMN_MISSING", "'")
+      message("DEBUG: term_id value: '", if(term_id_col %in% colnames(enrichment_results)) sample_row[[term_id_col]] else "COLUMN_MISSING", "'")
+      message("DEBUG: term_name value: '", if(term_name_col %in% colnames(enrichment_results)) sample_row[[term_name_col]] else "COLUMN_MISSING", "'")
       message("DEBUG: Storage data types - p_value: ", class(sample_row$p_value), 
               ", p_adjusted: ", class(sample_row$p_adjusted))
       message("DEBUG: Sample p_adjusted value: ", sample_row$p_adjusted)
