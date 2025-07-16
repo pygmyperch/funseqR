@@ -449,7 +449,7 @@ export_project_data <- function(source_con, target_db_path,
       if (verbose) message("  - Exporting ", statistics, " locus statistics (candidate dependency)")
       
       # Export all locus statistics
-      locus_stats <- DBI::dbGetQuery(source_con, "SELECT * FROM locus_statistics ORDER BY locus_id")
+      locus_stats <- DBI::dbGetQuery(source_con, "SELECT * FROM locus_statistics ORDER BY statistic_id")
       .batch_insert_locus_statistics(target_con, locus_stats)
     } else {
       if (verbose) message("  - No locus statistics found (candidates may have been defined via coordinates)")
@@ -614,10 +614,10 @@ export_project_data <- function(source_con, target_db_path,
     batch_data <- flanking_data[start_idx:end_idx, ]
     
     # Create parameterized query for batch
-    placeholders <- paste0("(", paste(rep("?", 9), collapse = ", "), ")")
+    placeholders <- paste0("(", paste(rep("?", 8), collapse = ", "), ")")
     values_clause <- paste(rep(placeholders, nrow(batch_data)), collapse = ", ")
     query <- paste0(
-      "INSERT INTO flanking_sequences (vcf_id, chromosome, position, start_position, end_position, raw_sequence, orf_nucleotide, orf_amino_acid, created_date) VALUES ",
+      "INSERT INTO flanking_sequences (vcf_id, sequence_id, flank_size, start_position, end_position, sequence, seq_type, seq_length) VALUES ",
       values_clause
     )
     
@@ -626,14 +626,13 @@ export_project_data <- function(source_con, target_db_path,
     for (i in 1:nrow(batch_data)) {
       params <- c(params, list(
         batch_data$vcf_id[i],
-        batch_data$chromosome[i],
-        batch_data$position[i],
+        batch_data$sequence_id[i],
+        batch_data$flank_size[i],
         batch_data$start_position[i],
         batch_data$end_position[i],
-        batch_data$raw_sequence[i],
-        batch_data$orf_nucleotide[i],
-        batch_data$orf_amino_acid[i],
-        batch_data$created_date[i]
+        batch_data$sequence[i],
+        batch_data$seq_type[i],
+        batch_data$seq_length[i]
       ))
     }
     
@@ -646,7 +645,7 @@ export_project_data <- function(source_con, target_db_path,
 .export_blast_data <- function(source_con, target_con, id_mappings, verbose) {
   
   # Check for BLAST parameters
-  blast_params <- DBI::dbGetQuery(source_con, "SELECT * FROM blast_parameters ORDER BY param_id")
+  blast_params <- DBI::dbGetQuery(source_con, "SELECT * FROM blast_parameters ORDER BY blast_param_id")
   
   if (nrow(blast_params) == 0) {
     if (verbose) message("  - No BLAST data found in source database")
@@ -662,15 +661,14 @@ export_project_data <- function(source_con, target_db_path,
   # Export BLAST parameters
   for (i in 1:nrow(blast_params)) {
     param_record <- blast_params[i, ]
-    old_param_id <- param_record$param_id
+    old_param_id <- param_record$blast_param_id
     
     # Insert parameter record
     DBI::dbExecute(target_con, "
-      INSERT INTO blast_parameters (db_path, db_name, sequence_type, program, e_value, max_target_seqs, num_threads, created_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ", list(param_record$db_path, param_record$db_name, param_record$sequence_type,
-            param_record$program, param_record$e_value, param_record$max_target_seqs,
-            param_record$num_threads, param_record$created_date))
+      INSERT INTO blast_parameters (blast_type, db_name, db_path, e_value, max_hits, execution_date)
+      VALUES (?, ?, ?, ?, ?, ?)
+    ", list(param_record$blast_type, param_record$db_name, param_record$db_path,
+            param_record$e_value, param_record$max_hits, param_record$execution_date))
     
     # Get new param_id
     new_param_id <- DBI::dbGetQuery(target_con, "SELECT last_insert_rowid() as id")$id
@@ -681,7 +679,7 @@ export_project_data <- function(source_con, target_db_path,
     
     # Export BLAST results for this parameter set
     blast_results <- DBI::dbGetQuery(source_con,
-      "SELECT * FROM blast_results WHERE param_id = ? ORDER BY blast_result_id",
+      "SELECT * FROM blast_results WHERE blast_param_id = ? ORDER BY blast_result_id",
       list(old_param_id))
     
     if (nrow(blast_results) > 0) {
@@ -837,10 +835,10 @@ export_project_data <- function(source_con, target_db_path,
     batch_data <- blast_results[start_idx:end_idx, ]
     
     # Create parameterized query for batch
-    placeholders <- paste0("(", paste(rep("?", 15), collapse = ", "), ")")
+    placeholders <- paste0("(", paste(rep("?", 14), collapse = ", "), ")")
     values_clause <- paste(rep(placeholders, nrow(batch_data)), collapse = ", ")
     query <- paste0(
-      "INSERT INTO blast_results (flanking_id, param_id, subject_accession, percent_identity, alignment_length, mismatches, gap_opens, q_start, q_end, s_start, s_end, e_value, bit_score, subject_title, created_date) VALUES ",
+      "INSERT INTO blast_results (blast_param_id, flanking_id, hit_accession, hit_description, percent_identity, alignment_length, mismatches, gap_openings, query_start, query_end, subject_start, subject_end, e_value, bit_score) VALUES ",
       values_clause
     )
     
@@ -848,21 +846,20 @@ export_project_data <- function(source_con, target_db_path,
     params <- list()
     for (i in 1:nrow(batch_data)) {
       params <- c(params, list(
+        batch_data$blast_param_id[i],
         batch_data$flanking_id[i],
-        batch_data$param_id[i],
-        batch_data$subject_accession[i],
+        batch_data$hit_accession[i],
+        batch_data$hit_description[i],
         batch_data$percent_identity[i],
         batch_data$alignment_length[i],
         batch_data$mismatches[i],
-        batch_data$gap_opens[i],
-        batch_data$q_start[i],
-        batch_data$q_end[i],
-        batch_data$s_start[i],
-        batch_data$s_end[i],
+        batch_data$gap_openings[i],
+        batch_data$query_start[i],
+        batch_data$query_end[i],
+        batch_data$subject_start[i],
+        batch_data$subject_end[i],
         batch_data$e_value[i],
-        batch_data$bit_score[i],
-        batch_data$subject_title[i],
-        batch_data$created_date[i]
+        batch_data$bit_score[i]
       ))
     }
     
@@ -884,10 +881,10 @@ export_project_data <- function(source_con, target_db_path,
     batch_data <- annotations[start_idx:end_idx, ]
     
     # Create parameterized query for batch
-    placeholders <- paste0("(", paste(rep("?", 7), collapse = ", "), ")")
+    placeholders <- paste0("(", paste(rep("?", 5), collapse = ", "), ")")
     values_clause <- paste(rep(placeholders, nrow(batch_data)), collapse = ", ")
     query <- paste0(
-      "INSERT INTO annotations (blast_result_id, uniprot_accession, protein_name, gene_names, organism, length, created_date) VALUES ",
+      "INSERT INTO annotations (blast_result_id, uniprot_accession, entry_name, gene_names, retrieval_date) VALUES ",
       values_clause
     )
     
@@ -897,11 +894,9 @@ export_project_data <- function(source_con, target_db_path,
       params <- c(params, list(
         batch_data$blast_result_id[i],
         batch_data$uniprot_accession[i],
-        batch_data$protein_name[i],
+        batch_data$entry_name[i],
         batch_data$gene_names[i],
-        batch_data$organism[i],
-        batch_data$length[i],
-        batch_data$created_date[i]
+        batch_data$retrieval_date[i]
       ))
     }
     
@@ -914,7 +909,7 @@ export_project_data <- function(source_con, target_db_path,
 .export_functional_annotations <- function(source_con, target_con, source_annotations, target_annotations, verbose) {
   
   # Get all annotation types to export
-  annotation_tables <- c("go_terms", "kegg_pathways", "pfam_domains", "interpro_domains", "eggnog_categories")
+  annotation_tables <- c("go_terms", "kegg_references", "pfam_domains", "interpro_families", "eggnog_categories")
   
   for (table_name in annotation_tables) {
     # Check if table exists and has data
@@ -963,11 +958,11 @@ export_project_data <- function(source_con, target_db_path,
   
   # Define column structures for each annotation type
   table_columns <- list(
-    go_terms = c("annotation_id", "go_id", "term_name", "ontology", "definition"),
-    kegg_pathways = c("annotation_id", "pathway_id", "pathway_name", "pathway_class"),
-    pfam_domains = c("annotation_id", "pfam_id", "domain_name", "domain_description"),
-    interpro_domains = c("annotation_id", "interpro_id", "domain_name", "domain_type"),
-    eggnog_categories = c("annotation_id", "nog_id", "category_id", "category_name", "description")
+    go_terms = c("annotation_id", "go_id", "go_term", "go_category", "go_evidence"),
+    kegg_references = c("annotation_id", "kegg_id", "pathway_name"),
+    pfam_domains = c("annotation_id", "pfam_id", "domain_name", "match_status"),
+    interpro_families = c("annotation_id", "interpro_id", "family_name"),
+    eggnog_categories = c("annotation_id", "eggnog_id", "taxonomic_scope")
   )
   
   if (!table_name %in% names(table_columns)) {
