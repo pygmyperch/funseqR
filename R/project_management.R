@@ -386,10 +386,10 @@ export_project_data <- function(source_con, target_db_path,
     batch_data <- ref_sequences[start_idx:end_idx, ]
     
     # Create parameterized query for batch
-    placeholders <- paste0("(", paste(rep("?", 5), collapse = ", "), ")")
+    placeholders <- paste0("(", paste(rep("?", 4), collapse = ", "), ")")
     values_clause <- paste(rep(placeholders, nrow(batch_data)), collapse = ", ")
     query <- paste0(
-      "INSERT INTO reference_sequences (genome_id, sequence_name, sequence_length, sequence_data, sequence_hash) VALUES ",
+      "INSERT INTO reference_sequences (genome_id, sequence_name, sequence_length, sequence) VALUES ",
       values_clause
     )
     
@@ -400,8 +400,7 @@ export_project_data <- function(source_con, target_db_path,
         batch_data$genome_id[i],
         batch_data$sequence_name[i],
         batch_data$sequence_length[i],
-        batch_data$sequence_data[i],
-        batch_data$sequence_hash[i]
+        batch_data$sequence[i]
       ))
     }
     
