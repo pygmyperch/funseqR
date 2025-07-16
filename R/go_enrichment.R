@@ -295,12 +295,16 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, verbose = T
 #' @param significance_threshold Numeric. FDR threshold for significance classification. Default is 0.05
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
-#' @return Data frame with enrichment results, sorted by adjusted p-value
+#' @return List containing:
+#' \\itemize{
+#'   \\item funseqr_results: Data frame with enrichment results in funseqR format
+#'   \\item raw_clusterprofiler: Original clusterProfiler object (if using clusterProfiler method)
+#' }
 #'
 #' @details
-#' Performs hypergeometric enrichment testing for GO terms. Tests whether each GO term
-#' is overrepresented in the foreground set compared to the background set.
-#' Applies FDR correction for multiple testing.
+#' Performs enrichment testing for GO terms. When using clusterProfiler method, 
+#' returns both converted funseqR results and the original clusterProfiler object
+#' for full access to all clusterProfiler functionality and data.
 #'
 #' @examples
 #' \dontrun{
@@ -309,10 +313,11 @@ extract_go_terms_for_enrichment <- function(con, foreground_file_id, verbose = T
 #' # Standard analysis (FDR < 0.05)
 #' bp_results <- perform_go_enrichment(go_data, "BP")
 #' 
-#' # More lenient threshold (FDR < 0.1)
-#' bp_results_lenient <- perform_go_enrichment(go_data, "BP", significance_threshold = 0.1)
+#' # Access funseqR format results
+#' funseqr_data <- bp_results$funseqr_results
 #' 
-#' head(bp_results)
+#' # Access full clusterProfiler object
+#' clusterprofiler_obj <- bp_results$raw_clusterprofiler
 #' }
 #'
 #' @keywords internal
@@ -324,7 +329,12 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
   if (method == "clusterprofiler") {
     return(.perform_clusterprofiler_enrichment(go_data, ontology, min_genes, max_genes, significance_threshold, verbose))
   } else if (method == "legacy") {
-    return(.perform_legacy_enrichment(go_data, ontology, min_genes, max_genes, significance_threshold, verbose))
+    # Legacy method returns only data frame, wrap in list for consistency
+    legacy_results <- .perform_legacy_enrichment(go_data, ontology, min_genes, max_genes, significance_threshold, verbose)
+    return(list(
+      funseqr_results = legacy_results,
+      raw_clusterprofiler = NULL
+    ))
   } else {
     stop("Invalid method. Must be 'clusterprofiler' or 'legacy'")
   }
@@ -344,7 +354,10 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
   
   if (nrow(clusterprofiler_data$term2gene) == 0) {
     if (verbose) message("  - No ", ontology, " terms found for clusterProfiler analysis")
-    return(data.frame())
+    return(list(
+      funseqr_results = data.frame(),
+      raw_clusterprofiler = NULL
+    ))
   }
   
   # Run clusterProfiler enrichment
@@ -360,13 +373,22 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
       maxGSSize = max_genes
     )
     
-    # Convert back to funseqR format
-    return(.convert_clusterprofiler_to_funseqr(enrichment_result, ontology, significance_threshold, verbose))
+    # Convert to funseqR format AND preserve raw clusterProfiler object
+    funseqr_results <- .convert_clusterprofiler_to_funseqr(enrichment_result, ontology, significance_threshold, verbose)
+    
+    return(list(
+      funseqr_results = funseqr_results,
+      raw_clusterprofiler = enrichment_result
+    ))
     
   }, error = function(e) {
     warning("clusterProfiler enrichment failed: ", e$message)
     if (verbose) message("  - Falling back to legacy method")
-    return(.perform_legacy_enrichment(go_data, ontology, min_genes, max_genes, significance_threshold, verbose))
+    legacy_results <- .perform_legacy_enrichment(go_data, ontology, min_genes, max_genes, significance_threshold, verbose)
+    return(list(
+      funseqr_results = legacy_results,
+      raw_clusterprofiler = NULL
+    ))
   })
 }
 
@@ -790,7 +812,11 @@ extract_kegg_terms_for_enrichment <- function(con, foreground_file_id, verbose =
 #' @param method Character. Enrichment method: "clusterprofiler" or "legacy". Default is "clusterprofiler"
 #' @param verbose Logical. Print progress information. Default is TRUE
 #'
-#' @return Data frame with enrichment results, sorted by adjusted p-value
+#' @return List containing:
+#' \\itemize{
+#'   \\item funseqr_results: Data frame with enrichment results in funseqR format
+#'   \\item raw_clusterprofiler: Original clusterProfiler object (if using clusterProfiler method)
+#' }
 #'
 #' @keywords internal
 perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, significance_threshold = 0.05, method = "clusterprofiler", verbose = TRUE) {
@@ -801,7 +827,12 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
   if (method == "clusterprofiler") {
     return(.perform_clusterprofiler_kegg_enrichment(kegg_data, min_genes, max_genes, significance_threshold, verbose))
   } else if (method == "legacy") {
-    return(.perform_legacy_kegg_enrichment(kegg_data, min_genes, max_genes, significance_threshold, verbose))
+    # Legacy method returns only data frame, wrap in list for consistency
+    legacy_results <- .perform_legacy_kegg_enrichment(kegg_data, min_genes, max_genes, significance_threshold, verbose)
+    return(list(
+      funseqr_results = legacy_results,
+      raw_clusterprofiler = NULL
+    ))
   } else {
     stop("Invalid method. Must be 'clusterprofiler' or 'legacy'")
   }
@@ -821,7 +852,10 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
   
   if (nrow(clusterprofiler_data$term2gene) == 0) {
     if (verbose) message("  - No KEGG pathways found for clusterProfiler analysis")
-    return(data.frame())
+    return(list(
+      funseqr_results = data.frame(),
+      raw_clusterprofiler = NULL
+    ))
   }
   
   # Run clusterProfiler enrichment
@@ -837,13 +871,22 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
       maxGSSize = max_genes
     )
     
-    # Convert back to funseqR format
-    return(.convert_clusterprofiler_kegg_to_funseqr(enrichment_result, significance_threshold, verbose))
+    # Convert to funseqR format AND preserve raw clusterProfiler object
+    funseqr_results <- .convert_clusterprofiler_kegg_to_funseqr(enrichment_result, significance_threshold, verbose)
+    
+    return(list(
+      funseqr_results = funseqr_results,
+      raw_clusterprofiler = enrichment_result
+    ))
     
   }, error = function(e) {
     warning("clusterProfiler KEGG enrichment failed: ", e$message)
     if (verbose) message("  - Falling back to legacy method")
-    return(.perform_legacy_kegg_enrichment(kegg_data, min_genes, max_genes, significance_threshold, verbose))
+    legacy_results <- .perform_legacy_kegg_enrichment(kegg_data, min_genes, max_genes, significance_threshold, verbose)
+    return(list(
+      funseqr_results = legacy_results,
+      raw_clusterprofiler = NULL
+    ))
   })
 }
 

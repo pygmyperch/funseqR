@@ -22,6 +22,7 @@
 #'   \\item summary: Workflow summary with parameters and statistics
 #'   \\item annotation_data: Raw annotation data used for enrichment
 #'   \\item enrichment_results: Enrichment test results for each annotation type
+#'   \\item raw_clusterprofiler_results: Original clusterProfiler objects with full results
 #'   \\item locus_info: Detailed table of loci with annotations and dataset membership
 #'   \\item plots: Generated visualization plots
 #'   \\item analysis_ids: Database IDs of stored enrichment analyses
@@ -87,6 +88,7 @@ ora <- function(con,
   enrichment_results <- list()
   enrichment_ids <- list()
   annotation_data <- list()
+  raw_clusterprofiler_results <- list()
   
   # Determine which analyses to run
   run_go <- annotation_type %in% c("GO", "both")
@@ -100,26 +102,33 @@ ora <- function(con,
     if (length(go_data$foreground$genes) == 0) {
       warning("No GO terms found for candidate genes.")
       enrichment_results[["GO"]] <- list()
+      raw_clusterprofiler_results[["GO"]] <- list()
     } else {
       # Perform GO enrichment for each ontology
       if (verbose) message("\n=== Step 3a: Performing GO Enrichment Analysis ===")
       go_results <- list()
       go_ids <- list()
+      go_raw_results <- list()
       
       for (ontology in ontologies) {
         if (verbose) message("  - Analyzing ", ontology, " ontology...")
         
-        results <- perform_go_enrichment(go_data, ontology, min_genes = min_genes, 
-                                       max_genes = max_genes, significance_threshold = significance_threshold,
-                                       method = method, verbose = verbose)
+        enrichment_output <- perform_go_enrichment(go_data, ontology, min_genes = min_genes, 
+                                                 max_genes = max_genes, significance_threshold = significance_threshold,
+                                                 method = method, verbose = verbose)
         
-        go_results[[ontology]] <- results
+        # Extract funseqR results and raw clusterProfiler objects
+        funseqr_results <- enrichment_output$funseqr_results
+        raw_cp_result <- enrichment_output$raw_clusterprofiler
+        
+        go_results[[ontology]] <- funseqr_results
+        go_raw_results[[ontology]] <- raw_cp_result
         
         # Store results in database if requested
-        if (store_results && nrow(results) > 0) {
+        if (store_results && nrow(funseqr_results) > 0) {
           analysis_id <- store_ora_results(
             con,
-            results, "GO", ontology, 
+            funseqr_results, "GO", ontology, 
             parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
             method = method,
             verbose = verbose
@@ -130,6 +139,7 @@ ora <- function(con,
       
       enrichment_results[["GO"]] <- go_results
       enrichment_ids[["GO"]] <- go_ids
+      raw_clusterprofiler_results[["GO"]] <- go_raw_results
     }
   }
   
@@ -145,17 +155,22 @@ ora <- function(con,
       # Perform KEGG enrichment
       if (verbose) message("\n=== Step 3b: Performing KEGG Enrichment Analysis ===")
       
-      kegg_results <- perform_kegg_enrichment(kegg_data, min_genes = min_genes, 
-                                            max_genes = max_genes, significance_threshold = significance_threshold,
-                                            method = method, verbose = verbose)
+      enrichment_output <- perform_kegg_enrichment(kegg_data, min_genes = min_genes, 
+                                              max_genes = max_genes, significance_threshold = significance_threshold,
+                                              method = method, verbose = verbose)
       
-      enrichment_results[["KEGG"]] <- list(PATHWAY = kegg_results)
+      # Extract funseqR results and raw clusterProfiler objects
+      funseqr_results <- enrichment_output$funseqr_results
+      raw_cp_result <- enrichment_output$raw_clusterprofiler
+      
+      enrichment_results[["KEGG"]] <- list(PATHWAY = funseqr_results)
+      raw_clusterprofiler_results[["KEGG"]] <- list(PATHWAY = raw_cp_result)
       
       # Store results in database if requested
-      if (store_results && nrow(kegg_results) > 0) {
+      if (store_results && nrow(funseqr_results) > 0) {
         analysis_id <- store_ora_results(
           con,
-          kegg_results, "KEGG", "PATHWAY", 
+          funseqr_results, "KEGG", "PATHWAY", 
           parameters = list(min_genes = min_genes, max_genes = max_genes, significance_threshold = significance_threshold),
           method = method,
           verbose = verbose
@@ -308,6 +323,7 @@ ora <- function(con,
     summary = workflow_summary,
     annotation_data = annotation_data,
     enrichment_results = enrichment_results,
+    raw_clusterprofiler_results = raw_clusterprofiler_results,
     locus_info = locus_info,
     plots = plots,
     analysis_ids = enrichment_ids

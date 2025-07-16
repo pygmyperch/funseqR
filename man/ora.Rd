@@ -45,6 +45,7 @@ List containing all analysis results, plots, locus information, and summary tabl
 \\item summary: Workflow summary with parameters and statistics
 \\item annotation_data: Raw annotation data used for enrichment
 \\item enrichment_results: Enrichment test results for each annotation type
+\\item raw_clusterprofiler_results: Original clusterProfiler objects with full results
 \\item locus_info: Detailed table of loci with annotations and dataset membership
 \\item plots: Generated visualization plots
 \\item analysis_ids: Database IDs of stored enrichment analyses

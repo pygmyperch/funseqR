@@ -28,15 +28,19 @@ perform_go_enrichment(
 \item{verbose}{Logical. Print progress information. Default is TRUE}
 }
 \value{
-Data frame with enrichment results, sorted by adjusted p-value
+List containing:
+\\itemize{
+\\item funseqr_results: Data frame with enrichment results in funseqR format
+\\item raw_clusterprofiler: Original clusterProfiler object (if using clusterProfiler method)
+}
 }
 \description{
 Perform GO enrichment analysis using hypergeometric test
 }
 \details{
-Performs hypergeometric enrichment testing for GO terms. Tests whether each GO term
-is overrepresented in the foreground set compared to the background set.
-Applies FDR correction for multiple testing.
+Performs enrichment testing for GO terms. When using clusterProfiler method,
+returns both converted funseqR results and the original clusterProfiler object
+for full access to all clusterProfiler functionality and data.
 }
 \examples{
 \dontrun{
@@ -45,10 +49,11 @@ go_data <- extract_go_terms_for_enrichment(con, fg_id, bg_id)
 # Standard analysis (FDR < 0.05)
 bp_results <- perform_go_enrichment(go_data, "BP")
 
-# More lenient threshold (FDR < 0.1)
-bp_results_lenient <- perform_go_enrichment(go_data, "BP", significance_threshold = 0.1)
+# Access funseqR format results
+funseqr_data <- bp_results$funseqr_results
 
-head(bp_results)
+# Access full clusterProfiler object
+clusterprofiler_obj <- bp_results$raw_clusterprofiler
 }
 
 }

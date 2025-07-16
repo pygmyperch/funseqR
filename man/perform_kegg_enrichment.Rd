@@ -27,7 +27,11 @@ perform_kegg_enrichment(
 \item{verbose}{Logical. Print progress information. Default is TRUE}
 }
 \value{
-Data frame with enrichment results, sorted by adjusted p-value
+List containing:
+\\itemize{
+\\item funseqr_results: Data frame with enrichment results in funseqR format
+\\item raw_clusterprofiler: Original clusterProfiler object (if using clusterProfiler method)
+}
 }
 \description{
 Perform KEGG pathway enrichment analysis
