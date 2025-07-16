@@ -1,10 +1,10 @@
-# Critical ORA Universe Fix
+# Critical ORA ClusterProfiler Fixes
 
-## Root Cause Identified
+## Root Causes Identified
 
-The different ORA enrichment results between the cp_enrich and simple databases are caused by an **incorrect universe parameter** in the clusterProfiler implementation.
+The different ORA enrichment results between the cp_enrich and simple databases are caused by **TWO critical bugs** in the clusterProfiler implementation.
 
-### The Problem
+### Problem 1: Incorrect Universe Parameter
 
 **Current (INCORRECT) implementation** in `.perform_clusterprofiler_enrichment()`:
 ```r
@@ -17,7 +17,19 @@ enrichment_result <- clusterProfiler::enricher(
 )
 ```
 
-**The universe should include ALL genes** (both foreground and background) for proper statistical testing.
+### Problem 2: Incomplete TERM2GENE Mapping
+
+**Current (INCORRECT) TERM2GENE building** in `.convert_go_data_to_clusterprofiler()`:
+```r
+for (gene in go_data$background$genes) {  # ❌ WRONG: only background genes
+  if (gene %in% names(go_data$background$gene2go)) {
+    gene_terms <- go_data$background$gene2go[[gene]]
+    // ... build term2gene mapping
+  }
+}
+```
+
+**BOTH issues must be fixed** for clusterProfiler to work correctly:
 
 ### Why This Matters
 
@@ -48,9 +60,9 @@ p_value <- phyper(fg_with_term - 1, bg_with_term, total_bg - bg_with_term, total
 
 This correctly accounts for the full population.
 
-### The Fix
+### The Fixes
 
-**Correct clusterProfiler implementation:**
+**Fix 1: Correct universe parameter:**
 ```r
 enrichment_result <- clusterProfiler::enricher(
   gene = go_data$foreground$genes,
@@ -59,6 +71,20 @@ enrichment_result <- clusterProfiler::enricher(
   TERM2NAME = clusterprofiler_data$term2name,
   ...
 )
+```
+
+**Fix 2: Complete TERM2GENE mapping:**
+```r
+# Include ALL genes (foreground + background) in TERM2GENE mapping
+all_genes <- c(go_data$foreground$genes, go_data$background$genes)
+all_gene2go <- c(go_data$foreground$gene2go, go_data$background$gene2go)
+
+for (gene in all_genes) {  # ✅ CORRECT: all genes
+  if (gene %in% names(all_gene2go)) {
+    gene_terms <- all_gene2go[[gene]]
+    // ... build complete term2gene mapping
+  }
+}
 ```
 
 ### Impact
@@ -72,9 +98,10 @@ The cp_enrich database likely used the legacy method (correct statistics), while
 
 ### Next Steps
 
-1. **Fix the universe parameter** in `.perform_clusterprofiler_enrichment()`
-2. **Apply same fix** to `.perform_clusterprofiler_kegg_enrichment()`  
-3. **Test the fix** by re-running ORA and comparing results
-4. **Verify** that fixed results match the legacy method results
+1. ✅ **Fix the universe parameter** in `.perform_clusterprofiler_enrichment()`
+2. ✅ **Fix the TERM2GENE mapping** in `.convert_go_data_to_clusterprofiler()`
+3. ✅ **Apply same fixes** to `.perform_clusterprofiler_kegg_enrichment()` and `.convert_kegg_data_to_clusterprofiler()`  
+4. **Test the fixes** by re-running ORA and comparing results
+5. **Verify** that fixed results match the legacy method results
 
-This is a critical bug that affects the statistical validity of all clusterProfiler-based enrichment analyses.
+These are critical bugs that completely invalidated the statistical validity of all clusterProfiler-based enrichment analyses. The TERM2GENE mapping bug was especially severe as it prevented clusterProfiler from seeing foreground genes at all.

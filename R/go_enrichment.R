@@ -516,9 +516,13 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
   # For each gene, find which GO terms it has
   term2gene_list <- list()
   
-  for (gene in go_data$background$genes) {
-    if (gene %in% names(go_data$background$gene2go)) {
-      gene_terms <- go_data$background$gene2go[[gene]]
+  # Include ALL genes (foreground + background) in TERM2GENE mapping
+  all_genes <- c(go_data$foreground$genes, go_data$background$genes)
+  all_gene2go <- c(go_data$foreground$gene2go, go_data$background$gene2go)
+  
+  for (gene in all_genes) {
+    if (gene %in% names(all_gene2go)) {
+      gene_terms <- all_gene2go[[gene]]
       ontology_gene_terms <- intersect(gene_terms, ontology_terms$go_id)
       
       if (length(ontology_gene_terms) > 0) {
@@ -906,9 +910,13 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
   # Create TERM2GENE mapping (pathway -> gene)
   term2gene_list <- list()
   
-  for (gene in kegg_data$background$genes) {
-    if (gene %in% names(kegg_data$background$gene2pathway)) {
-      gene_pathways <- kegg_data$background$gene2pathway[[gene]]
+  # Include ALL genes (foreground + background) in TERM2GENE mapping
+  all_genes <- c(kegg_data$foreground$genes, kegg_data$background$genes)
+  all_gene2pathway <- c(kegg_data$foreground$gene2pathway, kegg_data$background$gene2pathway)
+  
+  for (gene in all_genes) {
+    if (gene %in% names(all_gene2pathway)) {
+      gene_pathways <- all_gene2pathway[[gene]]
       pathway_gene_pathways <- intersect(gene_pathways, pathways$kegg_id)
       
       if (length(pathway_gene_pathways) > 0) {
