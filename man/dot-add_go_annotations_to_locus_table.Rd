@@ -2,7 +2,7 @@
 % Please edit documentation in R/go_workflow.R
 \name{.add_go_annotations_to_locus_table}
 \alias{.add_go_annotations_to_locus_table}
-\title{Add GO annotations to locus table}
+\title{Add GO annotations to locus table (LEGACY - DO NOT USE)}
 \usage{
 .add_go_annotations_to_locus_table(
   con,
@@ -13,6 +13,6 @@
 )
 }
 \description{
-Add GO annotations to locus table
+Add GO annotations to locus table (LEGACY - DO NOT USE)
 }
 \keyword{internal}

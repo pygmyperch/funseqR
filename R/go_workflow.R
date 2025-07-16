@@ -3,19 +3,15 @@
 #' High-level wrapper functions for complete GO enrichment workflows
 #'
 
-#' Over-Representation Analysis (ORA) workflow for GO and KEGG enrichment
+#' Over-Representation Analysis (ORA) for stored candidate loci
 #'
 #' @param con Database connection object
-#' @param candidate_vcf_file Character. Candidate specification: "stored" (default) uses candidates 
-#'   from database, or path to candidate VCF file for backwards compatibility
-#' @param blast_param_id Integer. Optional. Specific BLAST run ID to use for both datasets.
-#'   If NULL, uses all available annotations. Default is NULL.
-#' @param annotation_type Character. Type of annotations to analyze: "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "both", or "all". Default is "both"
+#' @param annotation_type Character. Type of annotations to analyze: "GO", "KEGG", or "both". Default is "both"
 #' @param ontologies Character vector. GO ontologies to test: c("BP", "MF", "CC"). Only used when GO is included. Default is c("BP", "MF", "CC")
 #' @param min_genes Integer. Minimum genes for term/pathway testing. Default is 5
 #' @param max_genes Integer. Maximum genes for term/pathway testing. Default is 500
 #' @param significance_threshold Numeric. FDR threshold for significance. Default is 0.05
-#' @param method Character. Enrichment method: "clusterprofiler" or "legacy". Default is "clusterprofiler"
+#' @param method Character. Enrichment method: "clusterprofiler". Default is "clusterprofiler"
 #' @param store_results Logical. Store results in database. Default is TRUE
 #' @param create_plots Logical. Generate visualization plots. Default is TRUE
 #' @param verbose Logical. Print progress information. Default is TRUE
@@ -24,7 +20,6 @@
 #' \\itemize{
 #'   \\item status: Analysis completion status
 #'   \\item summary: Workflow summary with parameters and statistics
-#'   \\item candidate_import: Information about imported candidate file
 #'   \\item annotation_data: Raw annotation data used for enrichment
 #'   \\item enrichment_results: Enrichment test results for each annotation type
 #'   \\item locus_info: Detailed table of loci with annotations and dataset membership
@@ -33,98 +28,58 @@
 #' }
 #'
 #' @details
-#' This function performs complete Over-Representation Analysis (ORA) workflow:
-#' 1. Import candidate loci file
-#' 2. Link to existing annotations
-#' 3. Extract annotations for both datasets (optionally filtered by BLAST run)
-#' 4. Perform enrichment testing using clusterProfiler:
-#'    - GO: Tests specified ontologies (BP, MF, CC)
-#'    - KEGG: Tests pathway enrichment
-#'    - both: Runs both GO and KEGG analyses
-#' 5. Create visualizations
-#' 6. Store results in unified database schema
+#' This function performs Over-Representation Analysis (ORA) using the streamlined 
+#' "one database = one analysis" architecture:
 #' 
-#' When blast_param_id is specified, only annotations from that specific BLAST run
-#' are used for both candidate and background datasets, ensuring methodological 
-#' consistency and enabling comparison of different annotation strategies.
+#' 1. Uses stored candidate loci from the `candidate_loci` table
+#' 2. Background is automatically generated as "all annotations NOT in candidate_loci"
+#' 3. Performs enrichment testing using clusterProfiler for GO and/or KEGG
+#' 4. Creates visualizations and stores results in database
 #' 
-#' The locus_info table contains one row per unique genomic locus from the background
-#' dataset, with proper labeling of candidate vs. background loci (no duplicates).
+#' **Prerequisites:**
+#' - Must have candidates defined using `define_locus_statistics()` or `define_candidate_loci()`
+#' - Must have functional annotations in database from `annotate_blast_results()`
 #'
 #' @examples
-#' \dontrun{
+#' \\dontrun{
 #' con <- connect_funseq_db("analysis.db")
 #' 
-#' # Streamlined workflow - uses stored candidates (default)
+#' # Basic ORA analysis
 #' results <- ora(con)
 #' 
-#' # Run only GO enrichment with stored candidates
+#' # GO-only analysis
 #' go_results <- ora(con, annotation_type = "GO")
 #' 
-#' # Use custom significance threshold with stored candidates
-#' results_lenient <- ora(con, significance_threshold = 0.1)
-#' 
-#' # Use only ORF-based annotations for both GO and KEGG
-#' results_orf <- ora(con, blast_param_id = 1)
-#' 
-#' # Backwards compatibility - use VCF file
-#' results_vcf <- ora(con, candidate_vcf_file = "candidates.vcf")
+#' # More lenient significance threshold
+#' results <- ora(con, significance_threshold = 0.1)
 #' 
 #' print(results$summary)
 #' print(results$plots$GO_BP_bubble)
-#' print(results$plots$KEGG_pathway_bubble)
 #' }
 #'
 #' @export
-ora <- function(con, candidate_vcf_file = "stored",
-                   annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
-                   ontologies = c("BP", "MF", "CC"), 
-                   min_genes = 5, max_genes = 500, significance_threshold = 0.05,
-                   method = "clusterprofiler", store_results = TRUE, create_plots = TRUE, verbose = TRUE) {
+ora <- function(con, 
+                annotation_type = c("both", "GO", "KEGG"), 
+                ontologies = c("BP", "MF", "CC"), 
+                min_genes = 5, max_genes = 500, significance_threshold = 0.05,
+                method = "clusterprofiler", store_results = TRUE, create_plots = TRUE, verbose = TRUE) {
   
   # Validate annotation_type parameter
   annotation_type <- match.arg(annotation_type)
   
   if (verbose) message("=== Starting Over-Representation Analysis (ORA) ===")
   if (verbose) message("Annotation types: ", annotation_type)
-  if (verbose) message("Using all available annotations (one database = one analysis project)")
+  if (verbose) message("Using stored candidates (one database = one analysis)")
   
-  # Note: Background data comes from the same annotation database, no file needed
+  # Step 1: Validate stored candidates exist
+  if (verbose) message("\n=== Step 1: Validating Stored Candidates ===")
   
-  # Step 1: Process candidate loci
-  if (verbose) message("\n=== Step 1: Processing Candidate Loci ===")
-  
-  # Handle stored candidates (streamlined workflow)
-  if (candidate_vcf_file == "stored") {
-    if (verbose) message("  - Using stored candidate loci from database")
-    
-    # Check if candidates exist in database
-    candidate_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM candidate_loci")$count
-    if (candidate_count == 0) {
-      stop("No candidate loci found in database. Please run define_locus_statistics() with a candidate_threshold or define_candidate_loci() first.")
-    }
-    
-    if (verbose) message("  - Found ", candidate_count, " stored candidate loci")
-    
-    # For stored candidates, we'll use a special marker and handle this in the enrichment functions
-    candidate_file_id <- "stored"
-    candidate_import <- list(file_id = "stored", vcf_count = candidate_count)
-    
-  } else if (is.character(candidate_vcf_file) && file.exists(candidate_vcf_file)) {
-    # Import candidate VCF file (backwards compatibility)
-    if (verbose) message("  - Importing candidate VCF file: ", candidate_vcf_file)
-    candidate_import <- import_vcf(con, candidate_vcf_file)
-    candidate_file_id <- candidate_import$file_id
-    
-  } else if (is.numeric(candidate_vcf_file)) {
-    # Use existing file ID (backwards compatibility)
-    if (verbose) message("  - Using existing file ID: ", candidate_vcf_file)
-    candidate_file_id <- candidate_vcf_file
-    candidate_import <- list(file_id = candidate_file_id)
-    
-  } else {
-    stop("candidate_vcf_file must be 'stored', a valid file path, or existing file ID")
+  candidate_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM candidate_loci")$count
+  if (candidate_count == 0) {
+    stop("No candidate loci found in database. Please run define_locus_statistics() with a candidate_threshold or define_candidate_loci() first.")
   }
+  
+  if (verbose) message("  - Found ", candidate_count, " stored candidate loci")
   
   # Step 2: Extract annotation data and perform enrichment
   if (verbose) message("\n=== Step 2: Extracting Annotation Data ===")
@@ -134,15 +89,12 @@ ora <- function(con, candidate_vcf_file = "stored",
   annotation_data <- list()
   
   # Determine which analyses to run
-  run_go <- annotation_type %in% c("GO", "both", "all")
-  run_kegg <- annotation_type %in% c("KEGG", "both", "all")
-  run_pfam <- annotation_type %in% c("Pfam", "all")
-  run_interpro <- annotation_type %in% c("InterPro", "all")
-  run_eggnog <- annotation_type %in% c("eggNOG", "all")
+  run_go <- annotation_type %in% c("GO", "both")
+  run_kegg <- annotation_type %in% c("KEGG", "both")
   
   if (run_go) {
     if (verbose) message("  - Extracting GO terms...")
-    go_data <- extract_go_terms_for_enrichment(con, candidate_file_id, verbose = verbose)
+    go_data <- extract_go_terms_for_enrichment(con, "stored", verbose = verbose)
     annotation_data[["GO"]] <- go_data
     
     if (length(go_data$foreground$genes) == 0) {
@@ -183,7 +135,7 @@ ora <- function(con, candidate_vcf_file = "stored",
   
   if (run_kegg) {
     if (verbose) message("  - Extracting KEGG pathways...")
-    kegg_data <- extract_kegg_terms_for_enrichment(con, candidate_file_id, verbose = verbose)
+    kegg_data <- extract_kegg_terms_for_enrichment(con, "stored", verbose = verbose)
     annotation_data[["KEGG"]] <- kegg_data
     
     if (length(kegg_data$foreground$genes) == 0) {
@@ -320,9 +272,6 @@ ora <- function(con, candidate_vcf_file = "stored",
   
   workflow_summary <- list(
     analysis_date = Sys.time(),
-    candidate_file = candidate_vcf_file,
-    candidate_file_id = candidate_file_id,
-    background_file_id = background_file_id,
     annotation_type = annotation_type,
     foreground_genes = total_foreground,
     background_genes = total_background,
@@ -334,8 +283,7 @@ ora <- function(con, candidate_vcf_file = "stored",
   # Step 6: Create locus information table
   if (verbose) message("\n=== Step 6: Creating Locus Information Table ===")
   
-  locus_info <- .create_locus_info_table(con, candidate_file_id, background_file_id, 
-                                         blast_param_id, annotation_type, verbose)
+  locus_info <- .create_stored_locus_info_table(con, annotation_type, verbose)
   
   if (verbose) {
     message("=== ORA Workflow Complete ===")
@@ -358,7 +306,6 @@ ora <- function(con, candidate_vcf_file = "stored",
   return(list(
     status = "success",
     summary = workflow_summary,
-    candidate_import = candidate_import,
     annotation_data = annotation_data,
     enrichment_results = enrichment_results,
     locus_info = locus_info,
@@ -765,7 +712,132 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
   ))
 }
 
-#' Create locus information table for ORA results
+#' Create locus information table for stored candidates ORA results
+#' @keywords internal
+.create_stored_locus_info_table <- function(con, annotation_type, verbose) {
+  
+  if (verbose) message("  - Creating locus information table for stored candidates...")
+  
+  # Get all loci with annotations using the "one database = one analysis" model
+  # Uses blast_param_id = 1 consistently
+  locus_query <- "
+    SELECT DISTINCT 
+      vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id,
+      vd.chromosome,
+      vd.position,
+      vd.ref,
+      vd.alt,
+      a.uniprot_accession,
+      a.entry_name,
+      a.gene_names,
+      br.e_value,
+      br.bit_score,
+      br.percent_identity
+    FROM vcf_data vd
+    LEFT JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
+    LEFT JOIN blast_results br ON fs.flanking_id = br.flanking_id AND br.blast_param_id = 1
+    LEFT JOIN annotations a ON br.blast_result_id = a.blast_result_id
+    ORDER BY vd.chromosome, vd.position
+  "
+  
+  # Execute query with error handling
+  locus_data <- tryCatch({
+    DBI::dbGetQuery(con, locus_query)
+  }, error = function(e) {
+    if (verbose) message("    - Error executing locus query: ", e$message)
+    return(data.frame())
+  })
+  
+  if (nrow(locus_data) == 0) {
+    if (verbose) message("    - No loci found")
+    return(data.frame())
+  }
+  
+  if (verbose) {
+    message("    - Found ", nrow(locus_data), " total loci entries")
+    annotated_count <- sum(!is.na(locus_data$uniprot_accession))
+    unannotated_count <- sum(is.na(locus_data$uniprot_accession))
+    message("      - With annotations: ", annotated_count)
+    message("      - Without annotations: ", unannotated_count)
+  }
+  
+  # Add annotation details based on annotation_type
+  available_tables <- DBI::dbListTables(con)
+  
+  if (annotation_type %in% c("GO", "both") && "go_terms" %in% available_tables) {
+    locus_data <- .add_go_annotations_to_stored_locus_table(con, locus_data, verbose)
+  }
+  
+  if (annotation_type %in% c("KEGG", "both") && "kegg_references" %in% available_tables) {
+    locus_data <- .add_kegg_annotations_to_stored_locus_table(con, locus_data, verbose)
+  }
+  
+  # Identify candidate loci from stored candidates
+  if (verbose) message("    - Identifying candidate loci...")
+  
+  candidate_locus_ids <- DBI::dbGetQuery(con, "
+    SELECT DISTINCT 
+      vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id
+    FROM candidate_loci cl
+    JOIN vcf_data vd ON cl.chromosome = vd.chromosome AND cl.position = vd.position
+  ")$locus_id
+  
+  if (verbose) message("    - Found ", length(candidate_locus_ids), " candidate loci out of ", 
+                       length(unique(locus_data$locus_id)), " total loci")
+  
+  # Create summary by locus (aggregate multiple annotations per locus)
+  summary_data <- tryCatch({
+    locus_data %>%
+      dplyr::group_by(locus_id, chromosome, position, ref, alt) %>%
+      dplyr::summarise(
+        uniprot_accessions = paste(unique(na.omit(uniprot_accession)), collapse = ";"),
+        gene_names = paste(unique(na.omit(gene_names)), collapse = ";"),
+        entry_names = paste(unique(na.omit(entry_name)), collapse = ";"),
+        best_e_value = ifelse(all(is.na(e_value)), NA_real_, min(e_value, na.rm = TRUE)),
+        best_bit_score = ifelse(all(is.na(bit_score)), NA_real_, max(bit_score, na.rm = TRUE)),
+        avg_percent_identity = ifelse(all(is.na(percent_identity)), NA_real_, 
+                                      round(mean(percent_identity, na.rm = TRUE), 2)),
+        annotation_count = dplyr::n(),
+        .groups = "drop"
+      ) %>%
+      dplyr::mutate(
+        dataset_type = ifelse(locus_id %in% candidate_locus_ids, "candidate", "background")
+      )
+  }, error = function(e) {
+    if (verbose) message("    - Error processing locus data: ", e$message)
+    return(data.frame())
+  })
+  
+  # Add aggregated annotation information if present
+  if ("go_terms" %in% names(locus_data)) {
+    go_summary <- locus_data %>%
+      dplyr::group_by(locus_id) %>%
+      dplyr::summarise(
+        go_terms = paste(unique(na.omit(unlist(strsplit(go_terms, ";")))), collapse = ";"),
+        go_categories = paste(unique(na.omit(unlist(strsplit(go_categories, ";")))), collapse = ";"),
+        .groups = "drop"
+      )
+    
+    summary_data <- merge(summary_data, go_summary, by = "locus_id", all.x = TRUE)
+  }
+  
+  if ("kegg_pathways" %in% names(locus_data)) {
+    kegg_summary <- locus_data %>%
+      dplyr::group_by(locus_id) %>%
+      dplyr::summarise(
+        kegg_pathways = paste(unique(na.omit(unlist(strsplit(kegg_pathways, ";")))), collapse = ";"),
+        .groups = "drop"
+      )
+    
+    summary_data <- merge(summary_data, kegg_summary, by = "locus_id", all.x = TRUE)
+  }
+  
+  if (verbose) message("    - Created locus table with ", nrow(summary_data), " unique loci")
+  
+  return(as.data.frame(summary_data))
+}
+
+#' Create locus information table for ORA results (LEGACY - DO NOT USE)
 #' @keywords internal
 .create_locus_info_table <- function(con, candidate_file_id, background_file_id, blast_param_id, annotation_type, verbose) {
   
@@ -950,7 +1022,96 @@ filter_enriched_loci <- function(ora_results, significance_threshold = 0.05,
   return(as.data.frame(summary_data))
 }
 
-#' Add GO annotations to locus table
+#' Add GO annotations to stored locus table
+#' @keywords internal  
+.add_go_annotations_to_stored_locus_table <- function(con, locus_data, verbose) {
+  
+  # Get GO terms for the loci using blast_param_id = 1
+  locus_ids_str <- paste0("'", paste(unique(locus_data$locus_id), collapse = "', '"), "'")
+  
+  go_query <- paste0("
+    SELECT DISTINCT 
+      vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id,
+      gt.go_id,
+      gt.go_term,
+      gt.go_category
+    FROM vcf_data vd
+    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id
+    JOIN annotations a ON br.blast_result_id = a.blast_result_id
+    JOIN go_terms gt ON a.annotation_id = gt.annotation_id
+    WHERE vd.vcf_id || '_' || vd.chromosome || '_' || vd.position IN (", locus_ids_str, ")
+      AND br.blast_param_id = 1
+  ")
+  
+  go_data <- DBI::dbGetQuery(con, go_query)
+  
+  if (nrow(go_data) > 0) {
+    # Aggregate GO terms by locus
+    go_summary <- go_data %>%
+      dplyr::group_by(locus_id) %>%
+      dplyr::summarise(
+        go_terms = paste(unique(go_id), collapse = ";"),
+        go_names = paste(unique(go_term), collapse = ";"),
+        go_categories = paste(unique(go_category), collapse = ";"),
+        .groups = "drop"
+      )
+    
+    # Merge with locus data
+    locus_data <- merge(locus_data, go_summary, by = "locus_id", all.x = TRUE)
+  } else {
+    locus_data$go_terms <- NA_character_
+    locus_data$go_names <- NA_character_
+    locus_data$go_categories <- NA_character_
+  }
+  
+  return(locus_data)
+}
+
+#' Add KEGG annotations to stored locus table
+#' @keywords internal
+.add_kegg_annotations_to_stored_locus_table <- function(con, locus_data, verbose) {
+  
+  # Get KEGG pathways for the loci using blast_param_id = 1
+  locus_ids_str <- paste0("'", paste(unique(locus_data$locus_id), collapse = "', '"), "'")
+  
+  kegg_query <- paste0("
+    SELECT DISTINCT 
+      vd.vcf_id || '_' || vd.chromosome || '_' || vd.position as locus_id,
+      kr.kegg_id,
+      kr.pathway_name
+    FROM vcf_data vd
+    JOIN flanking_sequences fs ON vd.vcf_id = fs.vcf_id
+    JOIN blast_results br ON fs.flanking_id = br.flanking_id
+    JOIN annotations a ON br.blast_result_id = a.blast_result_id
+    JOIN kegg_references kr ON a.annotation_id = kr.annotation_id
+    WHERE vd.vcf_id || '_' || vd.chromosome || '_' || vd.position IN (", locus_ids_str, ")
+      AND br.blast_param_id = 1
+  ")
+  
+  kegg_data <- DBI::dbGetQuery(con, kegg_query)
+  
+  if (nrow(kegg_data) > 0) {
+    # Aggregate KEGG pathways by locus
+    kegg_summary <- kegg_data %>%
+      dplyr::group_by(locus_id) %>%
+      dplyr::summarise(
+        kegg_pathways = paste(unique(kegg_id), collapse = ";"),
+        kegg_pathway_names = paste(unique(pathway_name), collapse = ";"),
+        .groups = "drop"
+      )
+    
+    # Merge with locus data
+    locus_data <- merge(locus_data, kegg_summary, by = "locus_id", all.x = TRUE)
+  } else {
+    locus_data$kegg_pathways <- NA_character_
+    locus_data$kegg_pathway_names <- NA_character_
+  }
+  
+  return(locus_data)
+}
+
+#' Add GO annotations to locus table (LEGACY - DO NOT USE)
 #' @keywords internal
 .add_go_annotations_to_locus_table <- function(con, locus_data, where_clause, params, verbose) {
   

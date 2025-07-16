@@ -6,8 +6,7 @@
 \usage{
 ora(
   con,
-  candidate_vcf_file = "stored",
-  annotation_type = c("both", "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "all"),
+  annotation_type = c("both", "GO", "KEGG"),
   ontologies = c("BP", "MF", "CC"),
   min_genes = 5,
   max_genes = 500,
@@ -21,10 +20,7 @@ ora(
 \arguments{
 \item{con}{Database connection object}
 
-\item{candidate_vcf_file}{Character. Candidate specification: "stored" (default) uses candidates
-from database, or path to candidate VCF file for backwards compatibility}
-
-\item{annotation_type}{Character. Type of annotations to analyze: "GO", "KEGG", "Pfam", "InterPro", "eggNOG", "both", or "all". Default is "both"}
+\item{annotation_type}{Character. Type of annotations to analyze: "GO", "KEGG", or "both". Default is "both"}
 
 \item{ontologies}{Character vector. GO ontologies to test: c("BP", "MF", "CC"). Only used when GO is included. Default is c("BP", "MF", "CC")}
 
@@ -34,23 +30,19 @@ from database, or path to candidate VCF file for backwards compatibility}
 
 \item{significance_threshold}{Numeric. FDR threshold for significance. Default is 0.05}
 
-\item{method}{Character. Enrichment method: "clusterprofiler" or "legacy". Default is "clusterprofiler"}
+\item{method}{Character. Enrichment method: "clusterprofiler". Default is "clusterprofiler"}
 
 \item{store_results}{Logical. Store results in database. Default is TRUE}
 
 \item{create_plots}{Logical. Generate visualization plots. Default is TRUE}
 
 \item{verbose}{Logical. Print progress information. Default is TRUE}
-
-\item{blast_param_id}{Integer. Optional. Specific BLAST run ID to use for both datasets.
-If NULL, uses all available annotations. Default is NULL.}
 }
 \value{
 List containing all analysis results, plots, locus information, and summary tables:
 \\itemize{
 \\item status: Analysis completion status
 \\item summary: Workflow summary with parameters and statistics
-\\item candidate_import: Information about imported candidate file
 \\item annotation_data: Raw annotation data used for enrichment
 \\item enrichment_results: Enrichment test results for each annotation type
 \\item locus_info: Detailed table of loci with annotations and dataset membership
@@ -62,52 +54,38 @@ List containing all analysis results, plots, locus information, and summary tabl
 High-level wrapper functions for complete GO enrichment workflows
 }
 \details{
-Over-Representation Analysis (ORA) workflow for GO and KEGG enrichment
+Over-Representation Analysis (ORA) for stored candidate loci
 
-This function performs complete Over-Representation Analysis (ORA) workflow:
+This function performs Over-Representation Analysis (ORA) using the streamlined
+"one database = one analysis" architecture:
 \enumerate{
-\item Import candidate loci file
-\item Link to existing annotations
-\item Extract annotations for both datasets (optionally filtered by BLAST run)
-\item Perform enrichment testing using clusterProfiler:
+\item Uses stored candidate loci from the \code{candidate_loci} table
+\item Background is automatically generated as "all annotations NOT in candidate_loci"
+\item Performs enrichment testing using clusterProfiler for GO and/or KEGG
+\item Creates visualizations and stores results in database
+}
+
+\strong{Prerequisites:}
 \itemize{
-\item GO: Tests specified ontologies (BP, MF, CC)
-\item KEGG: Tests pathway enrichment
-\item both: Runs both GO and KEGG analyses
+\item Must have candidates defined using \code{define_locus_statistics()} or \code{define_candidate_loci()}
+\item Must have functional annotations in database from \code{annotate_blast_results()}
 }
-\item Create visualizations
-\item Store results in unified database schema
-}
-
-When blast_param_id is specified, only annotations from that specific BLAST run
-are used for both candidate and background datasets, ensuring methodological
-consistency and enabling comparison of different annotation strategies.
-
-The locus_info table contains one row per unique genomic locus from the background
-dataset, with proper labeling of candidate vs. background loci (no duplicates).
 }
 \examples{
-\dontrun{
+\\dontrun{
 con <- connect_funseq_db("analysis.db")
 
-# Streamlined workflow - uses stored candidates (default)
+# Basic ORA analysis
 results <- ora(con)
 
-# Run only GO enrichment with stored candidates
+# GO-only analysis
 go_results <- ora(con, annotation_type = "GO")
 
-# Use custom significance threshold with stored candidates
-results_lenient <- ora(con, significance_threshold = 0.1)
-
-# Use only ORF-based annotations for both GO and KEGG
-results_orf <- ora(con, blast_param_id = 1)
-
-# Backwards compatibility - use VCF file
-results_vcf <- ora(con, candidate_vcf_file = "candidates.vcf")
+# More lenient significance threshold
+results <- ora(con, significance_threshold = 0.1)
 
 print(results$summary)
 print(results$plots$GO_BP_bubble)
-print(results$plots$KEGG_pathway_bubble)
 }
 
 }

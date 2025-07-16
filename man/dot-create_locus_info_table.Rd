@@ -2,7 +2,7 @@
 % Please edit documentation in R/go_workflow.R
 \name{.create_locus_info_table}
 \alias{.create_locus_info_table}
-\title{Create locus information table for ORA results}
+\title{Create locus information table for ORA results (LEGACY - DO NOT USE)}
 \usage{
 .create_locus_info_table(
   con,
@@ -14,6 +14,6 @@
 )
 }
 \description{
-Create locus information table for ORA results
+Create locus information table for ORA results (LEGACY - DO NOT USE)
 }
 \keyword{internal}
