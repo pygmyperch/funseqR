@@ -364,7 +364,7 @@ perform_go_enrichment <- function(go_data, ontology = "BP", min_genes = 5, max_g
   tryCatch({
     enrichment_result <- clusterProfiler::enricher(
       gene = go_data$foreground$genes,
-      universe = go_data$background$genes,
+      universe = c(go_data$foreground$genes, go_data$background$genes),
       TERM2GENE = clusterprofiler_data$term2gene,
       TERM2NAME = clusterprofiler_data$term2name,
       pvalueCutoff = 1.0,  # Get all results, filter later
@@ -862,7 +862,7 @@ perform_kegg_enrichment <- function(kegg_data, min_genes = 5, max_genes = 500, s
   tryCatch({
     enrichment_result <- clusterProfiler::enricher(
       gene = kegg_data$foreground$genes,
-      universe = kegg_data$background$genes,
+      universe = c(kegg_data$foreground$genes, kegg_data$background$genes),
       TERM2GENE = clusterprofiler_data$term2gene,
       TERM2NAME = clusterprofiler_data$term2name,
       pvalueCutoff = 1.0,  # Get all results, filter later
