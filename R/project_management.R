@@ -574,20 +574,32 @@ export_project_data <- function(source_con, target_db_path,
         ", list(new_file_id[1], fs_record$chromosome, fs_record$position))
         
         if (nrow(new_vcf) > 0) {
-          # Add to export data with updated vcf_id
-          export_record <- data.frame(
-            vcf_id = new_vcf$vcf_id[1],
-            chromosome = fs_record$chromosome,
-            position = fs_record$position,
-            start_position = fs_record$start_position,
-            end_position = fs_record$end_position,
-            raw_sequence = fs_record$raw_sequence,
-            orf_nucleotide = fs_record$orf_nucleotide,
-            orf_amino_acid = fs_record$orf_amino_acid,
-            created_date = fs_record$created_date
-          )
+          # Find corresponding sequence in target database
+          source_seq <- DBI::dbGetQuery(source_con, 
+            "SELECT sequence_name FROM reference_sequences WHERE sequence_id = ?",
+            list(fs_record$sequence_id))
           
-          flanking_export <- rbind(flanking_export, export_record)
+          if (nrow(source_seq) > 0) {
+            target_seq <- DBI::dbGetQuery(target_con,
+              "SELECT sequence_id FROM reference_sequences WHERE sequence_name = ?",
+              list(source_seq$sequence_name[1]))
+            
+            if (nrow(target_seq) > 0) {
+              # Add to export data with updated vcf_id and sequence_id
+              export_record <- data.frame(
+                vcf_id = new_vcf$vcf_id[1],
+                sequence_id = target_seq$sequence_id[1],
+                flank_size = fs_record$flank_size,
+                start_position = fs_record$start_position,
+                end_position = fs_record$end_position,
+                sequence = fs_record$sequence,
+                seq_type = fs_record$seq_type,
+                seq_length = fs_record$seq_length
+              )
+              
+              flanking_export <- rbind(flanking_export, export_record)
+            }
+          }
         }
       }
     }
