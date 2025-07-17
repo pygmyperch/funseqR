@@ -94,10 +94,10 @@ create_schema <- function(con, verbose = TRUE) {
     )
   ")
   
-  # Create unique index for vcf_id and seq_type combination
+  # Create index for vcf_id and position combination
   if (verbose) message("Creating flanking_sequences index...")
   DBI::dbExecute(con, "
-    CREATE UNIQUE INDEX idx_flanking_vcf_seqtype ON flanking_sequences (vcf_id, seq_type)
+    CREATE INDEX idx_flanking_vcf_pos ON flanking_sequences (vcf_id, chromosome, position)
   ")
 
   if (verbose) message("Creating blast_parameters table...")
