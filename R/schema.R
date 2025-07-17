@@ -329,7 +329,7 @@ create_schema <- function(con, verbose = TRUE) {
 
   # Flanking sequences indexes
   DBI::dbExecute(con, "CREATE INDEX idx_flanking_vcf_id ON flanking_sequences (vcf_id)")
-  DBI::dbExecute(con, "CREATE INDEX idx_flanking_seq_id ON flanking_sequences (sequence_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_flanking_chrom_pos ON flanking_sequences (chromosome, position)")
 
   # BLAST results indexes
   DBI::dbExecute(con, "CREATE INDEX idx_blast_res_param ON blast_results (blast_param_id)")
