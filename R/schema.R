@@ -82,22 +82,22 @@ create_schema <- function(con, verbose = TRUE) {
     CREATE TABLE flanking_sequences (
       flanking_id INTEGER PRIMARY KEY,
       vcf_id INTEGER NOT NULL,
-      chromosome TEXT NOT NULL,
-      position INTEGER NOT NULL,
+      sequence_id INTEGER NOT NULL,
+      flank_size INTEGER NOT NULL,
       start_position INTEGER NOT NULL,
       end_position INTEGER NOT NULL,
-      raw_sequence TEXT,
-      orf_nucleotide TEXT,
-      orf_amino_acid TEXT,
-      created_date TEXT NOT NULL,
-      FOREIGN KEY (vcf_id) REFERENCES vcf_data (vcf_id)
+      sequence TEXT NOT NULL,
+      seq_type TEXT NOT NULL DEFAULT 'raw',
+      seq_length INTEGER,
+      FOREIGN KEY (vcf_id) REFERENCES vcf_data (vcf_id),
+      FOREIGN KEY (sequence_id) REFERENCES reference_sequences (sequence_id)
     )
   ")
   
-  # Create index for vcf_id and position combination
+  # Create index for vcf_id and sequence_id combination
   if (verbose) message("Creating flanking_sequences index...")
   DBI::dbExecute(con, "
-    CREATE INDEX idx_flanking_vcf_pos ON flanking_sequences (vcf_id, chromosome, position)
+    CREATE INDEX idx_flanking_vcf_seq ON flanking_sequences (vcf_id, sequence_id)
   ")
 
   if (verbose) message("Creating blast_parameters table...")
@@ -329,7 +329,8 @@ create_schema <- function(con, verbose = TRUE) {
 
   # Flanking sequences indexes
   DBI::dbExecute(con, "CREATE INDEX idx_flanking_vcf_id ON flanking_sequences (vcf_id)")
-  DBI::dbExecute(con, "CREATE INDEX idx_flanking_chrom_pos ON flanking_sequences (chromosome, position)")
+  DBI::dbExecute(con, "CREATE INDEX idx_flanking_seq_id ON flanking_sequences (sequence_id)")
+  DBI::dbExecute(con, "CREATE INDEX idx_flanking_seq_type ON flanking_sequences (seq_type)")
 
   # BLAST results indexes
   DBI::dbExecute(con, "CREATE INDEX idx_blast_res_param ON blast_results (blast_param_id)")
