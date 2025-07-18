@@ -47,7 +47,7 @@ import_vcf <- function(con, vcf_file, verbose = TRUE) {
   DBI::dbExecute(
     con,
     "INSERT INTO vcf_objects (file_id, vcf_object_blob, created_date) VALUES (?, ?, ?)",
-    params = list(file_id, vcf_blob, format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+    params = list(file_id, list(vcf_blob), format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
   )
 
   # Extract data
