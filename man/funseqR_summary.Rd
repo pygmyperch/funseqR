@@ -4,21 +4,23 @@
 \alias{funseqR_summary}
 \title{Database summary functions for funseqR}
 \usage{
-funseqR_summary(con, type = "data")
+funseqR_summary(con, type = "database")
 }
 \arguments{
 \item{con}{A database connection object created by \code{\link{connect_funseq_db}} or \code{\link{create_funseq_db}}.}
 
-\item{type}{Character string specifying the type of summary to generate.
-Currently only "data" is supported, which returns record counts for all tables.
-Future versions will support additional types like "analyses".}
+\item{type}{Character string specifying the type of summary to generate:
+\describe{
+\item{database}{Overall database summary with record counts for all tables}
+\item{input_data}{Detailed summaries for core data tables (input_files, vcf_data, reference_genomes, reference_sequences, flanking_sequences)}
+\item{blast}{BLAST-related summaries (blast_parameters, blast_results, blast_database_metadata)}
+\item{annotation}{Annotation summaries (annotations, go_terms, kegg_references, pfam_domains, interpro_families, eggnog_categories)}
+\item{analyses}{Analysis summaries (ora_analyses, ora_results, candidate_loci, locus_statistics)}
+}}
 }
 \value{
-A data frame with columns:
-\describe{
-\item{table_name}{Character. Name of the database table.}
-\item{record_count}{Integer. Number of records in the table.}
-}
+For type "database": data.frame with table_name and record_count columns.
+For other types: named list with detailed data.frame summaries for each table in that group.
 }
 \description{
 These functions provide summary information about the contents of a funseqR database.
@@ -26,21 +28,39 @@ These functions provide summary information about the contents of a funseqR data
 \details{
 Summarize funseqR database contents
 
-This function provides a summary of the data stored in a funseqR database.
-It returns a data frame with information about each table and the number of records.
+This function provides comprehensive summaries of funseqR database contents.
+Supports multiple summary types organized by workflow stages.
 
-The function uses a template-based approach to ensure consistent output structure
-regardless of database contents. All possible funseqR tables are included in the
-output, with a count of 0 for tables that don't exist or are empty.
+The function provides summaries organized by workflow stages:
+\itemize{
+\item \strong{database}: Template-based overview of all tables with record counts
+\item \strong{input_data}: File information, VCF statistics, genome details, sequence info
+\item \strong{blast}: BLAST run parameters, hit statistics, database metadata
+\item \strong{annotation}: Functional annotation coverage and distributions
+\item \strong{analyses}: Enrichment results and candidate loci information
+}
 }
 \examples{
 \dontrun{
 # Connect to a funseqR database
 con <- connect_funseq_db("my_project.db")
 
-# Get data summary
-summary_df <- funseqR_summary(con, type = "data")
-print(summary_df)
+# Get overall database summary
+db_summary <- funseqR_summary(con, type = "database")
+print(db_summary)
+
+# Get detailed input data summaries
+input_summary <- funseqR_summary(con, type = "input_data")
+names(input_summary)  # "input_files", "vcf_data", etc.
+
+# Get BLAST-related summaries
+blast_summary <- funseqR_summary(con, type = "blast")
+
+# Get annotation summaries
+annotation_summary <- funseqR_summary(con, type = "annotation")
+
+# Get analysis summaries
+analysis_summary <- funseqR_summary(con, type = "analyses")
 
 # Close connection
 close_funseq_db(con)
