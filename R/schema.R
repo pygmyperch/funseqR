@@ -54,6 +54,17 @@ create_schema <- function(con, verbose = TRUE) {
     )
   ")
 
+  if (verbose) message("Creating vcf_objects table...")
+  DBI::dbExecute(con, "
+    CREATE TABLE vcf_objects (
+      vcf_object_id INTEGER PRIMARY KEY,
+      file_id INTEGER NOT NULL,
+      vcf_object_blob BLOB NOT NULL,
+      created_date TEXT NOT NULL,
+      FOREIGN KEY (file_id) REFERENCES input_files (file_id)
+    )
+  ")
+
   if (verbose) message("Creating reference_genomes table...")
   DBI::dbExecute(con, "
     CREATE TABLE reference_genomes (
@@ -322,6 +333,9 @@ create_schema <- function(con, verbose = TRUE) {
   # VCF data indexes
   DBI::dbExecute(con, "CREATE INDEX idx_vcf_chrom_pos ON vcf_data (chromosome, position)")
   DBI::dbExecute(con, "CREATE INDEX idx_vcf_file_id ON vcf_data (file_id)")
+  
+  # VCF objects indexes
+  DBI::dbExecute(con, "CREATE INDEX idx_vcf_objects_file_id ON vcf_objects (file_id)")
 
   # Sequences indexes
   DBI::dbExecute(con, "CREATE INDEX idx_ref_seq_name ON reference_sequences (sequence_name)")

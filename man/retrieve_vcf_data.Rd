@@ -16,9 +16,9 @@ retrieve_vcf_data(con, file_id, export_path = NULL, verbose = TRUE)
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 }
 \value{
-A data frame containing the VCF data in standard VCF format.
+A data frame containing the VCF data from the vcf_data table.
 }
 \description{
 This function retrieves VCF data from the database and optionally exports it to a VCF file.
-The function reconstructs the original VCF format from the parsed database storage.
+Uses the stored vcfR object for fast, faithful export.
 }

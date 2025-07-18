@@ -40,6 +40,15 @@ import_vcf <- function(con, vcf_file, verbose = TRUE) {
   # Read VCF file
   if (verbose) message("Reading VCF file...")
   vcf_data <- vcfR::read.vcfR(vcf_file, verbose = verbose)
+  
+  # Store the vcfR object for fast export
+  if (verbose) message("Storing vcfR object...")
+  vcf_blob <- serialize(vcf_data, NULL)
+  DBI::dbExecute(
+    con,
+    "INSERT INTO vcf_objects (file_id, vcf_object_blob, created_date) VALUES (?, ?, ?)",
+    params = list(file_id, vcf_blob, format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+  )
 
   # Extract data
   if (verbose) message("Extracting VCF data...")
@@ -308,17 +317,17 @@ vcf_to_bed <- function(con, file_id, output_file = NULL, verbose = TRUE) {
 #' Retrieve VCF data from database with optional export
 #'
 #' This function retrieves VCF data from the database and optionally exports it to a VCF file.
-#' The function reconstructs the original VCF format from the parsed database storage.
+#' Uses the stored vcfR object for fast, faithful export.
 #'
 #' @param con A database connection object.
 #' @param file_id The ID of the input file containing the VCF data.
 #' @param export_path Optional. File path to export the VCF data. If NULL, no export is performed.
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #'
-#' @return A data frame containing the VCF data in standard VCF format.
+#' @return A data frame containing the VCF data from the vcf_data table.
 #'
 #' @importFrom DBI dbGetQuery
-#' @importFrom jsonlite fromJSON
+#' @importFrom vcfR write.vcf
 #' @export
 retrieve_vcf_data <- function(con, file_id, export_path = NULL, verbose = TRUE) {
   # Validate connection
@@ -338,14 +347,38 @@ retrieve_vcf_data <- function(con, file_id, export_path = NULL, verbose = TRUE) 
     stop("VCF file with ID ", file_id, " not found.")
   }
   
-  # Get VCF data from database
-  if (verbose) message("Retrieving VCF data from database...")
+  # Export to file if requested using stored vcfR object
+  if (!is.null(export_path)) {
+    if (verbose) message("Retrieving stored vcfR object...")
+    
+    # Get the stored vcfR object
+    vcf_blob_result <- DBI::dbGetQuery(
+      con,
+      "SELECT vcf_object_blob FROM vcf_objects WHERE file_id = ?",
+      params = list(file_id)
+    )
+    
+    if (nrow(vcf_blob_result) == 0) {
+      stop("No stored vcfR object found for file ID ", file_id, 
+           ". This file may have been imported before vcfR object storage was implemented.")
+    }
+    
+    # Unserialize the vcfR object
+    if (verbose) message("Unserializing vcfR object...")
+    vcf_object <- unserialize(vcf_blob_result$vcf_object_blob[[1]])
+    
+    # Export using vcfR's native function (fast!)
+    if (verbose) message("Exporting VCF file to: ", export_path)
+    vcfR::write.vcf(vcf_object, file = export_path)
+    
+    if (verbose) message("VCF file exported successfully!")
+  }
+  
+  # Return parsed data for analysis
+  if (verbose) message("Retrieving parsed VCF data...")
   vcf_data <- DBI::dbGetQuery(
     con,
-    "SELECT chromosome, position, id, ref, alt, qual, filter, info, format, sample_data 
-     FROM vcf_data 
-     WHERE file_id = ? 
-     ORDER BY chromosome, position",
+    "SELECT * FROM vcf_data WHERE file_id = ? ORDER BY chromosome, position",
     params = list(file_id)
   )
   
@@ -353,88 +386,9 @@ retrieve_vcf_data <- function(con, file_id, export_path = NULL, verbose = TRUE) 
     stop("No VCF data found for file ID ", file_id)
   }
   
-  if (verbose) message("Found ", nrow(vcf_data), " VCF records")
+  if (verbose) message("Retrieved ", nrow(vcf_data), " VCF records")
   
-  # Reconstruct VCF format
-  if (verbose) message("Reconstructing VCF format...")
-  
-  # Start with standard VCF columns
-  vcf_output <- data.frame(
-    "#CHROM" = vcf_data$chromosome,
-    POS = vcf_data$position,
-    ID = ifelse(is.na(vcf_data$id), ".", vcf_data$id),
-    REF = vcf_data$ref,
-    ALT = vcf_data$alt,
-    QUAL = ifelse(is.na(vcf_data$qual), ".", vcf_data$qual),
-    FILTER = ifelse(is.na(vcf_data$filter), ".", vcf_data$filter),
-    INFO = ifelse(is.na(vcf_data$info), ".", vcf_data$info),
-    stringsAsFactors = FALSE
-  )
-  
-  # Add FORMAT column if present
-  if (!all(is.na(vcf_data$format))) {
-    vcf_output$FORMAT <- ifelse(is.na(vcf_data$format), ".", vcf_data$format)
-  }
-  
-  # Add sample columns if present
-  if (!all(is.na(vcf_data$sample_data))) {
-    if (verbose) message("Processing sample data...")
-    
-    # Parse first non-NA sample_data to get sample names
-    sample_names <- NULL
-    for (i in seq_len(nrow(vcf_data))) {
-      if (!is.na(vcf_data$sample_data[i])) {
-        tryCatch({
-          sample_data <- jsonlite::fromJSON(vcf_data$sample_data[i])
-          sample_names <- names(sample_data)
-          break
-        }, error = function(e) {
-          # Skip if JSON parsing fails
-        })
-      }
-    }
-    
-    # Add sample columns if we found sample names
-    if (!is.null(sample_names)) {
-      for (sample_name in sample_names) {
-        sample_column <- character(nrow(vcf_data))
-        
-        for (i in seq_len(nrow(vcf_data))) {
-          if (!is.na(vcf_data$sample_data[i])) {
-            tryCatch({
-              sample_data <- jsonlite::fromJSON(vcf_data$sample_data[i])
-              sample_column[i] <- ifelse(is.null(sample_data[[sample_name]]), ".", sample_data[[sample_name]])
-            }, error = function(e) {
-              sample_column[i] <- "."
-            })
-          } else {
-            sample_column[i] <- "."
-          }
-        }
-        
-        vcf_output[[sample_name]] <- sample_column
-      }
-    }
-  }
-  
-  # Export to file if requested
-  if (!is.null(export_path)) {
-    if (verbose) message("Exporting VCF data to: ", export_path)
-    
-    # Write VCF header
-    writeLines("##fileformat=VCFv4.2", export_path)
-    writeLines(paste0("##fileDate=", format(Sys.Date(), "%Y%m%d")), export_path, append = TRUE)
-    writeLines(paste0("##source=funseqR_retrieve_vcf_data"), export_path, append = TRUE)
-    writeLines(paste0("##reference=", file_info$file_name[1]), export_path, append = TRUE)
-    
-    # Write data
-    write.table(vcf_output, export_path, sep = "\t", row.names = FALSE, col.names = TRUE, 
-                quote = FALSE, append = TRUE)
-    
-    if (verbose) message("VCF file exported successfully!")
-  }
-  
-  return(vcf_output)
+  return(vcf_data)
 }
 
 #' Get locus names in chromosome:position format
