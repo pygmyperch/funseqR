@@ -488,14 +488,15 @@ compile_funseq_results <- function(con,
   if (verbose) message("    - Mapping enriched terms to individual loci...")
   
   # Create a data frame to store locus-level enrichment information
+  # Initialize with the correct number of rows (one for each locus)
   locus_enrichment <- data.frame(
-    locus_id = character(0),
-    enriched = logical(0),
-    enrichment_fdr = numeric(0),
-    enrichment_pvalue = numeric(0),
-    enriched_terms = character(0),
-    enriched_term_ids = character(0),
-    enrichment_analysis_ids = character(0),
+    locus_id = data$locus_id,
+    enriched = FALSE,
+    enrichment_fdr = NA_real_,
+    enrichment_pvalue = NA_real_,
+    enriched_terms = "",
+    enriched_term_ids = "",
+    enrichment_analysis_ids = "",
     stringsAsFactors = FALSE
   )
   
@@ -553,17 +554,15 @@ compile_funseq_results <- function(con,
       }
     }
     
-    # Add to results
-    locus_enrichment <- rbind(locus_enrichment, data.frame(
-      locus_id = locus_id,
-      enriched = is_enriched,
-      enrichment_fdr = if (is_enriched) best_fdr else NA_real_,
-      enrichment_pvalue = if (is_enriched) best_pvalue else NA_real_,
-      enriched_terms = if (is_enriched) paste(unique(matched_terms), collapse = ";") else "",
-      enriched_term_ids = if (is_enriched) paste(unique(matched_term_ids), collapse = ";") else "",
-      enrichment_analysis_ids = if (is_enriched) paste(unique(matched_analyses), collapse = ";") else "",
-      stringsAsFactors = FALSE
-    ))
+    # Update the row in locus_enrichment (instead of rbind)
+    if (is_enriched) {
+      locus_enrichment$enriched[i] <- TRUE
+      locus_enrichment$enrichment_fdr[i] <- best_fdr
+      locus_enrichment$enrichment_pvalue[i] <- best_pvalue
+      locus_enrichment$enriched_terms[i] <- paste(unique(matched_terms), collapse = ";")
+      locus_enrichment$enriched_term_ids[i] <- paste(unique(matched_term_ids), collapse = ";")
+      locus_enrichment$enrichment_analysis_ids[i] <- paste(unique(matched_analyses), collapse = ";")
+    }
   }
   
   if (verbose) {
