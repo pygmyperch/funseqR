@@ -11,7 +11,8 @@ retrieve_vcf_data(con, file_id, export_path = NULL, verbose = TRUE)
 
 \item{file_id}{The ID of the input file containing the VCF data.}
 
-\item{export_path}{Optional. File path to export the VCF data. If NULL, no export is performed.}
+\item{export_path}{Optional. File path to export the VCF data. If NULL, no export is performed.
+The file will be gzip compressed, and .gz extension will be added if not present.}
 
 \item{verbose}{Logical. If TRUE, print progress information. Default is TRUE.}
 }
@@ -20,5 +21,13 @@ A data frame containing the VCF data from the vcf_data table.
 }
 \description{
 This function retrieves VCF data from the database and optionally exports it to a VCF file.
-Uses the stored vcfR object for fast, faithful export.
+Uses the stored vcfR object for fast, faithful export. Note that exported files are
+automatically gzip compressed by vcfR, and the .gz extension will be appended to the
+filename if not already present.
+}
+\details{
+The export functionality uses the vcfR object stored during import for maximum speed
+and fidelity. The exported file is automatically gzip compressed by vcfR, resulting
+in significantly smaller file sizes compared to uncompressed VCF files while maintaining
+full compatibility with standard bioinformatics tools.
 }

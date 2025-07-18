@@ -317,14 +317,23 @@ vcf_to_bed <- function(con, file_id, output_file = NULL, verbose = TRUE) {
 #' Retrieve VCF data from database with optional export
 #'
 #' This function retrieves VCF data from the database and optionally exports it to a VCF file.
-#' Uses the stored vcfR object for fast, faithful export.
+#' Uses the stored vcfR object for fast, faithful export. Note that exported files are 
+#' automatically gzip compressed by vcfR, and the .gz extension will be appended to the
+#' filename if not already present.
 #'
 #' @param con A database connection object.
 #' @param file_id The ID of the input file containing the VCF data.
 #' @param export_path Optional. File path to export the VCF data. If NULL, no export is performed.
+#'   The file will be gzip compressed, and .gz extension will be added if not present.
 #' @param verbose Logical. If TRUE, print progress information. Default is TRUE.
 #'
 #' @return A data frame containing the VCF data from the vcf_data table.
+#'
+#' @details
+#' The export functionality uses the vcfR object stored during import for maximum speed
+#' and fidelity. The exported file is automatically gzip compressed by vcfR, resulting
+#' in significantly smaller file sizes compared to uncompressed VCF files while maintaining
+#' full compatibility with standard bioinformatics tools.
 #'
 #' @importFrom DBI dbGetQuery
 #' @importFrom vcfR write.vcf
@@ -349,6 +358,12 @@ retrieve_vcf_data <- function(con, file_id, export_path = NULL, verbose = TRUE) 
   
   # Export to file if requested using stored vcfR object
   if (!is.null(export_path)) {
+    # Auto-append .gz extension if not present (vcfR compresses output)
+    if (!grepl("\\.gz$", export_path, ignore.case = TRUE)) {
+      export_path <- paste0(export_path, ".gz")
+      if (verbose) message("Note: vcfR compresses output - appending .gz extension")
+    }
+    
     if (verbose) message("Retrieving stored vcfR object...")
     
     # Get the stored vcfR object
@@ -368,10 +383,10 @@ retrieve_vcf_data <- function(con, file_id, export_path = NULL, verbose = TRUE) 
     vcf_object <- unserialize(vcf_blob_result$vcf_object_blob[[1]])
     
     # Export using vcfR's native function (fast!)
-    if (verbose) message("Exporting VCF file to: ", export_path)
+    if (verbose) message("Exporting compressed VCF file to: ", export_path)
     vcfR::write.vcf(vcf_object, file = export_path)
     
-    if (verbose) message("VCF file exported successfully!")
+    if (verbose) message("Compressed VCF file exported successfully!")
   }
   
   # Return parsed data for analysis
