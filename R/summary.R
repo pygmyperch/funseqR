@@ -520,13 +520,13 @@ funseqR_summary <- function(con, type = "database") {
           oa.annotation_type,
           oa.term_type,
           COUNT(*) as total_terms_tested,
-          COUNT(CASE WHEN or.p_adjusted <= 0.05 THEN 1 END) as significant_05,
-          COUNT(CASE WHEN or.p_adjusted <= 0.1 THEN 1 END) as significant_10,
-          ROUND(MIN(or.p_adjusted), 6) as min_fdr,
-          ROUND(MAX(or.fold_enrichment), 2) as max_enrichment,
-          ROUND(AVG(or.fold_enrichment), 2) as avg_enrichment
-        FROM ora_results or
-        JOIN ora_analyses oa ON or.analysis_id = oa.analysis_id
+          COUNT(CASE WHEN ore.p_adjusted <= 0.05 THEN 1 END) as significant_05,
+          COUNT(CASE WHEN ore.p_adjusted <= 0.1 THEN 1 END) as significant_10,
+          ROUND(MIN(ore.p_adjusted), 6) as min_fdr,
+          ROUND(MAX(ore.fold_enrichment), 2) as max_enrichment,
+          ROUND(AVG(ore.fold_enrichment), 2) as avg_enrichment
+        FROM ora_results ore
+        JOIN ora_analyses oa ON ore.analysis_id = oa.analysis_id
         GROUP BY oa.annotation_type, oa.term_type
         ORDER BY oa.annotation_type, oa.term_type
       ")
@@ -570,7 +570,9 @@ funseqR_summary <- function(con, type = "database") {
           ROUND(MAX(statistic), 4) as max_statistic,
           ROUND(AVG(statistic), 4) as mean_statistic,
           ROUND(
-            (SELECT statistic FROM locus_statistics ORDER BY statistic LIMIT 1 OFFSET (COUNT(*)/2))
+            (SELECT statistic FROM locus_statistics ORDER BY statistic LIMIT 1 OFFSET (
+              (SELECT COUNT(*) FROM locus_statistics)/2
+            ))
           , 4) as median_statistic
         FROM locus_statistics
       ")
