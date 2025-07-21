@@ -16,6 +16,7 @@ funseqR_summary(con, type = "database")
 \item{blast}{BLAST-related summaries (blast_parameters, blast_results, blast_database_metadata)}
 \item{annotation}{Annotation summaries (annotations, go_terms, kegg_references, pfam_domains, interpro_families, eggnog_categories)}
 \item{analyses}{Analysis summaries (ora_analyses, ora_results, candidate_loci, locus_statistics)}
+\item{methods}{Methods documentation for reproducibility (logged commands, parameters, software versions)}
 }}
 }
 \value{
@@ -38,6 +39,7 @@ The function provides summaries organized by workflow stages:
 \item \strong{blast}: BLAST run parameters, hit statistics, database metadata
 \item \strong{annotation}: Functional annotation coverage and distributions
 \item \strong{analyses}: Enrichment results and candidate loci information
+\item \strong{methods}: Complete methods documentation for reproducibility including commands, parameters, and software versions
 }
 }
 \examples{
@@ -61,6 +63,9 @@ annotation_summary <- funseqR_summary(con, type = "annotation")
 
 # Get analysis summaries
 analysis_summary <- funseqR_summary(con, type = "analyses")
+
+# Get methods documentation for reproducibility
+methods_summary <- funseqR_summary(con, type = "methods")
 
 # Close connection
 close_funseq_db(con)

@@ -18,6 +18,7 @@
 #'     \item{blast}{BLAST-related summaries (blast_parameters, blast_results, blast_database_metadata)}
 #'     \item{annotation}{Annotation summaries (annotations, go_terms, kegg_references, pfam_domains, interpro_families, eggnog_categories)}
 #'     \item{analyses}{Analysis summaries (ora_analyses, ora_results, candidate_loci, locus_statistics)}
+#'     \item{methods}{Methods documentation for reproducibility (logged commands, parameters, software versions)}
 #'   }
 #'
 #' @return For type "database": data.frame with table_name and record_count columns.
@@ -31,6 +32,7 @@
 #'   \item \strong{blast}: BLAST run parameters, hit statistics, database metadata
 #'   \item \strong{annotation}: Functional annotation coverage and distributions
 #'   \item \strong{analyses}: Enrichment results and candidate loci information
+#'   \item \strong{methods}: Complete methods documentation for reproducibility including commands, parameters, and software versions
 #' }
 #'
 #' @importFrom DBI dbListTables dbGetQuery
@@ -57,6 +59,9 @@
 #' # Get analysis summaries
 #' analysis_summary <- funseqR_summary(con, type = "analyses")
 #' 
+#' # Get methods documentation for reproducibility
+#' methods_summary <- funseqR_summary(con, type = "methods")
+#' 
 #' # Close connection
 #' close_funseq_db(con)
 #' }
@@ -69,7 +74,7 @@ funseqR_summary <- function(con, type = "database") {
   }
   
   # Validate type parameter
-  valid_types <- c("database", "input_data", "blast", "annotation", "analyses")
+  valid_types <- c("database", "input_data", "blast", "annotation", "analyses", "methods")
   if (!type %in% valid_types) {
     stop("Invalid type. Supported types: ", paste(valid_types, collapse = ", "))
   }
@@ -107,7 +112,8 @@ funseqR_summary <- function(con, type = "database") {
         # Utility tables
         "uniprot_cache",
         "locus_statistics",
-        "candidate_loci"
+        "candidate_loci",
+        "method_log"
       ),
       record_count = 0L,
       stringsAsFactors = FALSE
@@ -144,6 +150,9 @@ funseqR_summary <- function(con, type = "database") {
     
   } else if (type == "analyses") {
     return(.get_analyses_summary(con))
+    
+  } else if (type == "methods") {
+    return(.get_methods_summary(con))
   }
 }
 
@@ -584,4 +593,248 @@ funseqR_summary <- function(con, type = "database") {
   }
   
   return(result)
+}
+
+#' Get methods summaries for reproducibility
+#' @keywords internal
+.get_methods_summary <- function(con) {
+  existing_tables <- DBI::dbListTables(con)
+  result <- list()
+  
+  # Check if method_log table exists
+  if (!"method_log" %in% existing_tables) {
+    result$status <- data.frame(
+      message = "Method logging not available - method_log table not found",
+      note = "This database was created before method logging was implemented"
+    )
+    return(result)
+  }
+  
+  # Get overall method log summary
+  result$overview <- tryCatch({
+    DBI::dbGetQuery(con, "
+      SELECT 
+        method_type,
+        COUNT(*) as total_executions,
+        COUNT(DISTINCT function_name) as unique_functions,
+        COUNT(CASE WHEN success = 1 THEN 1 END) as successful_executions,
+        COUNT(CASE WHEN success = 0 THEN 1 END) as failed_executions,
+        MIN(execution_date) as first_execution,
+        MAX(execution_date) as last_execution,
+        ROUND(AVG(execution_time_seconds), 2) as avg_execution_time_seconds
+      FROM method_log
+      GROUP BY method_type
+      ORDER BY method_type
+    ")
+  }, error = function(e) {
+    data.frame(message = paste("Error querying method log overview:", e$message))
+  })
+  
+  # Get BLAST methods
+  result$blast_methods <- tryCatch({
+    DBI::dbGetQuery(con, "
+      SELECT 
+        function_name,
+        command_text,
+        parameters_json,
+        execution_date,
+        execution_time_seconds,
+        success
+      FROM method_log
+      WHERE method_type = 'blast'
+      ORDER BY execution_date DESC
+    ")
+  }, error = function(e) {
+    data.frame(message = paste("Error querying BLAST methods:", e$message))
+  })
+  
+  # Get annotation methods
+  result$annotation_methods <- tryCatch({
+    DBI::dbGetQuery(con, "
+      SELECT 
+        function_name,
+        command_text,
+        parameters_json,
+        execution_date,
+        execution_time_seconds,
+        success
+      FROM method_log
+      WHERE method_type = 'annotation'
+      ORDER BY execution_date DESC
+    ")
+  }, error = function(e) {
+    data.frame(message = paste("Error querying annotation methods:", e$message))
+  })
+  
+  # Get enrichment methods
+  result$enrichment_methods <- tryCatch({
+    DBI::dbGetQuery(con, "
+      SELECT 
+        function_name,
+        command_text,
+        parameters_json,
+        execution_date,
+        execution_time_seconds,
+        success
+      FROM method_log
+      WHERE method_type = 'enrichment'
+      ORDER BY execution_date DESC
+    ")
+  }, error = function(e) {
+    data.frame(message = paste("Error querying enrichment methods:", e$message))
+  })
+  
+  # Get sequence processing methods
+  result$sequence_methods <- tryCatch({
+    DBI::dbGetQuery(con, "
+      SELECT 
+        function_name,
+        command_text,
+        parameters_json,
+        execution_date,
+        execution_time_seconds,
+        success
+      FROM method_log
+      WHERE method_type = 'sequence'
+      ORDER BY execution_date DESC
+    ")
+  }, error = function(e) {
+    data.frame(message = paste("Error querying sequence methods:", e$message))
+  })
+  
+  # Get statistical methods
+  result$statistical_methods <- tryCatch({
+    DBI::dbGetQuery(con, "
+      SELECT 
+        function_name,
+        command_text,
+        parameters_json,
+        execution_date,
+        execution_time_seconds,
+        success
+      FROM method_log
+      WHERE method_type = 'statistical'
+      ORDER BY execution_date DESC
+    ")
+  }, error = function(e) {
+    data.frame(message = paste("Error querying statistical methods:", e$message))
+  })
+  
+  # Get software environment information
+  result$software_environment <- tryCatch({
+    DBI::dbGetQuery(con, "
+      SELECT DISTINCT
+        r_version,
+        package_versions,
+        MIN(execution_date) as first_used,
+        MAX(execution_date) as last_used
+      FROM method_log
+      WHERE r_version IS NOT NULL
+      GROUP BY r_version, package_versions
+      ORDER BY first_used DESC
+    ")
+  }, error = function(e) {
+    data.frame(message = paste("Error querying software environment:", e$message))
+  })
+  
+  # Generate formatted methods text for scientific papers
+  result$methods_text <- tryCatch({
+    .format_methods_text(con)
+  }, error = function(e) {
+    data.frame(message = paste("Error generating methods text:", e$message))
+  })
+  
+  return(result)
+}
+
+#' Format methods information for scientific papers
+#' @keywords internal
+.format_methods_text <- function(con) {
+  # Get summary statistics for formatting
+  overview <- DBI::dbGetQuery(con, "
+    SELECT 
+      method_type,
+      COUNT(*) as executions,
+      COUNT(DISTINCT function_name) as functions
+    FROM method_log
+    GROUP BY method_type
+  ")
+  
+  # Get software versions
+  software <- DBI::dbGetQuery(con, "
+    SELECT DISTINCT r_version, package_versions
+    FROM method_log
+    WHERE r_version IS NOT NULL
+    LIMIT 1
+  ")
+  
+  # Get BLAST parameters
+  blast_params <- DBI::dbGetQuery(con, "
+    SELECT DISTINCT parameters_json
+    FROM method_log
+    WHERE method_type = 'blast'
+    LIMIT 1
+  ")
+  
+  # Get annotation parameters
+  annotation_params <- DBI::dbGetQuery(con, "
+    SELECT DISTINCT parameters_json
+    FROM method_log
+    WHERE method_type = 'annotation'
+    LIMIT 1
+  ")
+  
+  # Get enrichment parameters
+  enrichment_params <- DBI::dbGetQuery(con, "
+    SELECT DISTINCT parameters_json
+    FROM method_log
+    WHERE method_type = 'enrichment'
+    LIMIT 1
+  ")
+  
+  # Format the text
+  methods_text <- ""
+  
+  # Software section
+  if (nrow(software) > 0 && !is.na(software$r_version[1])) {
+    methods_text <- paste0(methods_text, 
+      "All analyses were performed using the funseqR package in R version ", 
+      software$r_version[1], ". ")
+  }
+  
+  # BLAST section
+  if ("blast" %in% overview$method_type) {
+    methods_text <- paste0(methods_text, 
+      "Sequence similarity searches were performed using BLAST. ")
+    if (nrow(blast_params) > 0 && !is.na(blast_params$parameters_json[1])) {
+      methods_text <- paste0(methods_text, "BLAST parameters: ", 
+                            blast_params$parameters_json[1], ". ")
+    }
+  }
+  
+  # Annotation section
+  if ("annotation" %in% overview$method_type) {
+    methods_text <- paste0(methods_text, 
+      "Functional annotations were retrieved from the UniProt database. ")
+    if (nrow(annotation_params) > 0 && !is.na(annotation_params$parameters_json[1])) {
+      methods_text <- paste0(methods_text, "Annotation parameters: ", 
+                            annotation_params$parameters_json[1], ". ")
+    }
+  }
+  
+  # Enrichment section
+  if ("enrichment" %in% overview$method_type) {
+    methods_text <- paste0(methods_text, 
+      "Over-representation analysis was performed using the clusterProfiler package. ")
+    if (nrow(enrichment_params) > 0 && !is.na(enrichment_params$parameters_json[1])) {
+      methods_text <- paste0(methods_text, "Enrichment parameters: ", 
+                            enrichment_params$parameters_json[1], ". ")
+    }
+  }
+  
+  return(data.frame(
+    section = "Methods",
+    text = methods_text,
+    note = "This text was automatically generated from logged method parameters"
+  ))
 }

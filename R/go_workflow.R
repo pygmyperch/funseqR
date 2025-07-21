@@ -68,6 +68,24 @@ ora <- function(con,
   # Validate annotation_type parameter
   annotation_type <- match.arg(annotation_type)
   
+  # Log method execution start
+  log_method_execution(
+    con = con,
+    method_type = "enrichment",
+    function_name = "ora",
+    parameters = list(
+      annotation_type = annotation_type,
+      ontologies = ontologies,
+      min_genes = min_genes,
+      max_genes = max_genes,
+      significance_threshold = significance_threshold,
+      method = method,
+      store_results = store_results,
+      create_plots = create_plots
+    ),
+    verbose = verbose
+  )
+  
   if (verbose) message("=== Starting Over-Representation Analysis (ORA) ===")
   if (verbose) message("Annotation types: ", annotation_type)
   if (verbose) message("Using stored candidates (one database = one analysis)")
@@ -117,6 +135,24 @@ ora <- function(con,
                                                  max_genes = max_genes, significance_threshold = significance_threshold,
                                                  method = method, verbose = verbose)
         
+        # Log GO enrichment execution
+        log_method_execution(
+          con = con,
+          method_type = "enrichment",
+          function_name = "clusterProfiler_GO",
+          command_text = paste0("enrichGO(ont = '", ontology, "', minGSSize = ", min_genes, ", maxGSSize = ", max_genes, ", pvalueCutoff = ", significance_threshold, ")"),
+          parameters = list(
+            ontology = ontology,
+            method = method,
+            min_genes = min_genes,
+            max_genes = max_genes,
+            significance_threshold = significance_threshold,
+            foreground_genes = length(go_data$foreground$genes),
+            background_genes = length(go_data$background$genes)
+          ),
+          verbose = FALSE
+        )
+        
         # Extract funseqR results and raw clusterProfiler objects
         funseqr_results <- enrichment_output$funseqr_results
         raw_cp_result <- enrichment_output$raw_clusterprofiler
@@ -158,6 +194,23 @@ ora <- function(con,
       enrichment_output <- perform_kegg_enrichment(kegg_data, min_genes = min_genes, 
                                               max_genes = max_genes, significance_threshold = significance_threshold,
                                               method = method, verbose = verbose)
+      
+      # Log KEGG enrichment execution
+      log_method_execution(
+        con = con,
+        method_type = "enrichment",
+        function_name = "clusterProfiler_KEGG",
+        command_text = paste0("enrichKEGG(organism = 'hsa', minGSSize = ", min_genes, ", maxGSSize = ", max_genes, ", pvalueCutoff = ", significance_threshold, ")"),
+        parameters = list(
+          method = method,
+          min_genes = min_genes,
+          max_genes = max_genes,
+          significance_threshold = significance_threshold,
+          foreground_genes = length(kegg_data$foreground$genes),
+          background_genes = length(kegg_data$background$genes)
+        ),
+        verbose = FALSE
+      )
       
       # Extract funseqR results and raw clusterProfiler objects
       funseqr_results <- enrichment_output$funseqr_results
@@ -317,6 +370,25 @@ ora <- function(con,
       message("Locus information table created with ", nrow(locus_info), " entries")
     }
   }
+  
+  # Log method execution completion
+  log_method_execution(
+    con = con,
+    method_type = "enrichment",
+    function_name = "ora_complete",
+    parameters = list(
+      annotation_type = annotation_type,
+      analyses_performed = length(enrichment_ids),
+      significant_results = sum(sapply(enrichment_results, function(x) {
+        if (is.list(x) && length(x) > 0) {
+          sum(sapply(x, function(y) if (is.data.frame(y)) sum(y$p.adjust <= significance_threshold, na.rm = TRUE) else 0))
+        } else 0
+      })),
+      analysis_ids = unlist(enrichment_ids),
+      success = TRUE
+    ),
+    verbose = verbose
+  )
   
   return(list(
     status = "success",

@@ -327,6 +327,23 @@ create_schema <- function(con, verbose = TRUE) {
     )
   ")
 
+  if (verbose) message("Creating method_log table...")
+  DBI::dbExecute(con, "
+    CREATE TABLE method_log (
+      log_id INTEGER PRIMARY KEY,
+      method_type TEXT NOT NULL,
+      function_name TEXT NOT NULL,
+      command_text TEXT,
+      parameters_json TEXT,
+      execution_date TEXT NOT NULL,
+      r_version TEXT,
+      package_versions TEXT,
+      execution_time_seconds REAL,
+      success BOOLEAN DEFAULT TRUE,
+      error_message TEXT
+    )
+  ")
+
   # Create indexes
   if (verbose) message("Creating indexes...")
 
@@ -395,6 +412,12 @@ create_schema <- function(con, verbose = TRUE) {
   DBI::dbExecute(con, "CREATE INDEX idx_candidate_loci_chrom_pos ON candidate_loci (chromosome, position)")
   DBI::dbExecute(con, "CREATE INDEX idx_candidate_loci_method ON candidate_loci (method)")
   DBI::dbExecute(con, "CREATE INDEX idx_candidate_loci_threshold ON candidate_loci (threshold)")
+
+  # Method log indexes
+  DBI::dbExecute(con, "CREATE INDEX idx_method_log_type ON method_log (method_type)")
+  DBI::dbExecute(con, "CREATE INDEX idx_method_log_function ON method_log (function_name)")
+  DBI::dbExecute(con, "CREATE INDEX idx_method_log_date ON method_log (execution_date)")
+  DBI::dbExecute(con, "CREATE INDEX idx_method_log_success ON method_log (success)")
 
   if (verbose) message("Schema creation complete.")
 

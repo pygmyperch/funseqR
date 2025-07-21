@@ -189,6 +189,24 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 1, e_value_th
     stop("Database connection is invalid. Please reconnect to the database.")
   }
 
+  # Log method execution start
+  log_method_execution(
+    con = con,
+    method_type = "annotation",
+    function_name = "annotate_blast_results",
+    parameters = list(
+      blast_param_id = blast_param_id,
+      max_hits = max_hits,
+      e_value_threshold = e_value_threshold,
+      batch_size = batch_size,
+      offline_mode = offline_mode,
+      use_cache = use_cache,
+      store_cache = store_cache,
+      evidence_keep = evidence_keep
+    ),
+    verbose = verbose
+  )
+
   # Check if BLAST parameters exist
   params <- DBI::dbGetQuery(
     con,
@@ -277,12 +295,46 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 1, e_value_th
       tryCatch({
         api_result <- query_uniprot_api(acc, debug = enable_debug)
         api_calls <- api_calls + 1
+        
+        # Log API call details
+        if (!is.null(api_result)) {
+          log_method_execution(
+            con = con,
+            method_type = "annotation",
+            function_name = "uniprot_api_call",
+            command_text = api_result$url,
+            parameters = list(
+              accession = acc,
+              status_code = api_result$status_code,
+              api_endpoint = "UniProt REST API",
+              success = !is.null(api_result$data)
+            ),
+            success = !is.null(api_result$data),
+            verbose = FALSE  # Don't spam with individual API call logs
+          )
+        }
+        
       }, error = function(e) {
         if (verbose) message("Error querying API for ", acc, ": ", e$message)
         # Create a minimal result object
         api_result <- list(
           accession = acc,
           error = e$message
+        )
+        
+        # Log failed API call
+        log_method_execution(
+          con = con,
+          method_type = "annotation",
+          function_name = "uniprot_api_call",
+          command_text = paste0("https://rest.uniprot.org/uniprotkb/", acc, ".json"),
+          parameters = list(
+            accession = acc,
+            error = e$message
+          ),
+          success = FALSE,
+          error_message = e$message,
+          verbose = FALSE
         )
       })
 
@@ -551,6 +603,23 @@ annotate_blast_results <- function(con, blast_param_id, max_hits = 1, e_value_th
   }, error = function(e) {
     # Silently ignore if no report exists
   })
+
+  # Log method execution completion
+  log_method_execution(
+    con = con,
+    method_type = "annotation",
+    function_name = "annotate_blast_results_complete",
+    parameters = list(
+      blast_param_id = blast_param_id,
+      total_accessions = result$total_accessions,
+      successful_annotations = result$successful_annotations,
+      go_terms = result$go_terms,
+      kegg_pathways = result$kegg_pathways,
+      pfam_domains = result$pfam_domains,
+      success = TRUE
+    ),
+    verbose = verbose
+  )
 
   return(result)
 }
@@ -1822,6 +1891,9 @@ query_uniprot_api <- function(accession,
   result$url <- url
 
   if (debug) message("Querying direct URL: ", url)
+  
+  # Log API call (note: con is not available in this function, so we'll log with a placeholder)
+  # This logging would need to be added at the calling function level or passed as parameter
 
   # Make HTTP request with proper headers
   headers <- c(

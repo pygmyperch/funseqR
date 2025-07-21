@@ -382,6 +382,25 @@ blast_sequences <- function(con, vcf_file_id, db_path, db_name,
   # Match arguments
   blast_type <- match.arg(blast_type)
 
+  # Log method execution start
+  log_method_execution(
+    con = con,
+    method_type = "blast",
+    function_name = "blast_sequences",
+    parameters = list(
+      vcf_file_id = vcf_file_id,
+      db_path = db_path,
+      db_name = db_name,
+      blast_type = blast_type,
+      e_value = e_value,
+      max_hits = max_hits,
+      threads = threads,
+      seq_type = seq_type,
+      extract_db_metadata = extract_db_metadata
+    ),
+    verbose = verbose
+  )
+
   # Determine engine and search type
   is_diamond <- grepl("^diamond_", blast_type)
   search_type <- if (is_diamond) gsub("^diamond_", "", blast_type) else blast_type
@@ -523,6 +542,21 @@ blast_sequences <- function(con, vcf_file_id, db_path, db_name,
     }
   }
 
+  # Log the actual command being executed
+  log_method_execution(
+    con = con,
+    method_type = "blast",
+    function_name = "system_command",
+    command_text = blast_command,
+    parameters = list(
+      engine = if (is_diamond) "DIAMOND" else "BLAST",
+      search_type = search_type,
+      database = file.path(db_path, db_name),
+      output_file = output_blast
+    ),
+    verbose = verbose
+  )
+
   system_result <- system(blast_command)
 
   if (system_result != 0) {
@@ -603,6 +637,21 @@ blast_sequences <- function(con, vcf_file_id, db_path, db_name,
   }, error = function(e) {
     # Silently ignore if no report exists
   })
+
+  # Log method execution completion
+  log_method_execution(
+    con = con,
+    method_type = "blast",
+    function_name = "blast_sequences_complete",
+    parameters = list(
+      blast_param_id = blast_param_id,
+      result_count = result_count,
+      query_count = if (exists("query_count")) query_count else length(flanking_seqs),
+      hit_rate = if (exists("hit_rate")) hit_rate else 0,
+      success = TRUE
+    ),
+    verbose = verbose
+  )
 
   return(result)
 }
