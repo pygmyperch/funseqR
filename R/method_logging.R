@@ -93,6 +93,19 @@ log_method_execution <- function(con, method_type, function_name,
   
   # Insert log entry
   tryCatch({
+    # Ensure all parameters are scalar values for DBI::dbExecute
+    # Convert everything to simple types and handle NULL/vector issues
+    safe_method_type <- as.character(method_type)[1]
+    safe_function_name <- as.character(function_name)[1]
+    safe_command_text <- if(is.null(command_text) || length(command_text) == 0) "" else as.character(command_text)[1]
+    safe_parameters_json <- if(is.null(parameters_json) || length(parameters_json) == 0) "" else as.character(parameters_json)[1]
+    safe_execution_date <- as.character(execution_date)[1]
+    safe_r_version <- as.character(r_version)[1]
+    safe_package_versions <- if(is.null(package_versions) || length(package_versions) == 0) "" else as.character(package_versions)[1]
+    safe_execution_time <- if(is.null(execution_time_seconds) || length(execution_time_seconds) == 0) as.numeric(NA) else as.numeric(execution_time_seconds)[1]
+    safe_success <- as.integer(as.logical(success)[1])  # Convert boolean to integer for SQLite
+    safe_error_message <- if(is.null(error_message) || length(error_message) == 0) "" else as.character(error_message)[1]
+    
     DBI::dbExecute(con, "
       INSERT INTO method_log (
         method_type, function_name, command_text, parameters_json,
@@ -100,9 +113,9 @@ log_method_execution <- function(con, method_type, function_name,
         success, error_message
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ", list(
-      method_type, function_name, command_text, parameters_json,
-      execution_date, r_version, package_versions, execution_time_seconds,
-      success, error_message
+      safe_method_type, safe_function_name, safe_command_text, safe_parameters_json,
+      safe_execution_date, safe_r_version, safe_package_versions, safe_execution_time,
+      safe_success, safe_error_message
     ))
     
     if (verbose) {
