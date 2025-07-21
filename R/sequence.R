@@ -67,7 +67,7 @@ import_reference <- function(con, genome_file, genome_name = NULL, genome_build 
     con,
     "INSERT INTO reference_genomes (file_id, genome_name, genome_build)
      VALUES (?, ?, ?)",
-    params = list(file_id, genome_name, genome_build)
+    params = list(file_id, genome_name, if(is.null(genome_build)) NA_character_ else genome_build)
   )
   
   # Get the genome ID
