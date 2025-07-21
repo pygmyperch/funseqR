@@ -911,9 +911,26 @@ funseqR_summary <- function(con, type = "database") {
         })
       }
       
-      # Add command if available
+      # Add command if available from blast_sequences or system_command
+      blast_command <- NULL
       if (!is.na(blast_data$command_text[1]) && blast_data$command_text[1] != "") {
-        blast_section <- c(blast_section, paste("blast_command:", blast_data$command_text[1]))
+        blast_command <- blast_data$command_text[1]
+      } else {
+        # Look for the actual system command that was executed
+        system_cmd <- DBI::dbGetQuery(con, "
+          SELECT command_text
+          FROM method_log
+          WHERE method_type = 'blast' AND function_name = 'system_command'
+          ORDER BY execution_date DESC
+          LIMIT 1
+        ")
+        if (nrow(system_cmd) > 0 && !is.na(system_cmd$command_text[1])) {
+          blast_command <- system_cmd$command_text[1]
+        }
+      }
+      
+      if (!is.null(blast_command)) {
+        blast_section <- c(blast_section, paste("blast_command:", blast_command))
       }
       
       sections <- c(sections, "", paste(blast_section, collapse = "\n"))
@@ -987,12 +1004,18 @@ funseqR_summary <- function(con, type = "database") {
         enrichment_section <- c(enrichment_section, param_lines)
       }
       
+      # Add main enrichment command if available
+      if (!is.na(enrichment_data$command_text[1]) && enrichment_data$command_text[1] != "") {
+        enrichment_section <- c(enrichment_section, paste("enrichment_command:", enrichment_data$command_text[1]))
+      }
+      
       # Add clusterProfiler commands if available
       cp_commands <- DBI::dbGetQuery(con, "
         SELECT DISTINCT command_text
         FROM method_log
         WHERE method_type = 'enrichment' AND function_name LIKE '%clusterProfiler%'
-        LIMIT 3
+        ORDER BY execution_date DESC
+        LIMIT 5
       ")
       
       if (nrow(cp_commands) > 0) {
