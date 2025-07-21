@@ -152,7 +152,13 @@ funseqR_summary <- function(con, type = "database") {
     return(.get_analyses_summary(con))
     
   } else if (type == "methods") {
-    return(.get_methods_summary(con))
+    # Return just the formatted text content, not wrapped in data.frame
+    methods_result <- .get_methods_summary(con)
+    if ("methods_text" %in% names(methods_result) && nrow(methods_result$methods_text) > 0) {
+      return(methods_result$methods_text$text)
+    } else {
+      return("No methods information available")
+    }
   }
 }
 
@@ -747,10 +753,68 @@ funseqR_summary <- function(con, type = "database") {
   return(result)
 }
 
+#' Get BLAST software version
+#' @keywords internal
+.get_blast_version <- function(blast_type = "blastx") {
+  tryCatch({
+    if (grepl("diamond", blast_type, ignore.case = TRUE)) {
+      # Get DIAMOND version
+      version_output <- system("diamond version", intern = TRUE, ignore.stderr = TRUE)
+      if (length(version_output) > 0) {
+        # Extract version from first line
+        version_line <- version_output[1]
+        return(paste("DIAMOND", version_line))
+      }
+    } else {
+      # Get BLAST version
+      cmd <- paste(blast_type, "-version")
+      version_output <- system(cmd, intern = TRUE, ignore.stderr = TRUE)
+      if (length(version_output) > 0) {
+        # BLAST version is usually in the first line
+        version_line <- version_output[1]
+        return(version_line)
+      }
+    }
+    return("Version not available")
+  }, error = function(e) {
+    return("Version detection failed")
+  })
+}
+
+#' Parse JSON parameters into readable format
+#' @keywords internal
+.parse_json_parameters <- function(json_string) {
+  if (is.null(json_string) || is.na(json_string) || json_string == "") {
+    return(character(0))
+  }
+  
+  tryCatch({
+    params <- jsonlite::fromJSON(json_string)
+    if (is.list(params)) {
+      # Convert list to name: value format
+      param_lines <- character(0)
+      for (name in names(params)) {
+        value <- params[[name]]
+        if (is.null(value)) {
+          value <- "NULL"
+        } else if (length(value) > 1) {
+          value <- paste(value, collapse = ", ")
+        }
+        param_lines <- c(param_lines, paste0(name, ": ", value))
+      }
+      return(param_lines)
+    } else {
+      return(paste("Raw:", json_string))
+    }
+  }, error = function(e) {
+    return(paste("Parse error:", json_string))
+  })
+}
+
 #' Format methods information for scientific papers
 #' @keywords internal
 .format_methods_text <- function(con) {
-  # Get summary statistics for formatting
+  # Get overview of method types performed
   overview <- DBI::dbGetQuery(con, "
     SELECT 
       method_type,
@@ -760,7 +824,10 @@ funseqR_summary <- function(con, type = "database") {
     GROUP BY method_type
   ")
   
-  # Get software versions
+  # Initialize sections list
+  sections <- character(0)
+  
+  # SOFTWARE ENVIRONMENT section
   software <- DBI::dbGetQuery(con, "
     SELECT DISTINCT r_version, package_versions
     FROM method_log
@@ -768,73 +835,185 @@ funseqR_summary <- function(con, type = "database") {
     LIMIT 1
   ")
   
-  # Get BLAST parameters
-  blast_params <- DBI::dbGetQuery(con, "
-    SELECT DISTINCT parameters_json
-    FROM method_log
-    WHERE method_type = 'blast'
-    LIMIT 1
-  ")
-  
-  # Get annotation parameters
-  annotation_params <- DBI::dbGetQuery(con, "
-    SELECT DISTINCT parameters_json
-    FROM method_log
-    WHERE method_type = 'annotation'
-    LIMIT 1
-  ")
-  
-  # Get enrichment parameters
-  enrichment_params <- DBI::dbGetQuery(con, "
-    SELECT DISTINCT parameters_json
-    FROM method_log
-    WHERE method_type = 'enrichment'
-    LIMIT 1
-  ")
-  
-  # Format the text
-  methods_text <- ""
-  
-  # Software section
   if (nrow(software) > 0 && !is.na(software$r_version[1])) {
-    methods_text <- paste0(methods_text, 
-      "All analyses were performed using the funseqR package in R version ", 
-      software$r_version[1], ". ")
+    software_section <- "SOFTWARE ENVIRONMENT:"
+    software_section <- c(software_section, paste("R version:", software$r_version[1]))
+    
+    # Try to parse package versions
+    if (!is.na(software$package_versions[1]) && software$package_versions[1] != "") {
+      tryCatch({
+        pkg_versions <- jsonlite::fromJSON(software$package_versions[1])
+        if ("funseqR" %in% names(pkg_versions)) {
+          software_section <- c(software_section, paste("funseqR version:", pkg_versions$funseqR))
+        }
+        if ("clusterProfiler" %in% names(pkg_versions)) {
+          software_section <- c(software_section, paste("clusterProfiler version:", pkg_versions$clusterProfiler))
+        }
+      }, error = function(e) {
+        # Skip if parsing fails
+      })
+    }
+    sections <- c(sections, "", paste(software_section, collapse = "\n"))
   }
   
-  # BLAST section
+  # BLAST PARAMETERS section
   if ("blast" %in% overview$method_type) {
-    methods_text <- paste0(methods_text, 
-      "Sequence similarity searches were performed using BLAST. ")
-    if (nrow(blast_params) > 0 && !is.na(blast_params$parameters_json[1])) {
-      methods_text <- paste0(methods_text, "BLAST parameters: ", 
-                            blast_params$parameters_json[1], ". ")
+    blast_data <- DBI::dbGetQuery(con, "
+      SELECT 
+        function_name,
+        parameters_json,
+        command_text
+      FROM method_log
+      WHERE method_type = 'blast' AND function_name = 'blast_sequences'
+      ORDER BY execution_date DESC
+      LIMIT 1
+    ")
+    
+    if (nrow(blast_data) > 0) {
+      blast_section <- "BLAST PARAMETERS:"
+      
+      # Parse BLAST parameters and add file information
+      if (!is.na(blast_data$parameters_json[1])) {
+        param_lines <- .parse_json_parameters(blast_data$parameters_json[1])
+        
+        # Try to get file information from vcf_file_id
+        tryCatch({
+          params <- jsonlite::fromJSON(blast_data$parameters_json[1])
+          if ("vcf_file_id" %in% names(params)) {
+            file_info <- DBI::dbGetQuery(con, "
+              SELECT file_name, file_path
+              FROM input_files
+              WHERE file_id = ?
+            ", list(params$vcf_file_id))
+            
+            if (nrow(file_info) > 0) {
+              blast_section <- c(blast_section, paste("file_name:", file_info$file_name[1]))
+              blast_section <- c(blast_section, paste("file_path:", file_info$file_path[1]))
+            }
+          }
+        }, error = function(e) {
+          # Skip if file info extraction fails
+        })
+        
+        blast_section <- c(blast_section, param_lines)
+      }
+      
+      # Add BLAST version detection
+      if (!is.na(blast_data$parameters_json[1])) {
+        tryCatch({
+          params <- jsonlite::fromJSON(blast_data$parameters_json[1])
+          if ("blast_type" %in% names(params)) {
+            blast_version <- .get_blast_version(params$blast_type)
+            blast_section <- c(blast_section, paste("blast_version:", blast_version))
+          }
+        }, error = function(e) {
+          blast_section <- c(blast_section, "blast_version: Version detection failed")
+        })
+      }
+      
+      # Add command if available
+      if (!is.na(blast_data$command_text[1]) && blast_data$command_text[1] != "") {
+        blast_section <- c(blast_section, paste("blast_command:", blast_data$command_text[1]))
+      }
+      
+      sections <- c(sections, "", paste(blast_section, collapse = "\n"))
     }
   }
   
-  # Annotation section
+  # ANNOTATION PARAMETERS section
   if ("annotation" %in% overview$method_type) {
-    methods_text <- paste0(methods_text, 
-      "Functional annotations were retrieved from the UniProt database. ")
-    if (nrow(annotation_params) > 0 && !is.na(annotation_params$parameters_json[1])) {
-      methods_text <- paste0(methods_text, "Annotation parameters: ", 
-                            annotation_params$parameters_json[1], ". ")
+    annotation_data <- DBI::dbGetQuery(con, "
+      SELECT 
+        function_name,
+        parameters_json,
+        command_text
+      FROM method_log
+      WHERE method_type = 'annotation' AND function_name = 'annotate_blast_results'
+      ORDER BY execution_date DESC
+      LIMIT 1
+    ")
+    
+    # Get API call information
+    api_calls <- DBI::dbGetQuery(con, "
+      SELECT 
+        command_text,
+        COUNT(*) as call_count
+      FROM method_log
+      WHERE method_type = 'annotation' AND function_name = 'uniprot_api_call'
+      GROUP BY command_text
+      ORDER BY call_count DESC
+    ")
+    
+    if (nrow(annotation_data) > 0) {
+      annotation_section <- "ANNOTATION PARAMETERS:"
+      
+      # Parse annotation parameters
+      if (!is.na(annotation_data$parameters_json[1])) {
+        param_lines <- .parse_json_parameters(annotation_data$parameters_json[1])
+        annotation_section <- c(annotation_section, param_lines)
+      }
+      
+      # Add API endpoint information
+      if (nrow(api_calls) > 0) {
+        total_calls <- sum(api_calls$call_count)
+        first_api_url <- api_calls$command_text[1]
+        annotation_section <- c(annotation_section, 
+          paste0("api_endpoint: ", first_api_url, " (total= ", total_calls, " API calls)"))
+      }
+      
+      sections <- c(sections, "", paste(annotation_section, collapse = "\n"))
     }
   }
   
-  # Enrichment section
+  # ENRICHMENT PARAMETERS section
   if ("enrichment" %in% overview$method_type) {
-    methods_text <- paste0(methods_text, 
-      "Over-representation analysis was performed using the clusterProfiler package. ")
-    if (nrow(enrichment_params) > 0 && !is.na(enrichment_params$parameters_json[1])) {
-      methods_text <- paste0(methods_text, "Enrichment parameters: ", 
-                            enrichment_params$parameters_json[1], ". ")
+    enrichment_data <- DBI::dbGetQuery(con, "
+      SELECT 
+        function_name,
+        parameters_json,
+        command_text
+      FROM method_log
+      WHERE method_type = 'enrichment' AND function_name = 'ora'
+      ORDER BY execution_date DESC
+      LIMIT 1
+    ")
+    
+    if (nrow(enrichment_data) > 0) {
+      enrichment_section <- "ENRICHMENT PARAMETERS:"
+      
+      # Parse enrichment parameters
+      if (!is.na(enrichment_data$parameters_json[1])) {
+        param_lines <- .parse_json_parameters(enrichment_data$parameters_json[1])
+        enrichment_section <- c(enrichment_section, param_lines)
+      }
+      
+      # Add clusterProfiler commands if available
+      cp_commands <- DBI::dbGetQuery(con, "
+        SELECT DISTINCT command_text
+        FROM method_log
+        WHERE method_type = 'enrichment' AND function_name LIKE '%clusterProfiler%'
+        LIMIT 3
+      ")
+      
+      if (nrow(cp_commands) > 0) {
+        enrichment_section <- c(enrichment_section, "clusterProfiler_commands:")
+        for (i in 1:nrow(cp_commands)) {
+          if (!is.na(cp_commands$command_text[i])) {
+            enrichment_section <- c(enrichment_section, paste("  -", cp_commands$command_text[i]))
+          }
+        }
+      }
+      
+      sections <- c(sections, "", paste(enrichment_section, collapse = "\n"))
     }
   }
+  
+  # Combine all sections
+  final_text <- paste(sections, collapse = "\n")
   
   return(data.frame(
     section = "Methods",
-    text = methods_text,
+    text = final_text,
     note = "This text was automatically generated from logged method parameters"
   ))
 }
