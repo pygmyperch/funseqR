@@ -388,15 +388,15 @@ blast_sequences <- function(con, vcf_file_id, db_path, db_name,
     method_type = "blast",
     function_name = "blast_sequences",
     parameters = list(
-      vcf_file_id = vcf_file_id,
-      db_path = db_path,
-      db_name = db_name,
-      blast_type = blast_type,
-      e_value = e_value,
-      max_hits = max_hits,
-      threads = threads,
-      seq_type = seq_type,
-      extract_db_metadata = extract_db_metadata
+      vcf_file_id = as.character(vcf_file_id),
+      db_path = as.character(db_path),
+      db_name = as.character(db_name),
+      blast_type = as.character(blast_type),
+      e_value = as.character(e_value),
+      max_hits = as.character(max_hits),
+      threads = as.character(threads),
+      seq_type = as.character(seq_type),
+      extract_db_metadata = as.character(extract_db_metadata)
     ),
     verbose = verbose
   )
@@ -549,10 +549,10 @@ blast_sequences <- function(con, vcf_file_id, db_path, db_name,
     function_name = "system_command",
     command_text = blast_command,
     parameters = list(
-      engine = if (is_diamond) "DIAMOND" else "BLAST",
-      search_type = search_type,
-      database = file.path(db_path, db_name),
-      output_file = output_blast
+      engine = as.character(if (is_diamond) "DIAMOND" else "BLAST"),
+      search_type = as.character(search_type),
+      database = as.character(file.path(db_path, db_name)),
+      output_file = as.character(output_blast)
     ),
     verbose = verbose
   )
@@ -644,11 +644,11 @@ blast_sequences <- function(con, vcf_file_id, db_path, db_name,
     method_type = "blast",
     function_name = "blast_sequences_complete",
     parameters = list(
-      blast_param_id = blast_param_id,
-      result_count = result_count,
-      query_count = if (exists("query_count")) query_count else length(flanking_seqs),
-      hit_rate = if (exists("hit_rate")) hit_rate else 0,
-      success = TRUE
+      blast_param_id = as.character(blast_param_id),
+      result_count = as.character(result_count),
+      query_count = as.character(if (exists("query_count")) query_count else length(flanking_seqs)),
+      hit_rate = as.character(if (exists("hit_rate")) hit_rate else 0),
+      success = as.character(TRUE)
     ),
     verbose = verbose
   )
